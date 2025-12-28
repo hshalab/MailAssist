@@ -216,6 +216,7 @@ function PageContent() {
                 role: storedUserRole,
                 businessId: storedBusinessId || null,
               })
+              setIsConnected(true) // FIX: Ensure connection state is synced
               setCheckingUser(false)
               return
             }
@@ -241,6 +242,7 @@ function PageContent() {
             role: data.user.role,
             businessId: data.user.businessId || null,
           })
+          setIsConnected(true) // FIX: Ensure connection state is synced
           // Store in sessionStorage for this tab
           if (typeof window !== "undefined") {
             sessionStorage.setItem("current_user_id", data.user.id)
