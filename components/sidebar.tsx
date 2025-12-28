@@ -40,7 +40,7 @@ const NAV_ITEMS = [
 
 const ADMIN_NAV_ITEMS = [
   { id: "team", label: "Team Management", icon: UsersIcon },
-  { id: "departments", label: "Departments", icon: DepartmentsIcon },
+  { id: "departments", label: "Workstreams", icon: DepartmentsIcon },
 ] as const
 
 const AI_NAV_ITEMS = [

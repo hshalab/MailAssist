@@ -28,7 +28,9 @@ import {
     Loader2,
     User,
     Tag,
+    Sparkles,
 } from "lucide-react"
+import { useToast } from "@/components/ui/use-toast"
 import {
     Select,
     SelectContent,
@@ -65,6 +67,8 @@ export default function DepartmentsView() {
     const [actionLoading, setActionLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [success, setSuccess] = useState<string | null>(null)
+    const [backfilling, setBackfilling] = useState(false)
+    const { toast } = useToast()
 
     // Form state
     const [name, setName] = useState("")
@@ -184,6 +188,42 @@ export default function DepartmentsView() {
         }
     }
 
+    const handleSmartBackfill = async () => {
+        setBackfilling(true)
+        try {
+            const response = await fetch('/api/departments/backfill', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ days: 30, limit: 20 })
+            })
+
+            const data = await response.json()
+
+            if (!response.ok) throw new Error(data.error || 'Backfill failed')
+
+            toast({
+                title: "Smart Backfill Complete",
+                description: data.message || `Processed ${data.processed} tickets`,
+                variant: "default"
+            })
+
+            // Reload departments to update counts if we want, 
+            // though backfill updates tickets, not department definitions directly (except counts).
+            // We can reload departments to show updated user counts?
+            loadDepartments()
+
+        } catch (error) {
+            console.error('Backfill error:', error)
+            toast({
+                title: "Backfill Failed",
+                description: "Could not auto-classify tickets.",
+                variant: "destructive"
+            })
+        } finally {
+            setBackfilling(false)
+        }
+    }
+
     const openEditDialog = (dept: Department) => {
         setSelectedDepartment(dept)
         setName(dept.name)
@@ -208,7 +248,7 @@ export default function DepartmentsView() {
 
     const openDeleteDialog = (dept: Department) => {
         setSelectedDepartment(dept)
-        setDeleteDialogOpen(false)
+        setDeleteDialogOpen(true)
     }
 
     return (
@@ -220,90 +260,107 @@ export default function DepartmentsView() {
                         Organization
                     </div>
                     <h2 className="text-4xl font-extrabold tracking-tight bg-gradient-to-br from-white via-white to-slate-400 bg-clip-text text-transparent">
-                        Departments
+                        Workstreams
                     </h2>
                     <p className="text-slate-400 max-w-md text-lg leading-relaxed">
-                        Create smart labels with descriptions. AI automatically classifies incoming emails to the right department.
+                        Create smart labels with descriptions. AI automatically classifies incoming emails to the right workstream.
                     </p>
                 </div>
 
-                <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-                    <DialogTrigger asChild>
-                        <Button size="lg" className="h-12 px-8 bg-primary hover:bg-primary/90 text-white shadow-2xl shadow-primary/20 transition-all hover:scale-[1.03] active:scale-95 font-bold rounded-2xl group border-0">
-                            <Plus className="mr-2 h-5 w-5 transition-transform" />
-                            Create Department
-                        </Button>
-                    </DialogTrigger>
-                    <DialogContent className="bg-slate-900/95 border-slate-800 backdrop-blur-2xl sm:max-w-md rounded-3xl">
-                        <form onSubmit={handleCreate} className="space-y-6">
-                            <DialogHeader>
-                                <DialogTitle className="text-2xl font-bold text-white">Create Department</DialogTitle>
-                                <DialogDescription className="text-slate-400 text-base">
-                                    Add a new department with a clear description for AI classification.
-                                </DialogDescription>
-                            </DialogHeader>
-                            <div className="space-y-5 py-2">
-                                <div className="space-y-2.5">
-                                    <Label htmlFor="name" className="text-slate-300 ml-1">Department Name</Label>
-                                    <div className="relative">
-                                        <Tag className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-                                        <Input
-                                            id="name"
-                                            value={name}
-                                            onChange={(e) => setName(e.target.value)}
-                                            placeholder="e.g., Sales, Support, Billing"
-                                            className="pl-10 bg-slate-800/50 border-slate-700 focus:border-primary text-white h-11 rounded-xl transition-all"
-                                            required
-                                            maxLength={100}
-                                        />
+                <div className="flex items-center gap-3">
+                    <Button
+                        variant="outline"
+                        size="lg"
+                        className="h-12 px-6 border-slate-700 bg-slate-800/50 hover:bg-slate-800 text-slate-300 hover:text-white rounded-2xl transition-all"
+                        onClick={handleSmartBackfill}
+                        disabled={backfilling}
+                    >
+                        {backfilling ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                            <Sparkles className="mr-2 h-4 w-4" />
+                        )}
+                        Auto-Classify
+                    </Button>
+
+                    <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+                        <DialogTrigger asChild>
+                            <Button size="lg" className="h-12 px-8 bg-primary hover:bg-primary/90 text-white shadow-2xl shadow-primary/20 transition-all hover:scale-[1.03] active:scale-95 font-bold rounded-2xl group border-0">
+                                <Plus className="mr-2 h-5 w-5 transition-transform" />
+                                Create Workstream
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent className="bg-slate-900/95 border-slate-800 backdrop-blur-2xl sm:max-w-md rounded-3xl">
+                            <form onSubmit={handleCreate} className="space-y-6">
+                                <DialogHeader>
+                                    <DialogTitle className="text-2xl font-bold text-white">Create Workstream</DialogTitle>
+                                    <DialogDescription className="text-slate-400 text-base">
+                                        Add a new workstream with a clear description for AI classification.
+                                    </DialogDescription>
+                                </DialogHeader>
+                                <div className="space-y-5 py-2">
+                                    <div className="space-y-2.5">
+                                        <Label htmlFor="name" className="text-slate-300 ml-1">Workstream Name</Label>
+                                        <div className="relative">
+                                            <Tag className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                                            <Input
+                                                id="name"
+                                                value={name}
+                                                onChange={(e) => setName(e.target.value)}
+                                                placeholder="e.g., Sales, Support, Billing"
+                                                className="pl-10 bg-slate-800/50 border-slate-700 focus:border-primary text-white h-11 rounded-xl transition-all"
+                                                required
+                                                maxLength={100}
+                                            />
+                                        </div>
                                     </div>
-                                </div>
-                                <div className="space-y-2.5">
-                                    <Label htmlFor="description" className="text-slate-300 ml-1">Description</Label>
-                                    <Textarea
-                                        id="description"
-                                        value={description}
-                                        onChange={(e) => setDescription(e.target.value)}
-                                        placeholder="Describe what this department handles. Be specific to help AI classify emails correctly. E.g., 'Questions about pricing, quotes, product purchases, and payment methods.'"
-                                        className="bg-slate-800/50 border-slate-700 focus:border-primary text-white min-h-[120px] rounded-xl transition-all resize-none"
-                                        required
-                                        minLength={10}
-                                    />
-                                    <p className="text-xs text-slate-500 ml-1">
-                                        Minimum 10 characters for effective AI classification
-                                    </p>
-                                </div>
-                                {error && (
-                                    <Alert className="bg-red-500/10 border-red-500/20 rounded-xl">
-                                        <XCircle className="h-4 w-4 text-red-400" />
-                                        <AlertDescription className="text-red-300 ml-2">{error}</AlertDescription>
-                                    </Alert>
-                                )}
-                            </div>
-                            <DialogFooter>
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    onClick={() => setCreateDialogOpen(false)}
-                                    className="text-slate-400 hover:text-white hover:bg-white/5 rounded-xl px-6"
-                                >
-                                    Cancel
-                                </Button>
-                                <Button
-                                    type="submit"
-                                    disabled={actionLoading}
-                                    className="bg-primary hover:bg-primary/90 rounded-xl px-8 h-11 font-bold shadow-lg shadow-primary/20"
-                                >
-                                    {actionLoading ? (
-                                        <Loader2 className="h-4 w-4 animate-spin" />
-                                    ) : (
-                                        "Create Department"
+                                    <div className="space-y-2.5">
+                                        <Label htmlFor="description" className="text-slate-300 ml-1">Description</Label>
+                                        <Textarea
+                                            id="description"
+                                            value={description}
+                                            onChange={(e) => setDescription(e.target.value)}
+                                            placeholder="Describe what this workstream handles. Be specific to help AI classify emails correctly. E.g., 'Questions about pricing, quotes, product purchases, and payment methods.'"
+                                            className="bg-slate-800/50 border-slate-700 focus:border-primary text-white min-h-[120px] rounded-xl transition-all resize-none"
+                                            required
+                                            minLength={10}
+                                        />
+                                        <p className="text-xs text-slate-500 ml-1">
+                                            Minimum 10 characters for effective AI classification
+                                        </p>
+                                    </div>
+                                    {error && (
+                                        <Alert className="bg-red-500/10 border-red-500/20 rounded-xl">
+                                            <XCircle className="h-4 w-4 text-red-400" />
+                                            <AlertDescription className="text-red-300 ml-2">{error}</AlertDescription>
+                                        </Alert>
                                     )}
-                                </Button>
-                            </DialogFooter>
-                        </form>
-                    </DialogContent>
-                </Dialog>
+                                </div>
+                                <DialogFooter>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        onClick={() => setCreateDialogOpen(false)}
+                                        className="text-slate-400 hover:text-white hover:bg-white/5 rounded-xl px-6"
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button
+                                        type="submit"
+                                        disabled={actionLoading}
+                                        className="bg-primary hover:bg-primary/90 rounded-xl px-8 h-11 font-bold shadow-lg shadow-primary/20"
+                                    >
+                                        {actionLoading ? (
+                                            <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                            "Create Workstream"
+                                        )}
+                                    </Button>
+                                </DialogFooter>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                </div>
             </div>
 
             {success && (
@@ -316,7 +373,7 @@ export default function DepartmentsView() {
             {/* Departments Grid */}
             <div className="space-y-6">
                 <div className="flex items-center gap-2 px-1">
-                    <h3 className="text-xl font-bold text-white">All Departments</h3>
+                    <h3 className="text-xl font-bold text-white">All Workstreams</h3>
                     <Badge variant="outline" className="bg-white/5 border-white/10 text-slate-400 rounded-full font-mono">
                         {departments.length}
                     </Badge>
@@ -333,13 +390,13 @@ export default function DepartmentsView() {
                         <div className="w-16 h-16 bg-slate-800/50 rounded-full flex items-center justify-center mb-5">
                             <Building2 className="h-8 w-8 text-slate-600" />
                         </div>
-                        <h4 className="text-xl font-semibold text-white mb-2">No departments yet</h4>
+                        <h4 className="text-xl font-semibold text-white mb-2">No workstreams yet</h4>
                         <p className="text-slate-400 max-w-xs mx-auto mb-6">
-                            Create your first department to start auto-classifying incoming emails.
+                            Create your first workstream to start auto-classifying incoming emails.
                         </p>
                         <Button onClick={() => setCreateDialogOpen(true)} className="bg-primary hover:bg-primary/90 rounded-xl px-6">
                             <Plus className="mr-2 h-4 w-4" />
-                            Create First Department
+                            Create First Workstream
                         </Button>
                     </Card>
                 ) : (
@@ -409,14 +466,14 @@ export default function DepartmentsView() {
                 <DialogContent className="bg-slate-900/95 border-slate-800 backdrop-blur-2xl sm:max-w-md rounded-3xl">
                     <form onSubmit={handleEdit} className="space-y-6">
                         <DialogHeader>
-                            <DialogTitle className="text-2xl font-bold text-white">Edit Department</DialogTitle>
+                            <DialogTitle className="text-2xl font-bold text-white">Edit Workstream</DialogTitle>
                             <DialogDescription className="text-slate-400 text-base">
-                                Update department information
+                                Update workstream information
                             </DialogDescription>
                         </DialogHeader>
                         <div className="space-y-5 py-2">
                             <div className="space-y-2.5">
-                                <Label htmlFor="edit-name" className="text-slate-300 ml-1">Department Name</Label>
+                                <Label htmlFor="edit-name" className="text-slate-300 ml-1">Workstream Name</Label>
                                 <Input
                                     id="edit-name"
                                     value={name}
@@ -483,8 +540,42 @@ export default function DepartmentsView() {
                 </DialogContent>
             </Dialog>
 
-            {/* Delete Confirmation - DialogueDelete */}
-            {/* Note: Delete functionality would use the deleteDialogOpen state */}
+            {/* Delete Confirmation Dialog */}
+            <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                <DialogContent className="bg-slate-900/95 border-slate-800 backdrop-blur-2xl sm:max-w-md rounded-3xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-2xl font-bold text-white">Delete Workstream</DialogTitle>
+                        <DialogDescription className="text-slate-400 text-base">
+                            Are you sure you want to delete "{selectedDepartment?.name}"? This action cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+                    {error && (
+                        <Alert className="bg-red-500/10 border-red-500/20 rounded-xl">
+                            <XCircle className="h-4 w-4 text-red-400" />
+                            <AlertDescription className="text-red-300 ml-2">{error}</AlertDescription>
+                        </Alert>
+                    )}
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => setDeleteDialogOpen(false)}
+                            className="text-slate-400 hover:text-white hover:bg-white/5 rounded-xl px-6"
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            onClick={handleDelete}
+                            disabled={actionLoading}
+                            className="bg-red-600 hover:bg-red-700 rounded-xl px-8 h-11 font-bold"
+                        >
+                            {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

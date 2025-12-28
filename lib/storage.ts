@@ -227,8 +227,8 @@ export async function saveStoredEmails(emails: StoredEmail[], retries = 1) {
       labels: email.labels ?? [],
       is_sent: email.isSent,
       is_reply: email.isReply ?? null,
-      snippet: email.snippet,
       owner_email: email.ownerEmail,
+      embedding_vector: email.embedding.length > 0 ? JSON.stringify(email.embedding) : null, // Save to new vector column
     };
 
     // Only add user_email if we have it (column might not exist yet)
@@ -264,6 +264,7 @@ export async function saveStoredEmails(emails: StoredEmail[], retries = 1) {
           is_reply: email.isReply ?? null,
           snippet: email.snippet,
           owner_email: email.ownerEmail,
+          embedding_vector: email.embedding.length > 0 ? JSON.stringify(email.embedding) : null, // Save to new vector column
         };
         if (userEmail) {
           payload.user_email = userEmail;
@@ -796,6 +797,33 @@ export async function clearAllData() {
       console.error(`Error clearing table ${table} in Supabase:`, error);
     }
   }
+}
+
+/**
+ * Find similar emails using Supabase pgvector (RPC)
+ * Replaces the in-memory cosine similarity
+ */
+export async function findSimilarEmailsVector(
+  queryEmbedding: number[],
+  matchThreshold: number = 0.5,
+  matchCount: number = 5,
+  userEmail: string
+): Promise<Array<{ id: string; subject: string; body: string; similarity: number }>> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase.rpc('match_emails', {
+    query_embedding: JSON.stringify(queryEmbedding), // Vector must be passed as string for some clients, or array
+    match_threshold: matchThreshold,
+    match_count: matchCount,
+    filter_user_email: userEmail
+  });
+
+  if (error) {
+    console.error('Error finding similar emails via pgvector:', error);
+    return [];
+  }
+
+  return data || [];
 }
 
 async function generateEmbeddingWithRetry(text: string, attempts = 3): Promise<number[]> {

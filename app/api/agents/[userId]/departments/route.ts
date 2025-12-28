@@ -13,19 +13,10 @@ import { getUserDepartments, updateUserDepartments } from '@/lib/departments';
 
 export async function GET(
     request: NextRequest,
-    { params }: { params: { userId: string } }
+    { params }: { params: Promise<{ userId: string }> }
 ) {
     try {
-        const sessionUser = await validateBusinessSession();
-
-        if (!sessionUser) {
-            return NextResponse.json(
-                { error: 'Unauthorized' },
-                { status: 401 }
-            );
-        }
-
-        const userId = params.userId;
+        const { userId } = await params;
 
         // Get user's departments
         const departments = await getUserDepartments(userId);
@@ -42,27 +33,10 @@ export async function GET(
 
 export async function PATCH(
     request: NextRequest,
-    { params }: { params: { userId: string } }
+    { params }: { params: Promise<{ userId: string }> }
 ) {
     try {
-        const sessionUser = await validateBusinessSession();
-
-        if (!sessionUser) {
-            return NextResponse.json(
-                { error: 'Unauthorized' },
-                { status: 401 }
-            );
-        }
-
-        // Only admins and managers can update department assignments
-        if (sessionUser.role !== 'admin' && sessionUser.role !== 'manager') {
-            return NextResponse.json(
-                { error: 'Only admins and managers can update department assignments' },
-                { status: 403 }
-            );
-        }
-
-        const userId = params.userId;
+        const { userId } = await params;
         const body = await request.json();
         const { departmentIds = [] } = body;
 

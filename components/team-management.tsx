@@ -324,12 +324,12 @@ export default function TeamManagementView() {
                   </Select>
                 </div>
                 <div className="space-y-2.5">
-                  <Label className="text-slate-300 ml-1">Departments (Optional)</Label>
+                  <Label className="text-slate-300 ml-1">Workstreams (Optional)</Label>
                   <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 max-h-48 overflow-y-auto">
                     {loadingDepartments ? (
-                      <div className="text-sm text-slate-400 text-center py-2">Loading departments...</div>
+                      <div className="text-sm text-slate-400 text-center py-2">Loading workstreams...</div>
                     ) : departments.length === 0 ? (
-                      <div className="text-sm text-slate-400 text-center py-2">No departments available</div>
+                      <div className="text-sm text-slate-400 text-center py-2">No workstreams available</div>
                     ) : (
                       <div className="space-y-2">
                         {departments.map((dept) => (
@@ -356,7 +356,7 @@ export default function TeamManagementView() {
                       </div>
                     )}
                   </div>
-                  <p className="text-xs text-slate-500 ml-1">Select departments this member can access</p>
+                  <p className="text-xs text-slate-500 ml-1">Select workstreams this member can access</p>
                 </div>
                 {error && (
                   <Alert className="bg-red-500/10 border-red-500/20 rounded-xl">
@@ -462,7 +462,7 @@ export default function TeamManagementView() {
                         className="h-8 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/5"
                         onClick={() => handleEditDepartments(member)}
                       >
-                        Edit Departments
+                        Edit Workstreams
                       </Button>
                     </div>
                   </Card>
@@ -543,17 +543,17 @@ export default function TeamManagementView() {
       <Dialog open={editDepartmentsDialogOpen} onOpenChange={setEditDepartmentsDialogOpen}>
         <DialogContent className="bg-slate-950 border-slate-800 rounded-2xl max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold text-white">Edit Departments</DialogTitle>
+            <DialogTitle className="text-2xl font-bold text-white">Edit Workstreams</DialogTitle>
             <DialogDescription className="text-slate-400 text-base">
-              {editingMember ? `Manage department access for ${editingMember.name}` : "Manage department access"}
+              {editingMember ? `Manage workstream access for ${editingMember.name}` : "Manage workstream access"}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 max-h-64 overflow-y-auto">
               {loadingDepartments ? (
-                <div className="text-sm text-slate-400 text-center py-2">Loading departments...</div>
+                <div className="text-sm text-slate-400 text-center py-2">Loading workstreams...</div>
               ) : departments.length === 0 ? (
-                <div className="text-sm text-slate-400 text-center py-2">No departments available</div>
+                <div className="text-sm text-slate-400 text-center py-2">No workstreams available</div>
               ) : (
                 <div className="space-y-2">
                   {departments.map((dept) => (
@@ -580,7 +580,7 @@ export default function TeamManagementView() {
                 </div>
               )}
             </div>
-            <p className="text-xs text-slate-500">Select departments this member can access</p>
+            <p className="text-xs text-slate-500">Select workstreams this member can access</p>
             {error && (
               <Alert className="bg-red-500/10 border-red-500/20 rounded-xl">
                 <XCircle className="h-4 w-4 text-red-400" />

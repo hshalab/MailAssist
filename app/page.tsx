@@ -95,9 +95,10 @@ function PageContent() {
 
       if (params.get("newAccount") === "true") {
         setShowPersonalAccountDialog(true)
-        // Trigger sync for new accounts after user selection
+        // Trigger sync and auto-classification for new accounts
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('trigger_sync_after_connect', 'true')
+          sessionStorage.setItem('trigger_backfill_after_sync', 'true')
         }
       }
 
@@ -120,9 +121,10 @@ function PageContent() {
     const justConnected = params.get("connected")
     if (justConnected === "true") {
       setIsConnected(true)
-      // Store flag to trigger sync after component is ready
+      // Store flag to trigger sync and auto-classification after component is ready
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('trigger_sync_after_connect', 'true')
+        sessionStorage.setItem('trigger_backfill_after_sync', 'true')
       }
       window.history.replaceState({}, "", window.location.pathname)
       return
@@ -738,6 +740,30 @@ function PageContent() {
       return () => clearTimeout(timer)
     }
   }, [isSyncComplete, hideSyncToast])
+
+  // NEW: Trigger auto-classification after initial sync
+  useEffect(() => {
+    if (isSyncComplete && typeof window !== 'undefined') {
+      const shouldTriggerBackfill = sessionStorage.getItem('trigger_backfill_after_sync')
+      if (shouldTriggerBackfill === 'true') {
+        sessionStorage.removeItem('trigger_backfill_after_sync')
+        console.log('[Backfill] Initial sync complete, triggering auto-classification...')
+        fetch('/api/departments/backfill', {
+          method: 'POST',
+          body: JSON.stringify({ limit: 50 })
+        })
+          .then(res => res.json())
+          .then(data => {
+            console.log('[Backfill] Auto-classification result:', data)
+            // Refresh tickets view if we're on that screen
+            if (activeView === 'tickets') {
+              setTicketsVersion(v => v + 1)
+            }
+          })
+          .catch(err => console.error('[Backfill] Auto-classification failed:', err))
+      }
+    }
+  }, [isSyncComplete, activeView])
 
   const showSyncToast = ((syncStatus?.processing ?? syncInProgress) || syncError || isSyncComplete) && !hideSyncToast
 

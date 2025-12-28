@@ -169,6 +169,15 @@ export async function GET(request: NextRequest) {
         userId = newUser.id;
         userName = newUser.name;
         businessId = null;
+
+        // NEW: Initialize default settings for new personal account
+        console.log('[OAuth Login] Initializing settings for new personal user:', gmailEmail);
+        await supabase
+          .from('user_settings')
+          .insert({
+            user_email: gmailEmail,
+            auto_classify_days: 30
+          });
       }
 
       // 3. Create Session
@@ -271,6 +280,15 @@ export async function GET(request: NextRequest) {
               console.error('[Gmail Callback] Error creating admin user:', adminError);
             } else {
               console.log('[Gmail Callback] Admin user created successfully:', newAdmin.id);
+
+              // NEW: Initialize settings for new business account
+              console.log('[Gmail Callback] Initializing settings for new business:', businessSession.businessId);
+              await supabase
+                .from('user_settings')
+                .insert({
+                  business_id: businessSession.businessId,
+                  auto_classify_days: 30
+                });
             }
           }
         }

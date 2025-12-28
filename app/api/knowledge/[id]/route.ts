@@ -6,14 +6,14 @@ import { isValidUUID, validateTextInput, sanitizeStringArray } from "@/lib/valid
 
 type RouteContext = { params: { id: string } }
 
-export async function PATCH(request: NextRequest, context: RouteContext) {
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const userId = getCurrentUserIdFromRequest(request as any)
     const userEmail = getSessionUserEmailFromRequest(request as any)
     if (!userId || !userEmail) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
 
     // Validate ID
-    const itemId = context.params.id
+    const { id: itemId } = await params
     if (!isValidUUID(itemId)) {
       return NextResponse.json({ error: "Invalid knowledge item ID" }, { status: 400 })
     }
@@ -24,10 +24,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (!allowed) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
     const body = await request.json()
-    
+
     // Validate and sanitize inputs if provided
     const updateData: any = {}
-    
+
     if (body.title !== undefined) {
       const titleValidation = validateTextInput(body.title, 200, false)
       if (!titleValidation.valid) {
@@ -35,7 +35,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
       updateData.title = titleValidation.sanitized
     }
-    
+
     if (body.body !== undefined) {
       const bodyValidation = validateTextInput(body.body, 10000, false)
       if (!bodyValidation.valid) {
@@ -43,7 +43,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
       updateData.body = bodyValidation.sanitized
     }
-    
+
     if (body.tags !== undefined) {
       const tags = sanitizeStringArray(Array.isArray(body.tags) ? body.tags : [])
       if (tags.length > 20) {
@@ -51,18 +51,18 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
       updateData.tags = tags
     }
-    
+
     if (body.canParaphrase !== undefined) {
       updateData.canParaphrase = !!body.canParaphrase
     }
-    
+
     if (body.status !== undefined) {
       if (!['published', 'pending'].includes(body.status)) {
         return NextResponse.json({ error: "Invalid status" }, { status: 400 })
       }
       updateData.status = body.status
     }
-    
+
     const item = await updateKnowledge(itemId, {
       ...updateData,
       bumpVersion: adminCheck.allowed && body.bumpVersion,
@@ -76,14 +76,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
   }
 }
 
-export async function DELETE(request: NextRequest, context: RouteContext) {
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const userId = getCurrentUserIdFromRequest(request as any)
     const userEmail = getSessionUserEmailFromRequest(request as any)
     if (!userId || !userEmail) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
 
     // Validate ID
-    const itemId = context.params.id
+    const { id: itemId } = await params
     if (!isValidUUID(itemId)) {
       return NextResponse.json({ error: "Invalid knowledge item ID" }, { status: 400 })
     }

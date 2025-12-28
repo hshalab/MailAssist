@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, Search, ShoppingBag, Inbox, RefreshCw, Paperclip } from "lucide-react"
+import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, Search, ShoppingBag, Inbox, RefreshCw, Paperclip, Building2 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -130,6 +130,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [departmentFilter, setDepartmentFilter] = useState<string>("all")
   const [emails, setEmails] = useState<string[]>([]) // For account filter dropdown
   const [departments, setDepartments] = useState<any[]>([]) // For department filter dropdown
+  const [allowedDeptIds, setAllowedDeptIds] = useState<string[] | null>(null) // For agents: only see tickets in these depts
 
   // Sync global search into local search field
   useEffect(() => {
@@ -355,6 +356,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [assigning, setAssigning] = useState<string | null>(null)
   const [addingNote, setAddingNote] = useState(false)
 
+  const [updatingDepartment, setUpdatingDepartment] = useState(false)
+  const [showDepartmentDialog, setShowDepartmentDialog] = useState(false)
+  const [targetDepartmentId, setTargetDepartmentId] = useState<string>("")
+  const [departmentReasoning, setDepartmentReasoning] = useState("")
+
   const { toast } = useToast()
   const canAssign = currentUserRole === "admin" || currentUserRole === "manager"
 
@@ -414,6 +420,97 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [autoFilterClosed])
 
+  // Load departments for the dialog
+  useEffect(() => {
+    const loadDepartments = async () => {
+      try {
+        const response = await fetch("/api/departments")
+        if (response.ok) {
+          const data = await response.json()
+          setDepartments(data.departments || [])
+        }
+      } catch (err) {
+        console.error("Error loading departments:", err)
+      }
+    }
+    loadDepartments()
+  }, [])
+
+  const handleUpdateDepartment = async () => {
+    if (!selectedTicket) {
+      console.warn("[DepartmentUpdate] No ticket selected")
+      return
+    }
+
+    const finalDeptId = targetDepartmentId === "unclassified" || !targetDepartmentId ? null : targetDepartmentId
+    console.log(`[DepartmentUpdate] Updating ticket ${selectedTicket.id} to department:`, finalDeptId)
+
+    setUpdatingDepartment(true)
+    try {
+      const response = await fetch(`/api/tickets/${selectedTicket.id}/department`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          departmentId: finalDeptId,
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || "Failed to update department")
+      }
+
+      // Find the name of the new department
+      const newDeptName = finalDeptId === null
+        ? null
+        : (departments.find(d => d.id === finalDeptId)?.name || null)
+
+      // Update local state
+      const updatedTicket: Ticket = {
+        ...selectedTicket,
+        departmentId: finalDeptId,
+        departmentName: newDeptName
+      }
+
+      setSelectedTicket(updatedTicket)
+
+      // Update in the tickets list
+      // If agent moved ticket to a department they don't have access to, remove it from view
+      if (currentUserRole === 'agent' && allowedDeptIds && targetDepartmentId && targetDepartmentId !== "unclassified") {
+        if (!allowedDeptIds.includes(targetDepartmentId)) {
+          setTickets(prev => prev.filter(t => t.id !== selectedTicket.id))
+          setSelectedTicket(null)
+          toast({
+            title: "Workstream updated",
+            description: `Ticket moved to restricted workstream. It has been removed from your view.`,
+          })
+          setShowDepartmentDialog(false)
+          setDepartmentReasoning("")
+          return
+        }
+      }
+
+      setTickets(prev => prev.map(t => t.id === selectedTicket.id ? updatedTicket : t))
+
+      toast({
+        title: "Workstream updated",
+        description: `Ticket moved to ${newDeptName || "Unclassified"}.`,
+      })
+
+      setShowDepartmentDialog(false)
+      setDepartmentReasoning("")
+    } catch (err) {
+      console.error("[DepartmentUpdate] Error:", err)
+      toast({
+        title: "Update failed",
+        description: err instanceof Error ? err.message : "Failed to update department. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setUpdatingDepartment(false)
+    }
+  }
+
   // Define fetchTickets before it's used in effects
   const fetchTickets = useCallback(async (options?: { silent?: boolean, returnData?: boolean }) => {
     const { silent = false, returnData = false } = options || {}
@@ -461,6 +558,19 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   }, [selectedAccount]) // Add selectedAccount dependency
 
   useEffect(() => {
+    const fetchAgentDepartments = async () => {
+      if (currentUserRole !== "agent" || !currentUserId) return
+      try {
+        const res = await fetch(`/api/agents/${currentUserId}/departments`)
+        if (res.ok) {
+          const data = await res.json()
+          setAllowedDeptIds(data.departments?.map((d: any) => d.id) || [])
+        }
+      } catch (e) {
+        console.error("Failed to fetch agent departments", e)
+      }
+    }
+
     // OPTIMIZED: Fetch all data in parallel instead of sequentially
     // This makes initial page load much faster
     Promise.all([
@@ -468,9 +578,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       fetchUsers(),
       fetchTicketViews(),
       fetchAccounts(),
+      fetchAgentDepartments(),
       ...(currentUserId ? [fetchQuickReplies()] : [])
     ]).catch(err => console.error('Error loading initial data:', err))
-  }, [currentUserId, refreshKey, fetchTickets])
+  }, [currentUserId, refreshKey, fetchTickets]) // currentUserRole is stable
 
   const fetchAccounts = async () => {
     try {
@@ -1443,35 +1554,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
 
-  const handleUpdateDepartment = async (departmentId: string | null) => {
-    if (!selectedTicket) return
 
-    try {
-      const response = await fetch(`/api/tickets/${selectedTicket.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ departmentId }),
-      })
-
-      if (!response.ok) throw new Error("Failed to update department")
-
-      const data = await response.json()
-      setSelectedTicket(data.ticket)
-      setTickets(prev => prev.map(t => t.id === selectedTicket.id ? data.ticket : t))
-
-      toast({
-        title: "Department updated",
-        description: departmentId ? "Ticket department has been updated" : "Ticket marked as unclassified",
-      })
-    } catch (error) {
-      console.error("Error updating department:", error)
-      toast({
-        title: "Error",
-        description: "Failed to update department",
-        variant: "destructive",
-      })
-    }
-  }
 
   const handleAddNote = async () => {
     if (!selectedTicket || !newNote.trim()) return
@@ -2200,7 +2283,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="all">All Departments</SelectItem>
-                              <SelectItem value="unclassified">Unclassified</SelectItem>
+                              <SelectItem value="unclassified">No Department</SelectItem>
                               {departments
                                 .sort((a, b) => a.name.localeCompare(b.name))
                                 .map((dept) => (
@@ -2431,7 +2514,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                               </Badge>
                             ) : (
                               <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-dashed text-muted-foreground">
-                                Unclassified
+                                No Department
                               </Badge>
                             )}
                           </div>
@@ -2508,7 +2591,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="border-dashed text-muted-foreground">
-                            Unclassified
+                            No Department
                           </Badge>
                         )}
                         {selectedTicket.tags.map((tag, idx) => (
@@ -2612,8 +2695,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                     <Select
                       value={selectedTicket.departmentId || "unclassified"}
                       onValueChange={(v) => {
-                        const deptId = v === "unclassified" ? null : v
-                        handleUpdateDepartment(deptId)
+                        setTargetDepartmentId(v)
+                        setShowDepartmentDialog(true)
                       }}
                     >
                       <SelectTrigger className="w-32 h-8 text-xs">
@@ -3215,7 +3298,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                             size="sm"
                             className="mt-2 transition-all duration-200 hover:scale-105"
                             onClick={() => {
+                              // Update both text and HTML representations
+                              // Convert newlines to breaks for HTML if needed, or just use raw text
+                              // for simple drafts. RichTextEditor should handle it.
                               setReplyText(draftText)
+                              // Simple conversion: wrap in paragraphs or usage simple replacement
+                              // But just setting raw text as HTML often works for simple editors or 
+                              // we can format it slightly.
+                              // Let's format it as simple paragraphs to be safe
+                              const html = draftText.split('\n').map(line => `<p>${line}</p>`).join('')
+                              setReplyHtml(html)
                               setShowDraft(false)
                             }}
                           >
@@ -3456,6 +3548,64 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                 {assigning ? <Loader2 className="w-4 h-4 animate-spin" /> : "Assign"}
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {/* Department Change Dialog */}
+      <Dialog open={showDepartmentDialog} onOpenChange={setShowDepartmentDialog}>
+        <DialogContent className="sm:max-w-md bg-background border-border shadow-2xl rounded-3xl">
+          <DialogHeader className="flex flex-col items-center text-center pt-2">
+            <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 transition-transform hover:scale-110">
+              <Sparkles className="w-6 h-6 text-primary" />
+            </div>
+            <DialogTitle className="text-2xl font-bold tracking-tight">Confirm Move</DialogTitle>
+            <DialogDescription className="text-muted-foreground text-base mt-2">
+              Are you sure you want to move this ticket? This will help the AI learn your routing preferences.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <Label htmlFor="department" className="text-sm font-semibold opacity-70">Move to Workstream</Label>
+              <Select
+                value={targetDepartmentId}
+                onValueChange={setTargetDepartmentId}
+              >
+                <SelectTrigger className="h-12 bg-muted/30 border-border rounded-xl">
+                  <SelectValue placeholder="Select workstream" />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl border-border bg-popover shadow-xl">
+                  <SelectItem value="unclassified">Unclassified</SelectItem>
+                  {departments.map((dept) => (
+                    <SelectItem key={dept.id} value={dept.id}>
+                      {dept.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button
+              variant="ghost"
+              onClick={() => setShowDepartmentDialog(false)}
+              className="text-slate-400 hover:text-white"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleUpdateDepartment}
+              disabled={updatingDepartment || !targetDepartmentId}
+              className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl px-8 h-11 font-bold shadow-lg shadow-primary/20 transition-all hover:scale-105 active:scale-95"
+            >
+              {updatingDepartment ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                "Update Department"
+              )}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

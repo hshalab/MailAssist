@@ -419,7 +419,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
                     : "bg-muted/30 text-muted-foreground/70 border-border/30"
                     }`}
                 >
-                  {email.departmentName || "Unclassified"}
+                  {email.departmentName || "No Department"}
                 </Badge>
               </div>
             </div>

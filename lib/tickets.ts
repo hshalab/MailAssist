@@ -160,14 +160,14 @@ export async function getOrCreateTicketForThread(
   const ticket = mapRowToTicket(data);
 
   // 2) Classify ticket to department (async, non-blocking)
-  // DISABLED: AI classification temporarily disabled
-  /*
+  // 2) Classify ticket to department (async, non-blocking)
+
   if (emailBody) {
     classifyTicketToDepartmentAsync(ticket.id, seed.subject, emailBody, userEmail).catch(err => {
       console.error('[Ticket] Department classification failed (non-blocking):', err);
     });
   }
-  */
+
 
   return ticket;
 }
@@ -176,7 +176,7 @@ export async function getOrCreateTicketForThread(
  * Classify a ticket to a department using AI (async, non-blocking)
  * This runs in the background and updates the ticket after classification
  */
-async function classifyTicketToDepartmentAsync(
+export async function classifyTicketToDepartmentAsync(
   ticketId: string,
   subject: string,
   body: string,
@@ -211,7 +211,9 @@ async function classifyTicketToDepartmentAsync(
     const result = await classifyEmailWithFallback(
       { subject, body },
       departments,
-      groqApiKey
+      groqApiKey,
+      scopeEmail,
+      businessId
     );
 
     console.log('[Ticket] Classification result:', result);
@@ -308,7 +310,13 @@ export async function ensureTicketForEmail(
     }
   } else {
     updates.last_customer_reply_at = dateIso;
-    updates.status = 'open';
+    // Always re-open if customer replies, even if closed
+    if (ticket.status === 'closed') {
+      console.log(`[Ticket] Auto-reopening closed ticket ${ticket.id} due to customer reply`);
+      updates.status = 'open';
+    } else {
+      updates.status = 'open';
+    }
   }
 
   if (userEmail) {

@@ -1,8 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import ShopifySettings from "@/components/shopify-settings"
 import { AccountManager } from "@/components/account-manager"
 
@@ -29,6 +31,50 @@ interface SettingsViewProps {
 export default function SettingsView({ status, syncing, onSync, error }: SettingsViewProps) {
   const [message, setMessage] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
+  const [autoClassifyDays, setAutoClassifyDays] = useState<number>(30)
+  const [savingSettings, setSavingSettings] = useState(false)
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null)
+
+  // Load settings on mount
+  useEffect(() => {
+    loadSettings()
+  }, [])
+
+  const loadSettings = async () => {
+    try {
+      const response = await fetch('/api/settings')
+      if (response.ok) {
+        const data = await response.json()
+        setAutoClassifyDays(data.auto_classify_days || 30)
+      }
+    } catch (err) {
+      console.error('Error loading settings:', err)
+    }
+  }
+
+  const saveSettings = async () => {
+    setSavingSettings(true)
+    setSettingsMessage(null)
+    try {
+      const response = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auto_classify_days: autoClassifyDays }),
+      })
+
+      if (response.ok) {
+        setSettingsMessage('Settings saved successfully!')
+        setTimeout(() => setSettingsMessage(null), 3000)
+      } else {
+        const data = await response.json()
+        setLocalError(data.error || 'Failed to save settings')
+      }
+    } catch (err) {
+      setLocalError('Failed to save settings')
+    } finally {
+      setSavingSettings(false)
+    }
+  }
 
   const formatLastSync = () => {
     if (!status?.lastSync) return "Never"
@@ -105,6 +151,56 @@ export default function SettingsView({ status, syncing, onSync, error }: Setting
                 {(error || localError) && (
                   <div className="text-sm font-medium text-destructive bg-destructive/10 border border-destructive/20 rounded-lg px-4 py-3">
                     {error || localError}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border shadow-lg">
+            <CardHeader className="pb-6 pt-6 px-6">
+              <CardTitle className="text-lg font-bold">Classification Settings</CardTitle>
+              <CardDescription className="text-sm mt-2">
+                Configure how the Auto-Classify feature processes your tickets.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5 px-6 pb-6">
+              <div className="space-y-3">
+                <Label htmlFor="auto-classify-days" className="text-sm font-medium">
+                  Auto-Classify Time Range (days)
+                </Label>
+                <div className="flex gap-3 items-center">
+                  <Input
+                    id="auto-classify-days"
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={autoClassifyDays}
+                    onChange={(e) => setAutoClassifyDays(parseInt(e.target.value) || 30)}
+                    className="w-32"
+                  />
+                  <span className="text-sm text-muted-foreground">
+                    Classify tickets from the last {autoClassifyDays} days
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  When you click "Auto-Classify" in Departments, it will process open tickets from the last {autoClassifyDays} days.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <Button
+                  onClick={saveSettings}
+                  disabled={savingSettings}
+                  size="lg"
+                  className="shadow-md hover:shadow-lg w-full sm:w-auto"
+                >
+                  {savingSettings ? "Saving..." : "Save Settings"}
+                </Button>
+
+                {settingsMessage && (
+                  <div className="text-sm font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border-2 border-emerald-200 dark:border-emerald-900/50 rounded-xl px-5 py-4">
+                    {settingsMessage}
                   </div>
                 )}
               </div>

@@ -17,11 +17,10 @@ type RouteContext =
 
 export async function PATCH(
   request: NextRequest,
-  context: RouteContext
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const paramsData = await Promise.resolve((context as any).params);
-    const id = paramsData?.id;
+    const { id } = await params;
 
     if (!id) {
       return NextResponse.json(
@@ -155,11 +154,10 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  context: RouteContext
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const paramsData = await Promise.resolve((context as any).params);
-    const id = paramsData?.id;
+    const { id } = await params;
 
     if (!id || !isValidUUID(id)) {
       return NextResponse.json(
