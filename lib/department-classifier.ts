@@ -88,7 +88,7 @@ Unsolicited, unwanted, or malicious emails. Classify as SPAM if the email contai
 - Cryptocurrency/forex/investment scams
 - Requests for urgent action on fake account issues
 - Generic mass emails from unknown senders
-- Adult content, dating sites, or illegal offers
+- Dating sites or illegal offers
 - Pills, medications, or health scams
 - Fake package delivery notifications
 - Emails with excessive urgency ("ACT NOW!", "LIMITED TIME!", "URGENT!")
