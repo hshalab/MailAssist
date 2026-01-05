@@ -185,6 +185,35 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       prevEmailIdRef.current = emailId
 
       if (isDifferentEmail) {
+        // PERFORMANCE: If we have full body content, set loading=false IMMEDIATELY
+        // This prevents the loading skeleton from flashing when data is already available
+        const hasFullBody = initialEmailData && initialEmailData.body && initialEmailData.body.length > (initialEmailData.snippet?.length || 0)
+        if (hasFullBody) {
+          setLoading(false)
+          setEmailSummary({
+            id: emailId,
+            threadId: initialEmailData.threadId,
+            subject: initialEmailData.subject || '',
+            from: initialEmailData.from || '',
+            to: initialEmailData.to || '',
+            date: initialEmailData.date || '',
+            body: initialEmailData.body,
+            snippet: initialEmailData.snippet,
+            attachments: initialEmailData.attachments,
+          })
+          setThreadMessages([{
+            id: emailId,
+            threadId: initialEmailData.threadId,
+            subject: initialEmailData.subject || '',
+            from: initialEmailData.from || '',
+            to: initialEmailData.to || '',
+            date: initialEmailData.date || '',
+            body: initialEmailData.body,
+            snippet: initialEmailData.snippet,
+            attachments: initialEmailData.attachments,
+          }])
+        }
+
         // Trigger smooth fade transition
         setIsTransitioning(true)
         
@@ -192,34 +221,9 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         setTimeout(() => {
           setLoadingFullContent(false)
           
-          // PERFORMANCE: If we have initialEmailData with body, set it immediately for instant display
-          // This prevents showing loading skeleton when we already have the content
-          if (initialEmailData && initialEmailData.body && initialEmailData.body.length > (initialEmailData.snippet?.length || 0)) {
-            // We have full body content, show it immediately
-            setEmailSummary({
-              id: emailId,
-              threadId: initialEmailData.threadId,
-              subject: initialEmailData.subject || '',
-              from: initialEmailData.from || '',
-              to: initialEmailData.to || '',
-              date: initialEmailData.date || '',
-              body: initialEmailData.body,
-              snippet: initialEmailData.snippet,
-              attachments: initialEmailData.attachments,
-            })
-            setThreadMessages([{
-              id: emailId,
-              threadId: initialEmailData.threadId,
-              subject: initialEmailData.subject || '',
-              from: initialEmailData.from || '',
-              to: initialEmailData.to || '',
-              date: initialEmailData.date || '',
-              body: initialEmailData.body,
-              snippet: initialEmailData.snippet,
-              attachments: initialEmailData.attachments,
-            }])
-            // Show content immediately since we have full data - don't show loading
-            setLoading(false)
+          // If we already set the data above, skip re-setting it
+          if (hasFullBody) {
+            // Already handled above - just reset UI state
           } else if (initialEmailData) {
             // We only have snippet, set it and show loading state while fetching full content
             setLoading(true)
