@@ -146,8 +146,39 @@ export class GenericEmailProvider implements EmailProvider {
                         const isReply = !!message.envelope?.inReplyTo;
 
                         const bodyText = parsed.text || '';
-                        const bodyHtml = parsed.html || '';
-                        const body = bodyText || bodyHtml || '';
+                        let bodyHtml = parsed.html || '';
+
+                        // Extract attachments from mailparser result
+                        const attachments: { id: string; filename: string; mimeType: string; size: number; contentId?: string; data?: string }[] = [];
+                        if (parsed.attachments && parsed.attachments.length > 0) {
+                            for (const att of parsed.attachments) {
+                                const attId = att.checksum || att.contentId || `att-${attachments.length}`;
+                                attachments.push({
+                                    id: attId,
+                                    filename: att.filename || 'attachment',
+                                    mimeType: att.contentType || 'application/octet-stream',
+                                    size: att.size || 0,
+                                    contentId: att.contentId?.replace(/^<|>$/g, ''), // strip angle brackets
+                                    data: att.content.toString('base64'), // inline base64 for IMAP
+                                });
+
+                                // Replace CID references in HTML with data URIs for inline display
+                                if (att.contentId && bodyHtml) {
+                                    const cidClean = att.contentId.replace(/^<|>$/g, '');
+                                    const dataUri = `data:${att.contentType || 'application/octet-stream'};base64,${att.content.toString('base64')}`;
+                                    // Match cid:xxx patterns in src attributes
+                                    const cidPatterns = [
+                                        new RegExp(`src=["']cid:${cidClean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`, 'gi'),
+                                        new RegExp(`src=["']cid:${(att.filename || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`, 'gi'),
+                                    ];
+                                    for (const pattern of cidPatterns) {
+                                        bodyHtml = bodyHtml.replace(pattern, `src="${dataUri}"`);
+                                    }
+                                }
+                            }
+                        }
+
+                        const body = bodyHtml || bodyText || '';
 
                         // Generate snippet from text body, falling back to HTML, then empty string
                         const snippetText = bodyText || bodyHtml.replace(/<[^>]*>/g, '') || '';
@@ -165,7 +196,8 @@ export class GenericEmailProvider implements EmailProvider {
                             labels: [],
                             isSent: folderPath.toLowerCase().includes('sent'),
                             isReply,
-                        });
+                            attachments, // Include extracted attachments
+                        } as any);
                     } catch (err) {
                         console.error('Error parsing message:', err);
                     }

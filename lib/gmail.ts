@@ -423,6 +423,9 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
 
   // For metadata-only format, use snippet if available, otherwise empty body
   let bodyText = '';
+  let bodyHtml = '';
+  const attachments: { id: string; filename: string; mimeType: string; size: number; contentId?: string }[] = [];
+
   if (!metadataOnly) {
     const decodeData = (data?: string) => {
       if (!data) return '';
@@ -431,12 +434,66 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
       return Buffer.from(normalized, 'base64').toString('utf-8');
     };
 
-    // Recursively walk MIME parts to find the best body candidate
-    const extractBody = (part: any): { text: string; htmlFallback?: string } => {
+    // First pass: Extract ALL attachments from the entire message tree
+    const extractAttachments = (part: any) => {
+      if (!part) return;
+
+      const mime = part.mimeType || '';
+      const partHeaders = part.headers || [];
+      const getPartHeader = (name: string) =>
+        partHeaders.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+      
+      // Check for Content-Disposition: attachment or inline with filename
+      const contentDisposition = getPartHeader('content-disposition');
+      const contentId = getPartHeader('content-id')?.replace(/^<|>$/g, '');
+      const isAttachment = contentDisposition.includes('attachment') || 
+                          (part.filename && part.filename.length > 0) ||
+                          (part.body?.attachmentId);
+
+      // Extract attachment info
+      if (isAttachment && (part.body?.attachmentId || part.filename)) {
+        const attachmentId = part.body?.attachmentId || contentId || `inline-${attachments.length}`;
+        const filename = part.filename || `attachment-${attachments.length}`;
+        
+        // Avoid duplicates
+        if (!attachments.find(a => a.id === attachmentId)) {
+          attachments.push({
+            id: attachmentId,
+            filename: filename,
+            mimeType: mime,
+            size: part.body?.size || 0,
+            contentId: contentId,
+          });
+        }
+      }
+
+      // Recurse into multipart children
+      if (part.parts && Array.isArray(part.parts)) {
+        for (const child of part.parts) {
+          extractAttachments(child);
+        }
+      }
+    };
+
+    // Extract attachments first (full tree traversal)
+    extractAttachments(message.payload);
+    
+    // Debug: Log found attachments
+    if (attachments.length > 0) {
+      console.log('[Gmail] parseEmailMessage found', attachments.length, 'attachments:', attachments.map(a => ({ id: a.id, filename: a.filename, mimeType: a.mimeType, size: a.size })));
+    }
+
+    // Second pass: Extract body content
+    const extractBody = (part: any): { text: string; html?: string } => {
       if (!part) return { text: '' };
 
       const mime = part.mimeType || '';
       const data = part.body?.data ? decodeData(part.body.data) : '';
+
+      // Skip attachments when looking for body
+      if (part.body?.attachmentId && part.filename) {
+        return { text: '' };
+      }
 
       // Direct text/plain
       if (mime === 'text/plain' && data) {
@@ -445,20 +502,19 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
 
       // HTML (fallback if no plain text exists)
       if (mime === 'text/html' && data) {
-        return { text: '', htmlFallback: data };
+        return { text: '', html: data };
       }
 
       // Multipart: search children
       if (part.parts && Array.isArray(part.parts)) {
+        let textContent = '';
         let htmlCandidate: string | undefined;
         for (const child of part.parts) {
           const result = extractBody(child);
-          if (result.text) return result; // prefer plain text
-          if (result.htmlFallback && !htmlCandidate) {
-            htmlCandidate = result.htmlFallback;
-          }
+          if (result.text && !textContent) textContent = result.text;
+          if (result.html && !htmlCandidate) htmlCandidate = result.html;
         }
-        return { text: '', htmlFallback: htmlCandidate };
+        return { text: textContent, html: htmlCandidate };
       }
 
       return { text: '' };
@@ -466,15 +522,11 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
 
     const bodyResult = extractBody(message.payload);
     bodyText = bodyResult.text;
+    bodyHtml = bodyResult.html || '';
 
-    if (!bodyText && bodyResult.htmlFallback) {
-      // Strip HTML tags as a fallback; keep simple breaks
-      bodyText = bodyResult.htmlFallback
-        .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<\/p>/gi, '\n\n')
-        .replace(/<[^>]*>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .trim();
+    // Use HTML if no plain text, keep the HTML for proper rendering
+    if (!bodyText && bodyHtml) {
+      bodyText = bodyHtml;
     }
   } else {
     // For metadata format, use snippet if available
@@ -505,6 +557,7 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
     body: bodyText,
     labels: message.labelIds || [],
     isReply,
+    attachments, // Include attachment metadata
   };
 }
 

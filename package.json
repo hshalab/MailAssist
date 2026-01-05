@@ -53,6 +53,7 @@
     "googleapis": "^144.0.0",
     "imapflow": "^1.2.1",
     "input-otp": "1.4.1",
+    "isomorphic-dompurify": "^2.35.0",
     "lucide-react": "^0.454.0",
     "mailparser": "^3.9.1",
     "next": "^16.0.7",

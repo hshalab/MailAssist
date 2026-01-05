@@ -9,6 +9,7 @@ import { getValidTokens } from '@/lib/token-refresh';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { canViewAllTickets } from '@/lib/permissions';
 import { getCurrentUserEmail } from '@/lib/storage';
+import { getGmailClient } from '@/lib/gmail';
 
 type RouteContext =
   | { params: { id: string } }
@@ -69,7 +70,59 @@ export async function GET(
 
     const thread = await getThreadById(tokens, ticket.threadId);
 
-    return NextResponse.json({ messages: thread.messages || [] });
+    // Log initial thread data
+    console.log('[Thread API] Fetched thread with', thread.messages?.length || 0, 'messages');
+    thread.messages?.forEach((msg: any, i: number) => {
+      console.log(`  Message ${i}: has ${msg.attachments?.length || 0} attachments`, msg.attachments?.map((a: any) => a.filename));
+    });
+
+    // Fetch attachment data for all messages
+    const gmail = getGmailClient(tokens);
+    const messagesWithAttachmentData = await Promise.all(
+      (thread.messages || []).map(async (msg: any) => {
+        if (!msg.attachments || msg.attachments.length === 0) {
+          return msg;
+        }
+
+        console.log(`[Thread API] Fetching attachment data for message ${msg.id}`);
+        
+        const attachmentsWithData = await Promise.all(
+          msg.attachments.map(async (att: any) => {
+            try {
+              console.log(`[Thread API] Fetching attachment ${att.id} (${att.filename}) from message ${msg.id}`);
+              const response = await gmail.users.messages.attachments.get({
+                userId: 'me',
+                messageId: msg.id,
+                id: att.id,
+              });
+
+              const attachmentData = response.data.data;
+              console.log(`[Thread API] Got attachment data for ${att.filename}: ${attachmentData ? `${attachmentData.length} chars` : 'no data'}`);
+              return {
+                ...att,
+                data: attachmentData || undefined, // base64url encoded
+              };
+            } catch (error) {
+              console.error(`[Thread API] Failed to fetch attachment ${att.id} (${att.filename}) from message ${msg.id}:`, error instanceof Error ? error.message : String(error));
+              return att; // Return without data if fetch fails
+            }
+          })
+        );
+
+        return {
+          ...msg,
+          attachments: attachmentsWithData,
+        };
+      })
+    );
+
+    // Debug: Log attachment info for each message
+    console.log('[Thread API] Returning thread messages with attachments:');
+    messagesWithAttachmentData?.forEach((msg: any, i: number) => {
+      console.log(`  Message ${i}: ${msg.id}, attachments:`, msg.attachments?.length || 0, msg.attachments?.map((a: any) => ({ id: a.id, filename: a.filename, hasData: !!a.data })));
+    });
+
+    return NextResponse.json({ messages: messagesWithAttachmentData || [] });
   } catch (error) {
     console.error('Error fetching ticket thread:', error);
     return NextResponse.json(

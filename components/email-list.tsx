@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { Mail, Plus } from "lucide-react"
+import { Mail, Plus, Paperclip } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { ConnectImapForm } from "./connect-imap-form"
@@ -19,6 +19,7 @@ interface Email {
   accountEmail?: string // Legacy field
   ownerEmail?: string // New field
   departmentName?: string | null // NEW: Department name from ticket
+  attachments?: { id: string; filename: string; mimeType: string; size: number }[] // Attachments
 }
 
 interface EmailListProps {
@@ -40,6 +41,10 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   const [hasMore, setHasMore] = useState(true)
   const [showImapForm, setShowImapForm] = useState(false)
   const listContainerRef = useRef<HTMLDivElement>(null)
+  
+  // Client-side cache for email details to make clicking instant
+  const emailCacheRef = useRef<Map<string, any>>(new Map())
+  const prefetchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const fetchEmails = async (newLimit = limit, isLoadMore = false, silent = false) => {
     try {
@@ -92,6 +97,15 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       setLimit(newLimit)
       // If we received at least as many as we asked for, assume there might be more
       setHasMore(Array.isArray(data.emails) && data.emails.length >= newLimit)
+      
+      // PERFORMANCE: Prefetch the first 3 emails for instant loading
+      if (!isLoadMore && data.emails?.length > 0) {
+        const topEmails = data.emails.slice(0, 3)
+        topEmails.forEach((email: Email, idx: number) => {
+          // Stagger prefetch slightly to avoid overwhelming the API
+          setTimeout(() => prefetchEmailDetails(email.id), idx * 100)
+        })
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load emails')
       console.error('Error fetching emails:', err)
@@ -102,6 +116,37 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
         onLoadingChange?.(false)
       }
     }
+  }
+
+  // Prefetch email details for instant loading when clicked
+  const prefetchEmailDetails = async (emailId: string) => {
+    // Skip if already cached
+    if (emailCacheRef.current.has(emailId)) return
+    
+    try {
+      const response = await fetch(`/api/emails/${emailId}`, {
+        // Use force-cache to store in browser cache
+        cache: 'force-cache'
+      })
+      if (response.ok) {
+        const data = await response.json()
+        emailCacheRef.current.set(emailId, data.email)
+      }
+    } catch (err) {
+      // Silent fail - not critical
+      console.debug('Prefetch failed for', emailId, err)
+    }
+  }
+
+  // Handle hover to prefetch email details
+  const handleEmailHover = (emailId: string) => {
+    if (prefetchTimeoutRef.current) {
+      clearTimeout(prefetchTimeoutRef.current)
+    }
+    // Prefetch after 200ms hover to avoid prefetching on quick scrolls
+    prefetchTimeoutRef.current = setTimeout(() => {
+      prefetchEmailDetails(emailId)
+    }, 200)
   }
 
   // Memoized refresh function to prevent infinite loops (silent refresh)
@@ -192,19 +237,41 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
 
   if (loading && !loadingMore) {
     return (
-      <div className="p-4 space-y-3 animate-in fade-in duration-300">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="border border-border/50 rounded-xl p-4 bg-card">
-            <div className="flex gap-4">
-              <div className="w-10 h-10 rounded-full bg-muted animate-pulse" />
-              <div className="flex-1 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="h-5 bg-muted rounded w-1/3 animate-pulse" />
-                  <div className="h-4 bg-muted rounded w-16 animate-pulse" />
+      <div className="p-3 space-y-2 animate-in fade-in duration-300">
+        {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+          <div 
+            key={i} 
+            className="relative w-full rounded-xl border border-border/40 bg-gradient-to-br from-card via-card to-muted/5 overflow-hidden"
+            style={{ animationDelay: `${i * 30}ms` }}
+          >
+            {/* Shimmer effect overlay */}
+            <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+            
+            <div className="flex gap-3 p-3 relative">
+              {/* Avatar Skeleton */}
+              <div className="w-10 h-10 rounded-full bg-muted/80 flex-shrink-0 shadow-sm" />
+              
+              {/* Content Skeleton */}
+              <div className="flex-1 min-w-0 space-y-2">
+                {/* Row 1: Name and Time */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="h-4 bg-muted/70 rounded-md w-32" />
+                  <div className="h-3 bg-muted/50 rounded w-12" />
                 </div>
-                <div className="space-y-2">
-                  <div className="h-4 bg-muted rounded w-2/3 animate-pulse" />
-                  <div className="h-4 bg-muted rounded w-full animate-pulse" />
+                
+                {/* Row 2: Subject */}
+                <div className="h-4 bg-muted/70 rounded-md w-3/4" />
+                
+                {/* Row 3: Snippet */}
+                <div className="space-y-1.5">
+                  <div className="h-3 bg-muted/50 rounded w-full" />
+                  <div className="h-3 bg-muted/50 rounded w-2/3" />
+                </div>
+                
+                {/* Row 4: Badges */}
+                <div className="flex items-center gap-1.5 pt-1">
+                  <div className="h-4 bg-muted/40 rounded-md w-20" />
+                  <div className="h-5 bg-muted/40 rounded-md w-24" />
                 </div>
               </div>
             </div>
@@ -296,8 +363,11 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   }
 
   const getInitials = (from: string) => {
-    const name = from.split("<")[0].trim() || from;
-    return name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+    // Strip quotes and get name part before email
+    const name = from.split("<")[0].trim().replace(/["']/g, "") || from.replace(/["']/g, "");
+    // Get first letter of each word, filtering out non-letters
+    const initials = name.split(" ").map(n => n.replace(/[^a-zA-Z]/g, "")[0] || "").filter(Boolean).join("").slice(0, 2).toUpperCase();
+    return initials || "?";
   };
 
   const getAvatarColor = (from: string) => {
@@ -323,16 +393,27 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       {filteredEmails.map((email, index) => (
         <button
           key={email.id}
-          onClick={() => onSelectEmail(email.id, {
-            subject: email.subject,
-            from: email.from,
-            to: email.to,
-            date: email.date,
-            snippet: email.snippet,
-            body: email.body,
-            threadId: email.threadId,
-            departmentName: email.departmentName,
-          })}
+          onClick={() => {
+            // Get cached full email data if available
+            const cachedEmail = emailCacheRef.current.get(email.id)
+            onSelectEmail(email.id, {
+              subject: email.subject,
+              from: email.from,
+              to: email.to,
+              date: email.date,
+              snippet: email.snippet,
+              body: cachedEmail?.body || email.body,
+              threadId: email.threadId,
+              departmentName: email.departmentName,
+              attachments: cachedEmail?.attachments,
+            })
+          }}
+          onMouseEnter={() => handleEmailHover(email.id)}
+          onMouseLeave={() => {
+            if (prefetchTimeoutRef.current) {
+              clearTimeout(prefetchTimeoutRef.current)
+            }
+          }}
           className={`w-full text-left rounded-xl transition-all duration-200 ease-out border animate-in fade-in slide-in-from-left-2 group relative overflow-hidden ${selectedEmail === email.id
             ? "border-primary/50 bg-accent/10 shadow-lg ring-1 ring-primary/20"
             : "border-border/40 hover:border-primary/30 hover:bg-accent/5 hover:shadow-md bg-card/80"
@@ -421,6 +502,15 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
                 >
                   {email.departmentName || "No Department"}
                 </Badge>
+                {email.attachments && email.attachments.length > 0 && (
+                  <div
+                    className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"
+                    title={`${email.attachments.length} attachment${email.attachments.length > 1 ? 's' : ''}`}
+                  >
+                    <Paperclip className="w-3 h-3" />
+                    <span className="font-medium">{email.attachments.length}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

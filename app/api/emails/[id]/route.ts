@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidTokens } from '@/lib/token-refresh';
 import { getEmailById } from '@/lib/gmail';
-import { getStoredEmailById, storeReceivedEmail } from '@/lib/storage';
+import { storeReceivedEmail } from '@/lib/storage';
 import { ensureTicketForEmail } from '@/lib/tickets';
 
 type RouteContext =
@@ -30,14 +30,8 @@ export async function GET(
       );
     }
 
-    // Check local storage first (optimized indexed query)
-    const cachedEmail = await getStoredEmailById(emailId);
-
-    if (cachedEmail) {
-      return NextResponse.json({ email: cachedEmail });
-    }
-
-    // Load and refresh tokens if needed
+    // Always fetch fresh from Gmail to get attachments
+    // (Cached emails don't have attachment metadata)
     const tokens = await getValidTokens();
 
     if (!tokens || !tokens.access_token) {
@@ -47,7 +41,7 @@ export async function GET(
       );
     }
 
-    // Fetch the specific email
+    // Fetch the specific email with full content including attachments
     const email = await getEmailById(tokens, emailId);
     
     if (!email) {
@@ -57,11 +51,10 @@ export async function GET(
       );
     }
 
-    // Store for future requests (without embeddings) - non-blocking
+    // Store for future requests (without attachments/embeddings) - non-blocking
     storeReceivedEmail(email).catch(err => console.error('Error storing email:', err));
 
     // OPTIMIZED: Ensure ticket exists/updated in background (non-blocking)
-    // This makes the API response faster
     ensureTicketForEmail(
       {
         id: email.id,
@@ -74,8 +67,17 @@ export async function GET(
       false
     ).catch(err => console.error('Error creating ticket:', err));
 
-    // Return email immediately - ticket creation happens in background
-    return NextResponse.json({ email });
+    // Return email with attachments
+    const response = NextResponse.json({ email });
+    
+    // PERFORMANCE: Aggressive caching for email details
+    // Cache for 5 minutes, allow stale content for 10 minutes while revalidating
+    response.headers.set(
+      'Cache-Control',
+      'public, s-maxage=300, stale-while-revalidate=600, max-age=60'
+    );
+    
+    return response;
   } catch (error) {
     console.error('Error fetching email:', error);
     return NextResponse.json(

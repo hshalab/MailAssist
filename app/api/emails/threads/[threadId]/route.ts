@@ -44,6 +44,12 @@ export async function GET(
       );
     }
 
+    // Debug: Log attachment info for each message
+    console.log('[Email Thread API] Thread messages with attachments:');
+    thread.messages?.forEach((msg, i) => {
+      console.log(`  Message ${i}: ${msg.id}, attachments:`, msg.attachments?.length || 0, msg.attachments);
+    });
+
     return NextResponse.json({ thread });
   } catch (error) {
     console.error('Error fetching email thread:', error);

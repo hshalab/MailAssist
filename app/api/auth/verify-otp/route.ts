@@ -203,7 +203,7 @@ export async function POST(req: NextRequest) {
       sessionToken,
     });
     // Set gmail_user_email session cookie for business login
-    response = setSessionUserEmailInResponse(response, business.business_email);
+    setSessionUserEmailInResponse(response, business.business_email);
     return response;
   } catch (error) {
     console.error('[VerifyOTP] Unexpected error:', error)

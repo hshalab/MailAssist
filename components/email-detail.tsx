@@ -7,7 +7,8 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
 import { useToast } from "@/components/ui/use-toast"
-import { ArrowLeft, ChevronDown, ChevronUp, Sparkles, Loader2, Mail, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Paperclip, Code, Bold, Italic, Underline, Strikethrough, List, ListOrdered, Quote, AlignLeft, AlignCenter, AlignRight, Highlighter, Type } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, Sparkles, Loader2, Mail, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Paperclip, Code, Bold, Italic, Underline, Strikethrough, List, ListOrdered, Quote, AlignLeft, AlignCenter, AlignRight, Highlighter, Type, FileText, Download } from "lucide-react"
+import { EmailContentViewer } from "@/components/email-content-viewer"
 
 const toPlainText = (html: string) => {
   if (!html) return ""
@@ -47,6 +48,7 @@ interface EmailDetailProps {
     snippet?: string
     body?: string
     threadId?: string
+    attachments?: { id: string; filename: string; mimeType: string; size: number }[]
   }
 }
 
@@ -60,6 +62,7 @@ interface EmailMessage {
   body: string
   snippet?: string
   labels?: string[]
+  attachments?: { id: string; filename: string; mimeType: string; size: number }[]
 }
 
 interface EmailSummary {
@@ -71,24 +74,16 @@ interface EmailSummary {
   date: string
   body: string
   snippet?: string
+  labels?: string[]
+  attachments?: { id: string; filename: string; mimeType: string; size: number }[]
 }
 
 export default function EmailDetail({ emailId, onDraftGenerated, onBack, initialEmailData, onToggleShopify, showShopifySidebar, ticketId, hideCloseButton }: EmailDetailProps) {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([])
-  const [emailSummary, setEmailSummary] = useState<EmailSummary | null>(
-    initialEmailData ? {
-      id: emailId,
-      threadId: initialEmailData.threadId,
-      subject: initialEmailData.subject || '',
-      from: initialEmailData.from || '',
-      to: initialEmailData.to || '',
-      date: initialEmailData.date || '',
-      body: initialEmailData.body || initialEmailData.snippet || '',
-      snippet: initialEmailData.snippet,
-    } : null
-  )
-  const [loading, setLoading] = useState(!initialEmailData) // Don't show loading if we have initial data
+  const [emailSummary, setEmailSummary] = useState<EmailSummary | null>(null)
+  const [loading, setLoading] = useState(true) // Show loading skeleton initially
   const [loadingFullContent, setLoadingFullContent] = useState(false)
+  const [isTransitioning, setIsTransitioning] = useState(false)
   const [showDraft, setShowDraft] = useState(false)
   const [draftMinimized, setDraftMinimized] = useState(false)
   const [draftText, setDraftText] = useState("")
@@ -180,28 +175,104 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     }
   }, [draftHtml, emailId, showDraft])
 
+  const latestRequestRef = useRef(0)
+  const prevEmailIdRef = useRef<string | null>(null)
+
   useEffect(() => {
     if (emailId) {
-      // CRITICAL UX FIX: Clear previous email content immediately
-      setThreadMessages([])
-      setEmailSummary(null)
+      // Only clear state if switching to a different email
+      const isDifferentEmail = prevEmailIdRef.current !== emailId
+      prevEmailIdRef.current = emailId
 
-      // Reset draft/UI state whenever user selects a new email
-      setShowDraft(false)
-      setDraftMinimized(false)
-      setDraftText("")
-      setDraftHtml("")
-      setDraftId(null)
-      setCopied(false)
-      setGenerating(false)
-      setError(null)
-      setConversationSummary("")
-      setSummaryExpanded(false)
+      if (isDifferentEmail) {
+        // Trigger smooth fade transition
+        setIsTransitioning(true)
+        
+        // Brief delay to allow fade-out effect
+        setTimeout(() => {
+          // Set loading state
+          setLoading(true)
+          setLoadingFullContent(false)
+          
+          // PERFORMANCE: If we have initialEmailData with body, set it immediately for instant display
+          // This prevents showing loading skeleton when we already have the content
+          if (initialEmailData && initialEmailData.body && initialEmailData.body.length > (initialEmailData.snippet?.length || 0)) {
+            // We have full body content, show it immediately
+            setEmailSummary({
+              id: emailId,
+              threadId: initialEmailData.threadId,
+              subject: initialEmailData.subject || '',
+              from: initialEmailData.from || '',
+              to: initialEmailData.to || '',
+              date: initialEmailData.date || '',
+              body: initialEmailData.body,
+              snippet: initialEmailData.snippet,
+              attachments: initialEmailData.attachments,
+            })
+            setThreadMessages([{
+              id: emailId,
+              threadId: initialEmailData.threadId,
+              subject: initialEmailData.subject || '',
+              from: initialEmailData.from || '',
+              to: initialEmailData.to || '',
+              date: initialEmailData.date || '',
+              body: initialEmailData.body,
+              snippet: initialEmailData.snippet,
+              attachments: initialEmailData.attachments,
+            }])
+            // Show content immediately since we have full data
+            setLoading(false)
+          } else if (initialEmailData) {
+            // We only have snippet, set it but keep loading state
+            setEmailSummary({
+              id: emailId,
+              threadId: initialEmailData.threadId,
+              subject: initialEmailData.subject || '',
+              from: initialEmailData.from || '',
+              to: initialEmailData.to || '',
+              date: initialEmailData.date || '',
+              body: initialEmailData.body || initialEmailData.snippet || '',
+              snippet: initialEmailData.snippet,
+              attachments: initialEmailData.attachments,
+            })
+            setThreadMessages([{
+              id: emailId,
+              threadId: initialEmailData.threadId,
+              subject: initialEmailData.subject || '',
+              from: initialEmailData.from || '',
+              to: initialEmailData.to || '',
+              date: initialEmailData.date || '',
+              body: initialEmailData.body || initialEmailData.snippet || '',
+              snippet: initialEmailData.snippet,
+              attachments: initialEmailData.attachments,
+            }])
+          } else {
+            // No initial data, clear everything and show loading
+            setThreadMessages([])
+            setEmailSummary(null)
+          }
+
+          // Reset draft/UI state whenever user selects a new email
+          setShowDraft(false)
+          setDraftMinimized(false)
+          setDraftText("")
+          setDraftHtml("")
+          setDraftId(null)
+          setCopied(false)
+          setGenerating(false)
+          setError(null)
+          setConversationSummary("")
+          setSummaryExpanded(false)
+          
+          // End transition after content loads
+          setIsTransitioning(false)
+        }, 100) // Match fade-out animation duration
+      }
 
       // Try to load autosaved draft from localStorage
       try {
         const saved = localStorage.getItem(`draft_${emailId}`)
-        if (saved && !draftHtml) {
+        if (saved) {
           const parsed = JSON.parse(saved)
           if (parsed?.html) {
             setDraftHtml(parsed.html)
@@ -212,142 +283,88 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         // Ignore localStorage errors
       }
 
-      // Set initial email data immediately if provided
-      if (initialEmailData) {
-        setEmailSummary({
-          id: emailId,
-          threadId: initialEmailData.threadId,
-          subject: initialEmailData.subject || '',
-          from: initialEmailData.from || '',
-          to: initialEmailData.to || '',
-          date: initialEmailData.date || '',
-          body: initialEmailData.body || initialEmailData.snippet || '',
-          snippet: initialEmailData.snippet,
-        })
-        // Show initial message if we have snippet/body
-        if (initialEmailData.snippet || initialEmailData.body) {
-          setThreadMessages([{
-            id: emailId,
-            threadId: initialEmailData.threadId,
-            subject: initialEmailData.subject || '',
-            from: initialEmailData.from || '',
-            to: initialEmailData.to || '',
-            date: initialEmailData.date || '',
-            body: initialEmailData.body || initialEmailData.snippet || '',
-            snippet: initialEmailData.snippet,
-          }])
-        }
-        setLoading(false)
-        setLoadingFullContent(true) // Show subtle indicator that we're loading full content
-      } else {
-        setEmailSummary(null)
-        setThreadMessages([])
-        setLoading(true)
-        setLoadingFullContent(false)
-      }
+      // Bump request token to guard against race conditions from rapid clicks
+      latestRequestRef.current += 1
+      const requestToken = latestRequestRef.current
 
-      fetchThread()
+      // Fetch the email content immediately (guarded by current token)
+      if (isDifferentEmail) {
+        fetchThread(requestToken)
+      }
     }
   }, [emailId, initialEmailData])
 
-  const fetchThread = async () => {
+  const fetchThread = async (requestToken?: number) => {
     try {
-      if (!initialEmailData) {
-        setLoading(true)
-      }
-      // Don't clear error if we have content showing - it causes the UI glitch
-      if (!initialEmailData && !emailSummary) {
-        setError(null)
-      }
+      setError(null)
 
-      // OPTIMIZED: Fetch email and thread in parallel for faster loading
-      // Use initial threadId if available, otherwise fetch email first
-      const initialThreadId = initialEmailData?.threadId || emailId
-
-      // Fetch both email and thread in parallel
-      const [emailResponse, threadResponse] = await Promise.all([
-        fetch(`/api/emails/${emailId}`).catch(() => ({ ok: false, status: 500 })),
-        fetch(`/api/emails/threads/${encodeURIComponent(initialThreadId)}`).catch(() => ({ ok: false, status: 500 }))
-      ])
-
-      // Process email response
-      if (emailResponse.ok) {
-        try {
-          const emailData = await (emailResponse as Response).json()
-          const email: EmailSummary = emailData.email
-          setEmailSummary(email)
-          setError(null) // Clear any previous errors on success
-        } catch (e) {
-          // Ignore JSON parse errors, thread will have the data
-        }
+      // PERFORMANCE: Use force-cache to leverage browser cache from prefetch
+      // This makes email loading instant if it was prefetched
+      const emailResponse = await fetch(`/api/emails/${emailId}`, {
+        cache: 'force-cache'
+      })
+      
+      if (!emailResponse.ok) {
+        throw new Error('Failed to fetch email')
       }
 
-      // Process thread response (this is what we really need)
+      const emailData = await emailResponse.json()
+      const email: EmailSummary = emailData.email
+      // If user switched emails, abort applying this result
+      if (requestToken && requestToken !== latestRequestRef.current) return
+      
+      // Update email summary with full data
+      setEmailSummary(email)
+      setLoading(false) // Content is ready to display
+      
+      // Now fetch the thread using the threadId
+      const threadId = email.threadId || emailId
+      const threadResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`)
+
       if (threadResponse.ok) {
-        try {
-          const threadData = await (threadResponse as Response).json()
-          const messages = threadData.thread?.messages || []
-          setThreadMessages(messages)
-          setError(null) // Clear error on successful load
-
-          // Update emailSummary from first message if we don't have it
-          if (messages.length > 0 && !emailSummary) {
-            const firstMessage = messages[0]
-            setEmailSummary({
-              id: firstMessage.id,
-              threadId: firstMessage.threadId,
-              subject: firstMessage.subject,
-              from: firstMessage.from,
-              to: firstMessage.to,
-              date: firstMessage.date,
-              body: firstMessage.body,
-              snippet: firstMessage.snippet,
-            })
-          }
-        } catch (e) {
-          console.error('Error parsing thread data:', e)
+        const threadData = await threadResponse.json()
+        // Fix: thread data is nested under 'thread' key from API
+        const thread: EmailMessage[] = threadData.thread?.messages || threadData.messages || []
+        if (requestToken && requestToken !== latestRequestRef.current) return
+        
+        if (thread.length > 0) {
+          setThreadMessages(thread)
+        } else {
+          // If no thread, show the single email with attachments
+          setThreadMessages([{
+            id: email.id,
+            threadId: email.threadId,
+            subject: email.subject,
+            from: email.from,
+            to: email.to,
+            date: email.date,
+            body: email.body,
+            snippet: email.snippet,
+            labels: email.labels,
+            attachments: email.attachments,
+          }])
         }
       } else {
-        // If thread fetch failed, try with email's threadId
-        if (emailResponse.ok) {
-          try {
-            const emailData = await (emailResponse as Response).json()
-            const email: EmailSummary = emailData.email
-            const threadId = email.threadId || email.id
-
-            if (threadId !== initialThreadId) {
-              // Retry with correct threadId
-              const retryResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`)
-              if (retryResponse.ok) {
-                const threadData = await retryResponse.json()
-                setThreadMessages(threadData.thread?.messages || [])
-                setEmailSummary(email)
-                setError(null)
-              } else if (!initialEmailData) {
-                // Only set error if we have nothing to show
-                setError("Conversation not found")
-              }
-            } else if (!initialEmailData) {
-              setError("Conversation not found")
-            }
-          } catch (e) {
-            if (!initialEmailData) {
-              setError("Failed to load conversation")
-            }
-          }
-        } else if (!initialEmailData) {
-          // Only set error if we have no content at all
-          setError("Failed to load email")
-        }
+        // Thread fetch failed, show single email with attachments
+        if (requestToken && requestToken !== latestRequestRef.current) return
+        setThreadMessages([{
+          id: email.id,
+          threadId: email.threadId,
+          subject: email.subject,
+          from: email.from,
+          to: email.to,
+          date: email.date,
+          body: email.body,
+          snippet: email.snippet,
+          labels: email.labels,
+          attachments: email.attachments,
+        }])
       }
     } catch (err) {
-      // Only set error if we have no content showing
-      if (!initialEmailData && !emailSummary) {
-        setError(err instanceof Error ? err.message : 'Failed to load email')
-      }
       console.error('Error fetching email:', err)
-    } finally {
+      setError(err instanceof Error ? err.message : 'Failed to load email')
       setLoading(false)
+    } finally {
       setLoadingFullContent(false)
     }
   }
@@ -954,6 +971,58 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     )
   }
 
+  if (loading) {
+    return (
+      <div className="h-full flex flex-col bg-background overflow-hidden animate-in fade-in duration-300">
+        {onBack && (
+          <div className="md:hidden px-4 pt-3 pb-2 flex-shrink-0 bg-background border-b border-border">
+            <Button
+              onClick={onBack}
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs -ml-2"
+            >
+              <ArrowLeft className="w-4 h-4 mr-1" />
+              Back
+            </Button>
+          </div>
+        )}
+        
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
+          <Card className="mx-4 md:mx-6 mt-4 mb-3 shadow-lg border-border relative overflow-hidden">
+            {/* Shimmer overlay */}
+            <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent z-10" />
+            
+            <div className="px-6 py-5 border-b border-border relative">
+              <div className="space-y-3">
+                <div className="h-7 bg-muted/70 rounded-md w-3/4" />
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-muted/70" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 bg-muted/70 rounded w-1/3" />
+                    <div className="h-3 bg-muted/50 rounded w-1/2" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="px-6 py-5 space-y-4 relative">
+              <div className="space-y-2">
+                <div className="h-4 bg-muted/70 rounded w-full" />
+                <div className="h-4 bg-muted/70 rounded w-full" />
+                <div className="h-4 bg-muted/70 rounded w-5/6" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-4 bg-muted/50 rounded w-full" />
+                <div className="h-4 bg-muted/50 rounded w-4/5" />
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
   if (threadMessages.length === 0 && !emailSummary) {
     return (
       <div className="p-6 flex items-center justify-center h-full">
@@ -975,9 +1044,9 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
   }
 
   return (
-    <div className="h-full flex flex-col bg-muted/20 overflow-hidden">
+    <div className={`h-full flex flex-col bg-background overflow-hidden transition-opacity duration-200 ${isTransitioning ? 'opacity-70' : 'opacity-100'}`}>
       {onBack && (
-        <div className="md:hidden px-4 pt-3 pb-2 flex-shrink-0 bg-background border-b border-border">
+        <div className="md:hidden px-4 pt-3 pb-2 flex-shrink-0 bg-background border-b border-border animate-in fade-in slide-in-from-top-2 duration-300">
           <Button
             onClick={onBack}
             variant="ghost"
@@ -990,9 +1059,10 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
-        <Card className={`mx-4 md:mx-6 mt-4 mb-3 flex flex-col overflow-hidden max-w-full shadow-lg ${showDraft && !draftMinimized ? 'flex-shrink-0 max-h-[40vh]' : 'flex-1'}`}>
-          <div className="px-6 py-5 border-b border-border flex-shrink-0 overflow-hidden bg-card">
+      {/* Scrollable email content */}
+      <div className="flex-1 overflow-y-auto overflow-x-hidden animate-in fade-in duration-300">
+        <Card className="mx-4 md:mx-6 mt-4 mb-3 shadow-lg border-border animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="px-6 py-5 border-b border-border flex-shrink-0 bg-card">
             <div className="flex items-start justify-between gap-4 mb-2">
               <h2 className="text-xl font-bold text-foreground line-clamp-2 break-words flex-1">
                 {threadMessages[threadMessages.length - 1]?.subject || emailSummary?.subject || "(No subject)"}
@@ -1058,9 +1128,8 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
             )}
           </div>
 
-          <div className="px-6 py-4">
-            <div className="space-y-6 max-w-full">
-              {threadMessages.length > 0 ? (
+          <div className="max-h-[60vh] overflow-y-auto px-6 py-4">
+            <div className="space-y-6 max-w-full">{threadMessages.length > 0 ? (
                 threadMessages.map((msg, index) => (
                   <div
                     key={msg.id}
@@ -1079,6 +1148,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                               <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xs">
                                 {msg.from.split("<")[0].trim()
                                   ? msg.from.split("<")[0].trim()
+                                    .replace(/["'""''`]/g, "")
                                     .split(" ")
                                     .map((n) => n[0])
                                     .join("")
@@ -1109,26 +1179,12 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                     </div>
                     <div className="text-sm text-foreground/90 leading-relaxed overflow-hidden break-words">
                       {msg.body && msg.body.trim() ? (
-                        // Check if it looks like HTML (more comprehensive check)
-                        /<[^>]*(div|p|span|html|table|tr|td|br|img|a|b|i|em|strong|blockquote|pre|code|ul|ol|li|h[1-6])[\s>]/i.test(msg.body) ? (
-                          <div
-                            className="prose prose-sm max-w-none 
-                              prose-headings:font-semibold prose-headings:text-foreground
-                              prose-p:text-foreground prose-p:leading-relaxed
-                              prose-a:text-primary prose-a:no-underline hover:prose-a:underline
-                              prose-ul:text-foreground prose-ol:text-foreground
-                              prose-li:text-foreground prose-li:leading-relaxed
-                              prose-code:text-foreground prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded
-                              prose-pre:bg-muted prose-pre:text-foreground
-                              prose-blockquote:text-muted-foreground prose-blockquote:border-primary
-                              prose-img:rounded-lg overflow-hidden break-words"
-                            dangerouslySetInnerHTML={{ __html: msg.body }}
-                          />
-                        ) : (
-                          <div className="whitespace-pre-wrap break-words">
-                            {msg.body}
-                          </div>
-                        )
+                        <EmailContentViewer
+                          content={msg.body}
+                          emailId={msg.id}
+                          attachments={msg.attachments}
+                          className="rounded-md overflow-hidden"
+                        />
                       ) : (
                         <div className="text-muted-foreground italic">
                           No content
@@ -1168,77 +1224,123 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
             </div>
           </div>
         </Card>
+      </div>
 
+      {/* Sticky action buttons at bottom */}
+      <div className="flex-shrink-0 border-t border-border bg-card shadow-lg animate-in fade-in slide-in-from-bottom duration-300">
         {error && (
-          <div className="mx-4 md:mx-6 mb-3 px-4 py-3 text-sm font-medium text-destructive bg-destructive/10 rounded-lg border border-destructive/20">
+          <div className="mx-4 md:mx-6 mt-3 px-4 py-3 text-sm font-medium text-destructive bg-destructive/10 rounded-lg border border-destructive/20">
             {error}
           </div>
         )}
 
-        <Card className="mx-4 md:mx-6 mb-4 shadow-lg">
-          <div className="p-6 space-y-4">
-            {onToggleShopify && emailSummary && (
-              <Button
-                variant={showShopifySidebar ? "default" : "outline"}
-                size="sm"
-                onClick={() => onToggleShopify(emailSummary.from)}
-                className="w-full gap-2"
-              >
-                <ShoppingBag className="w-4 h-4" />
-                {showShopifySidebar ? "Hide" : "Show"} Shopify Info
-              </Button>
-            )}
-            <Button
-              onClick={handleGenerateDraft}
-              disabled={generating || showDraft}
-              className="w-full h-11 text-base font-semibold shadow-md hover:shadow-lg"
-            >
-              {generating ? (
-                <>
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  Generating draft...
-                </>
-              ) : showDraft ? (
-                <>
-                  <Sparkles className="w-5 h-5 mr-2" />
-                  Draft generated
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-5 h-5 mr-2" />
-                  Generate AI draft
-                </>
-              )}
-            </Button>
+        {/* Consolidated Attachment List - above Shopify button */}
+        {(() => {
+          const allAttachments = threadMessages.flatMap(msg => 
+            (msg.attachments || []).map(att => ({ ...att, messageId: msg.id }))
+          );
+          if (allAttachments.length === 0) return null;
+          return (
+            <div className="mx-4 md:mx-6 pt-4 pb-2">
+              <div className="flex items-center gap-2 mb-2 text-sm text-muted-foreground">
+                <Paperclip className="w-4 h-4" />
+                <span>{allAttachments.length} Attachment{allAttachments.length > 1 ? 's' : ''}</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {allAttachments.map((att: any, idx: number) => {
+                  const downloadHref = att.data
+                    ? `data:${att.mimeType || 'application/octet-stream'};base64,${att.data}`
+                    : `/api/emails/${att.messageId}/attachments/${att.id}?filename=${encodeURIComponent(att.filename)}&mimeType=${encodeURIComponent(att.mimeType)}`;
+                  return (
+                    <a
+                      key={`${att.messageId}-${att.id}-${idx}`}
+                      href={downloadHref}
+                      download={att.filename}
+                      className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-muted hover:bg-muted/80 rounded-lg border border-border/50 transition-colors group"
+                    >
+                      <FileText className="w-4 h-4 text-primary group-hover:text-primary/80" />
+                      <span className="max-w-[200px] truncate">{att.filename}</span>
+                      {att.size > 0 && (
+                        <span className="text-xs text-muted-foreground">
+                          ({att.size > 1024 * 1024
+                            ? `${(att.size / 1024 / 1024).toFixed(1)} MB`
+                            : `${Math.round(att.size / 1024)} KB`})
+                        </span>
+                      )}
+                      <Download className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
 
-            {showDraft && (
-              <div className="space-y-4 pt-4 border-t border-border animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-primary" />
-                    AI-Generated Draft
-                  </h3>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setDraftMinimized(!draftMinimized)}
-                    className="h-9 px-3 hover:bg-accent/10"
-                    title={draftMinimized ? "Expand draft" : "Minimize draft"}
-                  >
-                    {draftMinimized ? (
-                      <ChevronDown className="w-4 h-4" />
-                    ) : (
-                      <ChevronUp className="w-4 h-4" />
-                    )}
-                  </Button>
+        <div className="mx-4 md:mx-6 py-4 space-y-3">
+          {onToggleShopify && emailSummary && (
+            <Button
+              variant={showShopifySidebar ? "default" : "outline"}
+              size="sm"
+              onClick={() => onToggleShopify(emailSummary.from)}
+              className="w-full gap-2"
+            >
+              <ShoppingBag className="w-4 h-4" />
+              {showShopifySidebar ? "Hide" : "Show"} Customer Info
+            </Button>
+          )}
+          <Button
+            onClick={handleGenerateDraft}
+            disabled={generating || showDraft}
+            className="w-full h-11 text-base font-semibold shadow-md hover:shadow-lg"
+          >
+            {generating ? (
+              <>
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                Generating draft...
+              </>
+            ) : showDraft ? (
+              <>
+                <Sparkles className="w-5 h-5 mr-2" />
+                Draft generated
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-5 h-5 mr-2" />
+                Generate AI draft
+              </>
+            )}
+          </Button>
+        </div>
+
+        {showDraft && (
+          <div className="mx-4 md:mx-6 mb-4 border-t border-border pt-4">
+            <div className="bg-card rounded-lg shadow-lg border border-border overflow-hidden max-h-[60vh] flex flex-col">
+              <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-border bg-muted/50">
+                <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  AI-Generated Draft
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDraftMinimized(!draftMinimized)}
+                  className="h-9 px-3 hover:bg-accent/10"
+                  title={draftMinimized ? "Expand draft" : "Minimize draft"}
+                >
+                  {draftMinimized ? (
+                    <ChevronDown className="w-4 h-4" />
+                  ) : (
+                    <ChevronUp className="w-4 h-4" />
+                  )}
+                </Button>
+              </div>
+              {draftMinimized ? (
+                <div className="text-sm text-muted-foreground italic py-4 px-6 bg-muted/30">
+                  Draft minimized - click to expand
                 </div>
-                {draftMinimized ? (
-                  <div className="text-sm text-muted-foreground italic py-3 px-4 bg-muted/30 rounded-lg">
-                    Draft minimized - click to expand
-                  </div>
-                ) : (
-                  <div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
-                    <div className="space-y-2">
+              ) : (
+                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  <div className="space-y-3">
                       <div className="flex flex-wrap gap-1 items-center bg-muted/40 border border-border rounded-lg px-2 py-1.5">
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('bold'))} aria-label="Bold"><Bold className="w-3.5 h-3.5" /></button>
                         <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('italic'))} aria-label="Italic"><Italic className="w-3.5 h-3.5" /></button>
@@ -1395,75 +1497,74 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                           </div>
                         )}
                       </div>
-                    </div>
-                  </div>
-                )}
-
-                {!draftMinimized && (
-                  <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                    <div className="flex items-center gap-2">
-                      <Button
-                        onClick={() => handleSendReply()}
-                        disabled={sending || sendSuccess}
-                        className={`flex-1 h-10 text-sm font-semibold shadow-md transition-all duration-300 ease-out hover:shadow-lg disabled:cursor-not-allowed ${sendSuccess
-                            ? "bg-green-600 text-white hover:bg-green-600"
-                            : "disabled:opacity-50"
-                          }`}
-                      >
-                        {sendingAction === 'send' ? (
-                          <>
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            Sending...
-                          </>
-                        ) : sendSuccess ? (
-                          "✓ Reply sent!"
-                        ) : (
-                          "Send Reply"
-                        )}
-                      </Button>
-                      {ticketId && !hideCloseButton && (
-                        <Button
-                          variant="secondary"
-                          onClick={() => handleSendReply({ closeTicket: true })}
-                          disabled={sending || sendSuccess}
-                          className="flex-1 h-10 text-sm font-semibold shadow-md transition-all duration-300 ease-out hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {sendingAction === 'send-close' ? (
-                            <>
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              Sending...
-                            </>
-                          ) : sendSuccess ? (
-                            "✓ Sent & Closed!"
-                          ) : (
-                            "Send & Close"
+                    
+                    {!draftMinimized && (
+                      <div className="space-y-3 pt-4 border-t border-border">
+                        <div className="flex items-center gap-2">
+                          <Button
+                            onClick={() => handleSendReply()}
+                            disabled={sending || sendSuccess}
+                            className={`flex-1 h-10 text-sm font-semibold shadow-md transition-all duration-300 ease-out hover:shadow-lg disabled:cursor-not-allowed ${sendSuccess
+                              ? "bg-green-600 text-white hover:bg-green-600"
+                              : "disabled:opacity-50"
+                              }`}
+                          >
+                            {sendingAction === 'send' ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                Sending...
+                              </>
+                            ) : sendSuccess ? (
+                              "✓ Reply sent!"
+                            ) : (
+                              "Send Reply"
+                            )}
+                          </Button>
+                          {ticketId && !hideCloseButton && (
+                            <Button
+                              variant="secondary"
+                              onClick={() => handleSendReply({ closeTicket: true })}
+                              disabled={sending || sendSuccess}
+                              className="flex-1 h-10 text-sm font-semibold shadow-md transition-all duration-300 ease-out hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {sendingAction === 'send-close' ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                  Sending...
+                                </>
+                              ) : sendSuccess ? (
+                                "✓ Sent & Closed!"
+                              ) : (
+                                "Send & Close"
+                              )}
+                            </Button>
                           )}
-                        </Button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Button
-                        onClick={handleCopy}
-                        variant="outline"
-                        className="h-10 text-sm font-medium hover:bg-accent/10 hover:border-primary/50 transition-all duration-200"
-                      >
-                        {copied ? "✓ Copied!" : "Copy Draft"}
-                      </Button>
-                      <Button
-                        onClick={handleRegenerate}
-                        variant="outline"
-                        disabled={generating}
-                        className="h-10 text-sm font-medium hover:bg-accent/10 hover:border-primary/50 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {generating ? "Regenerating..." : "Regenerate"}
-                      </Button>
-                    </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Button
+                            onClick={handleCopy}
+                            variant="outline"
+                            className="h-10 text-sm font-medium hover:bg-accent/10 hover:border-primary/50 transition-all duration-200"
+                          >
+                            {copied ? "✓ Copied!" : "Copy Draft"}
+                          </Button>
+                          <Button
+                            onClick={handleRegenerate}
+                            variant="outline"
+                            disabled={generating}
+                            className="h-10 text-sm font-medium hover:bg-accent/10 hover:border-primary/50 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {generating ? "Regenerating..." : "Regenerate"}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              )}
+            </div>
           </div>
-        </Card>
+        )}
       </div>
     </div>
   )

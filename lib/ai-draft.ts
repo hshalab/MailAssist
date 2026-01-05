@@ -6,7 +6,7 @@
 import { findSimilarEmails } from './similarity';
 import { generateEmbedding } from './embeddings';
 import { createEmailContext } from './similarity';
-import { loadStoredEmails, findSimilarEmailsVector } from './storage';
+import { loadStoredEmails } from './storage';
 import type { KnowledgeItem } from './knowledge';
 import type { Guardrails } from './guardrails';
 import { logAIUsage, logGuardrailUsage } from './analytics';
@@ -54,56 +54,33 @@ export async function generateDraftReply(
   }
 
   // Find similar past emails to match tone and style
-  let similarEmails: Array<{ emailId: string; similarity: number; email: any }> = [];
-
-  if (queryEmbedding.length > 0 && options?.userEmail) {
-    // 1. Try Vector Search (Faster)
-    try {
-      const vectorMatches = await findSimilarEmailsVector(
-        queryEmbedding,
-        0.5,
-        5,
-        options.userEmail
-      );
-
-      if (vectorMatches && vectorMatches.length > 0) {
-        similarEmails = vectorMatches.map(match => ({
-          emailId: match.id,
-          similarity: match.similarity,
-          email: {
-            subject: match.subject,
-            body: match.body
-          }
-        }));
-      }
-    } catch (err) {
-      console.warn('Vector search failed, falling back to legacy:', err);
-    }
-  }
-
-  // 2. Fallback to Legacy In-Memory or Simple Slice if Vector failed or returned nothing
-  if (similarEmails.length === 0) {
-    if (queryEmbedding.length > 0 && pastEmails.length > 0) {
-      // Legacy in-memory matching (if pastEmails were loaded)
-      similarEmails = findSimilarEmails(
-        queryEmbedding,
-        pastEmails.map((email) => ({
-          emailId: email.id,
-          embedding: email.embedding,
-          email,
-        })),
-        5
-      );
-    }
-
-    // Final Fallback: just take the most recent ones
-    if (similarEmails.length === 0 && pastEmails.length > 0) {
+  // If no embedding was generated, use first 5 past emails as fallback
+  let similarEmails: Array<{ emailId: string; similarity: number; email: any }>;
+  if (queryEmbedding.length > 0 && pastEmails.length > 0) {
+    similarEmails = findSimilarEmails(
+      queryEmbedding,
+      pastEmails.map((email) => ({
+        emailId: email.id,
+        embedding: email.embedding,
+        email,
+      })),
+      5 // Top 5 most similar emails
+    );
+    // If no similar emails found, use first few as fallback
+    if (similarEmails.length === 0) {
       similarEmails = pastEmails.slice(0, 5).map((email) => ({
         emailId: email.id,
         email,
-        similarity: 0.5,
+        similarity: 0.5, // Default similarity for fallback
       }));
     }
+  } else {
+    // Fallback: use first 5 past emails if embedding generation failed
+    similarEmails = pastEmails.slice(0, 5).map((email) => ({
+      emailId: email.id,
+      email,
+      similarity: 0.5, // Default similarity for fallback
+    }));
   }
 
   // Build context from similar emails
@@ -146,10 +123,10 @@ export async function generateDraftReply(
   const startTime = Date.now();
   let draft = await callGroqAPI(prompt, groqApiKey);
   const responseTimeMs = Date.now() - startTime;
-
+  
   // Track knowledge items used
   const knowledgeItemIds = relevantKnowledge.map(k => k.id).filter(Boolean) as string[];
-
+  
   // Enforce guardrails and track usage
   const originalDraft = draft;
   draft = enforceGuardrailsOutput(draft, guardrails, {
@@ -253,10 +230,10 @@ export async function generateNewEmailDraft(
   const startTime = Date.now();
   let draft = await callGroqAPI(prompt, groqApiKey);
   const responseTimeMs = Date.now() - startTime;
-
+  
   // Track knowledge items used
   const knowledgeItemIds = relevantKnowledge.map(k => k.id).filter(Boolean) as string[];
-
+  
   // Enforce guardrails and track usage
   const originalDraft = draft;
   draft = enforceGuardrailsOutput(draft, guardrails, {
@@ -272,7 +249,7 @@ export async function generateNewEmailDraft(
       userEmail: options.userEmail,
       userId: options.userId || null,
       ticketId: options.ticketId || null,
-      action: 'new_email_generated' as any,
+      action: 'draft_generated',
       draftId: options.draftId || null,
       knowledgeItemIds: knowledgeItemIds.length > 0 ? knowledgeItemIds : undefined,
       guardrailApplied: !!guardrails,
@@ -306,14 +283,14 @@ function createNewEmailPrompt(
 
   const knowledgeSection = knowledgeItems.length
     ? `\n\nRELEVANT KNOWLEDGE SNIPPETS:\n${knowledgeItems
-      .map((k, idx) => `[${idx + 1}] ${k.title}: ${k.body}`)
-      .join("\n")}\n`
+        .map((k, idx) => `[${idx + 1}] ${k.title}: ${k.body}`)
+        .join("\n")}\n`
     : ""
 
   const topicRulesSection = topicRules.length
     ? `\nTopic-specific rules:\n${topicRules
-      .map((r) => `- If tags/intent match "${r.tag}", then: ${r.instruction}`)
-      .join("\n")}`
+        .map((r) => `- If tags/intent match "${r.tag}", then: ${r.instruction}`)
+        .join("\n")}`
     : ""
 
   const bannedSection = banned.length
@@ -411,14 +388,14 @@ function createDraftPrompt(
 
   const knowledgeSection = knowledgeItems.length
     ? `\n\nRELEVANT KNOWLEDGE SNIPPETS:\n${knowledgeItems
-      .map((k, idx) => `[${idx + 1}] ${k.title}: ${k.body}`)
-      .join("\n")}\n`
+        .map((k, idx) => `[${idx + 1}] ${k.title}: ${k.body}`)
+        .join("\n")}\n`
     : ""
 
   const topicRulesSection = topicRules.length
     ? `\nTopic-specific rules:\n${topicRules
-      .map((r) => `- If tags/intent match "${r.tag}", then: ${r.instruction}`)
-      .join("\n")}`
+        .map((r) => `- If tags/intent match "${r.tag}", then: ${r.instruction}`)
+        .join("\n")}`
     : ""
 
   const bannedSection = banned.length
@@ -497,11 +474,11 @@ function enforceGuardrailsOutput(
   }
 ): string {
   if (!guardrails) return draft
-
+  
   let result = draft
   const banned = guardrails.bannedWords?.filter(Boolean) || []
   const foundBannedWords: string[] = []
-
+  
   banned.forEach((word) => {
     const re = new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
     if (re.test(result)) {
@@ -509,7 +486,7 @@ function enforceGuardrailsOutput(
       result = result.replace(re, "[removed]")
     }
   })
-
+  
   // Log guardrail usage
   if (options?.userEmail && guardrails) {
     // Always log guardrails as applied when they exist
@@ -525,7 +502,7 @@ function enforceGuardrailsOutput(
         : { guardrailsApplied: true, toneStyle: !!guardrails.toneStyle, rules: !!guardrails.rules, topicRules: guardrails.topicRules?.length || 0 },
       draftContent: draft,
     })
-
+    
     // Log topic rules if any match ticket tags
     if (guardrails.topicRules && guardrails.topicRules.length > 0) {
       // Note: We'd need ticket tags to check, but for now log that topic rules exist
@@ -533,7 +510,7 @@ function enforceGuardrailsOutput(
       // For now, topic rules are counted if they exist in the guardrails
     }
   }
-
+  
   return result
 }
 
@@ -550,14 +527,14 @@ export function getGroqApiKey(): string | null {
 async function callGroqAPI(prompt: string, apiKey: string, temperature?: number): Promise<string> {
   const REQUEST_TIMEOUT = 30000; // 30 seconds timeout for Groq API
   const models = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'llama-3-70b-8192']; // Try models in order
-
+  
   let lastError: Error | null = null;
-
+  
   for (const model of models) {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
-
+      
       try {
         const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
@@ -590,13 +567,13 @@ async function callGroqAPI(prompt: string, apiKey: string, temperature?: number)
           try {
             const errorData = await response.json();
             errorMessage = errorData.error?.message || errorData.message || errorMessage;
-
+            
             // If model not found (404), try next model
             if (response.status === 404 && models.indexOf(model) < models.length - 1) {
               console.warn(`[Groq API] Model ${model} not found, trying next model...`);
               continue; // Try next model
             }
-
+            
             // Provide helpful hints for common errors
             if (response.status === 401 || response.status === 403) {
               errorMessage += ' (Check your GROQ_API_KEY)';
@@ -611,22 +588,22 @@ async function callGroqAPI(prompt: string, apiKey: string, temperature?: number)
               throw parseError; // Re-throw auth errors
             }
           }
-
+          
           // If it's not the last model, try the next one
           if (models.indexOf(model) < models.length - 1) {
             lastError = new Error(errorMessage);
             continue;
           }
-
+          
           throw new Error(errorMessage);
         }
 
         const data = await response.json();
-
+        
         if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
           throw new Error('Invalid response format from Groq API: no choices returned');
         }
-
+        
         const draft = data.choices[0]?.message?.content?.trim();
 
         if (!draft) {
@@ -641,13 +618,13 @@ async function callGroqAPI(prompt: string, apiKey: string, temperature?: number)
           // Timeout - don't retry with other models
           throw new Error('Request timeout: Groq API took too long to respond');
         }
-
+        
         // If it's an auth/rate limit error, don't try other models
-        if (fetchError.message?.includes('Check your GROQ_API_KEY') ||
-          fetchError.message?.includes('Rate limit')) {
+        if (fetchError.message?.includes('Check your GROQ_API_KEY') || 
+            fetchError.message?.includes('Rate limit')) {
           throw fetchError;
         }
-
+        
         // Otherwise, try next model
         lastError = fetchError;
         if (models.indexOf(model) < models.length - 1) {
@@ -665,7 +642,7 @@ async function callGroqAPI(prompt: string, apiKey: string, temperature?: number)
       continue;
     }
   }
-
+  
   // If we get here, all models failed
   throw lastError || new Error('All Groq API models failed');
 }

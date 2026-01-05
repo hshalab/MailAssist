@@ -23,6 +23,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import QuickRepliesSidebar from "@/components/quick-replies-sidebar"
 import ShopifySidebar from "@/components/shopify-sidebar"
 import RichTextEditor from "@/components/rich-text-editor"
+import { EmailContentViewer } from "@/components/email-content-viewer"
 
 interface Ticket {
   id: string
@@ -2969,29 +2970,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                                         <span className="text-xs text-muted-foreground flex-shrink-0">{formatDate(msg.date)}</span>
                                       </div>
 
-                                      <div className="text-sm leading-6 whitespace-pre-wrap break-words overflow-wrap-anywhere w-full max-w-full overflow-hidden">
-                                        {main.join("\n") || msg.subject || "No content"}
-                                      </div>
-
-                                      {hasQuoted && (
-                                        <div className="space-y-1">
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="h-6 px-2 text-[10px] text-muted-foreground hover:text-muted-foreground"
-                                            onClick={(e) => {
-                                              e.stopPropagation()
-                                              setShowQuotedMap(prev => ({ ...prev, [key]: !prev[key] }))
-                                            }}
-                                          >
-                                            <MoreVertical className="w-3 h-3 mr-1" />
-                                            {showQuoted ? "Hide" : "Show"} quoted text
-                                          </Button>
-                                          {showQuoted && (
-                                            <div className="text-[11px] text-muted-foreground/70 whitespace-pre-wrap bg-muted/40 border-l-2 border-muted-foreground/30 pl-3 py-2 rounded leading-4 max-h-32 overflow-y-auto break-words overflow-wrap-anywhere w-full max-w-full overflow-x-hidden">
-                                              {quoted.join("\n")}
-                                            </div>
-                                          )}
+                                      {/* Render email content with EmailContentViewer */}
+                                      {msg.body ? (
+                                        <EmailContentViewer
+                                          content={msg.body}
+                                          emailId={msg.id}
+                                          className="rounded-md overflow-hidden mt-2"
+                                        />
+                                      ) : (
+                                        <div className="text-sm text-muted-foreground italic mt-2">
+                                          No content
                                         </div>
                                       )}
                                     </div>
