@@ -86,7 +86,7 @@ export async function GET(
 
         console.log(`[Thread API] Fetching attachment data for message ${msg.id}`);
         
-        const attachmentsWithData = await Promise.all(
+        const attachmentResults = await Promise.allSettled(
           msg.attachments.map(async (att: any) => {
             try {
               console.log(`[Thread API] Fetching attachment ${att.id} (${att.filename}) from message ${msg.id}`);
@@ -108,6 +108,15 @@ export async function GET(
             }
           })
         );
+        
+        const attachmentsWithData = attachmentResults.map((result, idx) => {
+          if (result.status === 'fulfilled') {
+            return result.value;
+          } else {
+            console.error('[Thread API] Attachment fetch promise rejected:', result.reason);
+            return msg.attachments[idx]; // Return original attachment if promise rejected
+          }
+        });
 
         return {
           ...msg,

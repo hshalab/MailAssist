@@ -190,8 +190,6 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         
         // Brief delay to allow fade-out effect
         setTimeout(() => {
-          // Set loading state
-          setLoading(true)
           setLoadingFullContent(false)
           
           // PERFORMANCE: If we have initialEmailData with body, set it immediately for instant display
@@ -220,10 +218,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
               snippet: initialEmailData.snippet,
               attachments: initialEmailData.attachments,
             }])
-            // Show content immediately since we have full data
+            // Show content immediately since we have full data - don't show loading
             setLoading(false)
           } else if (initialEmailData) {
-            // We only have snippet, set it but keep loading state
+            // We only have snippet, set it and show loading state while fetching full content
+            setLoading(true)
             setEmailSummary({
               id: emailId,
               threadId: initialEmailData.threadId,
@@ -248,6 +247,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
             }])
           } else {
             // No initial data, clear everything and show loading
+            setLoading(true)
             setThreadMessages([])
             setEmailSummary(null)
           }
