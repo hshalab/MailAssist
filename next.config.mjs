@@ -8,8 +8,6 @@ const nextConfig = {
   },
   // Fix for thread-stream/pino build errors
   serverExternalPackages: ['pino', 'thread-stream', 'imapflow'],
-  // Enable Turbopack
-  turbopack: {},
   // Suppress source map warnings in development
   webpack: (config, { dev, isServer }) => {
     if (dev) {

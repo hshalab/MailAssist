@@ -435,7 +435,7 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
     };
 
     // First pass: Extract ALL attachments from the entire message tree
-    const extractAttachments = (part: any) => {
+    const extractAttachments = (part: any, depth: number = 0) => {
       if (!part) return;
 
       const mime = part.mimeType || '';
@@ -450,10 +450,17 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
                           (part.filename && part.filename.length > 0) ||
                           (part.body?.attachmentId);
 
+      // Debug logging for each part
+      if (depth === 0) {
+        console.log('[Gmail] Extracting attachments - root part mimeType:', mime, 'hasAttachmentId:', !!part.body?.attachmentId, 'filename:', part.filename);
+      }
+
       // Extract attachment info
       if (isAttachment && (part.body?.attachmentId || part.filename)) {
         const attachmentId = part.body?.attachmentId || contentId || `inline-${attachments.length}`;
         const filename = part.filename || `attachment-${attachments.length}`;
+        
+        console.log('[Gmail] Found attachment at depth', depth, '- id:', attachmentId, 'filename:', filename, 'contentDisposition:', contentDisposition);
         
         // Avoid duplicates
         if (!attachments.find(a => a.id === attachmentId)) {
@@ -469,8 +476,9 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
 
       // Recurse into multipart children
       if (part.parts && Array.isArray(part.parts)) {
+        console.log('[Gmail] Part has', part.parts.length, 'child parts at depth', depth);
         for (const child of part.parts) {
-          extractAttachments(child);
+          extractAttachments(child, depth + 1);
         }
       }
     };
@@ -479,8 +487,18 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
     extractAttachments(message.payload);
     
     // Debug: Log found attachments
+    console.log('[Gmail] parseEmailMessage - Message', message.id, 'Payload structure:', {
+      hasPayload: !!message.payload,
+      payloadMimeType: message.payload?.mimeType,
+      hasParts: !!message.payload?.parts,
+      partsCount: message.payload?.parts?.length || 0,
+      payloadHasAttachmentId: !!message.payload?.body?.attachmentId,
+      payloadFilename: message.payload?.filename
+    });
     if (attachments.length > 0) {
       console.log('[Gmail] parseEmailMessage found', attachments.length, 'attachments:', attachments.map(a => ({ id: a.id, filename: a.filename, mimeType: a.mimeType, size: a.size })));
+    } else {
+      console.log('[Gmail] parseEmailMessage found NO attachments for message', message.id);
     }
 
     // Second pass: Extract body content
