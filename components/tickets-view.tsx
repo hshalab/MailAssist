@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, Search, ShoppingBag, Inbox, RefreshCw, Paperclip, Building2 } from "lucide-react"
+import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, Search, ShoppingBag, Inbox, RefreshCw, Paperclip, Building2, FileText, Download } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -72,6 +72,7 @@ interface ThreadMessage {
   to: string
   body: string
   date?: string
+  attachments?: any[]
 }
 
 interface QuickReply {
@@ -2975,11 +2976,50 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                                         <EmailContentViewer
                                           content={msg.body}
                                           emailId={msg.id}
+                                          attachments={msg.attachments}
                                           className="rounded-md overflow-hidden mt-2"
                                         />
                                       ) : (
                                         <div className="text-sm text-muted-foreground italic mt-2">
                                           No content
+                                        </div>
+                                      )}
+
+                                      {/* Attachments */}
+                                      {msg.attachments && msg.attachments.length > 0 && (
+                                        <div className="mt-3 pt-3 border-t border-border/50">
+                                          <div className="flex flex-wrap gap-2">
+                                            {msg.attachments.map((att: any, attIdx: number) => {
+                                              const downloadHref = att.data
+                                                ? `data:${att.mimeType || 'application/octet-stream'};base64,${att.data}`
+                                                : `/api/emails/${msg.id}/attachments/${att.id}?filename=${encodeURIComponent(att.filename)}&mimeType=${encodeURIComponent(att.mimeType || '')}`
+
+                                              // Handle size display
+                                              let sizeDisplay = ''
+                                              if (att.size > 0) {
+                                                sizeDisplay = att.size > 1024 * 1024
+                                                  ? `${(att.size / 1024 / 1024).toFixed(1)} MB`
+                                                  : `${Math.round(att.size / 1024)} KB`
+                                              }
+
+                                              return (
+                                                <a
+                                                  key={`att-${att.id}-${attIdx}`}
+                                                  href={downloadHref}
+                                                  download={att.filename}
+                                                  className="inline-flex items-center gap-2 px-3 py-2 text-xs bg-muted/50 hover:bg-muted border border-border/50 rounded-md transition-colors group max-w-full"
+                                                  title={att.filename}
+                                                >
+                                                  <div className="p-1 rounded bg-primary/10 text-primary">
+                                                    <FileText className="w-3 h-3" />
+                                                  </div>
+                                                  <span className="truncate max-w-[150px] font-medium">{att.filename}</span>
+                                                  {sizeDisplay && <span className="text-muted-foreground opacity-70">({sizeDisplay})</span>}
+                                                  <Download className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity ml-1" />
+                                                </a>
+                                              )
+                                            })}
+                                          </div>
                                         </div>
                                       )}
                                     </div>
