@@ -8,8 +8,27 @@ import { getSessionUserEmailFromRequest, getCurrentUserIdFromRequest } from '@/l
 import { getUserById } from '@/lib/users';
 import { supabase } from '@/lib/supabase';
 
+import { validateBusinessSession } from '@/lib/session';
+
 export async function GET(request: NextRequest) {
   try {
+    // 1. Check for valid business session (new auth flow)
+    const businessSession = await validateBusinessSession();
+    if (businessSession) {
+      return NextResponse.json({
+        user: {
+          id: businessSession.id,
+          name: businessSession.name,
+          email: businessSession.email,
+          role: businessSession.role,
+          businessId: businessSession.businessId,
+          businessName: businessSession.businessName,
+          isActive: true,
+        }
+      });
+    }
+
+    // 2. Fallback: Legacy Gmail session check
     const userId = getCurrentUserIdFromRequest(request);
 
     if (!userId) {
