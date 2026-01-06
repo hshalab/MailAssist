@@ -19,7 +19,7 @@ export interface ClassificationResult {
     departmentName?: string;
 }
 
-const CONFIDENCE_THRESHOLD = 50; // Minimum confidence to auto-assign (lowered to catch more spam/promotions)
+const CONFIDENCE_THRESHOLD = 30; // Minimum confidence to auto-assign (lowered to 30% to catch more emails)
 
 /**
  * Classify an email to the most appropriate department using AI
@@ -171,7 +171,7 @@ ${departmentList}
 
 **Email:**
 Subject: "${emailContent.subject}"
-Body: "${emailContent.body.substring(0, 2000)}"`;
+Body: "${emailContent.body.substring(0, 1000)}"`;
 
 
     try {

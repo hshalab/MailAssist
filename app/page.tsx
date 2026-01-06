@@ -597,7 +597,7 @@ function PageContent() {
           </div>
         )
       case "team":
-        return <TeamManagement />
+        return <TeamManagement currentUser={currentUser} />
       case "drafts":
         return <DraftsView key={currentUserId || "no-user"} refreshKey={draftsVersion} currentUserId={currentUserId} />
       case "compose":
@@ -620,7 +620,7 @@ function PageContent() {
       case "ai-settings":
         return <AISettings />
       case "departments":
-        return <DepartmentsView />
+        return <DepartmentsView currentUser={currentUser} />
       case "analytics":
         return (
           <div className="p-6">

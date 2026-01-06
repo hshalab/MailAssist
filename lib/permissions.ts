@@ -41,7 +41,7 @@ export async function requirePermission(
   requiredRole: UserRole | UserRole[]
 ): Promise<{ allowed: boolean; userId: string | null; userRole?: UserRole }> {
   const userId = getCurrentUserIdFromRequest(request);
-  
+
   if (!userId) {
     return { allowed: false, userId: null };
   }
@@ -55,7 +55,18 @@ export async function requirePermission(
  */
 export async function canViewAllTickets(userId: string | null): Promise<boolean> {
   if (!userId) return false;
-  return hasPermission(userId, ['admin', 'manager']);
+
+  // Custom check: Admins/Managers OR Agents with explicit full access
+  const hasRole = await hasPermission(userId, ['admin', 'manager']);
+  if (hasRole) return true;
+
+  // Check manual override
+  const user = await getUserById(userId);
+  if (user && user.hasFullAccess) {
+    return true;
+  }
+
+  return false;
 }
 
 /**

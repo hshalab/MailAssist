@@ -19,6 +19,7 @@ export interface User {
   businessId?: string | null;
   createdAt: string;
   updatedAt: string;
+  hasFullAccess?: boolean;
 }
 
 export interface CreateUserInput {
@@ -276,6 +277,7 @@ function mapRowToUser(row: any): User {
     businessId: row.business_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    hasFullAccess: row.has_full_access || false,
   };
 }
 

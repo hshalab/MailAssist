@@ -8,21 +8,18 @@ import { clearSessionInResponse, getSessionUserEmail } from '@/lib/session';
 
 export async function POST() {
   try {
-    // Get user email from session before clearing
-    const userEmail = await getSessionUserEmail();
-    
-    // Clear all user data
-    await clearAllData();
-    
+    // Clear session only - DO NOT wipe data on logout
+    // await clearAllData();
+
     // Create response
-    const response = NextResponse.json({ 
-      success: true, 
-      message: 'Logged out successfully. All data cleared.' 
+    const response = NextResponse.json({
+      success: true,
+      message: 'Logged out successfully.'
     });
-    
+
     // CRITICAL: Clear session cookie to prevent access to this user's data
     clearSessionInResponse(response);
-    
+
     return response;
   } catch (error) {
     console.error('Error during logout:', error);

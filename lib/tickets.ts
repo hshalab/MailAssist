@@ -407,14 +407,15 @@ export async function getTickets(
       .select('department_id')
       .eq('user_id', currentUserId);
 
-    const deptIds = userDepts?.map(ud => ud.department_id) || [];
+    const deptIds = userDepts?.map((ud: any) => ud.department_id) || [];
 
     if (deptIds.length > 0) {
       // If agent has departments, they see: (assigned to them) OR (unassigned AND in their dept)
       query = query.or(`assignee_user_id.eq.${currentUserId},and(assignee_user_id.is.null,department_id.in.(${deptIds.join(',')}))`);
     } else {
-      // If agent has no departments, they only see tickets assigned to them
-      query = query.eq('assignee_user_id', currentUserId);
+      // If agent has no departments, allow them to see all unassigned tickets
+      // This ensures they can at least see the general queue
+      query = query.or(`assignee_user_id.eq.${currentUserId},assignee_user_id.is.null`);
     }
   }
   // Admin/Manager: see all (no additional filter)
@@ -431,11 +432,15 @@ export async function getTickets(
 
   const { data, error } = await query;
 
+  console.log(`[getTickets] Query params: userEmail=${userEmail}, canViewAll=${canViewAll}`);
+
   if (error) {
     console.error('Error fetching tickets:', error);
     // Fallback to simple query if JOIN fails (backward compatibility)
     return getTicketsFallback(currentUserId, canViewAll, userEmail);
   }
+
+  console.log(`[getTickets] Found ${data?.length || 0} tickets`);
 
   if (!data) return [];
 

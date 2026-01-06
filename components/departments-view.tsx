@@ -55,9 +55,15 @@ interface User {
     role: string
 }
 
-export default function DepartmentsView() {
+interface DepartmentsViewProps {
+    currentUser?: { id: string; name: string; role: string; business_id?: string } | null
+}
+
+export default function DepartmentsView({ currentUser }: DepartmentsViewProps) {
     const [departments, setDepartments] = useState<Department[]>([])
     const [loading, setLoading] = useState(true)
+
+    const canManage = currentUser?.role === 'admin' || currentUser?.role === 'manager'
     const [createDialogOpen, setCreateDialogOpen] = useState(false)
     const [editDialogOpen, setEditDialogOpen] = useState(false)
     const [assignDialogOpen, setAssignDialogOpen] = useState(false)
@@ -268,98 +274,102 @@ export default function DepartmentsView() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                    <Button
-                        variant="outline"
-                        size="lg"
-                        className="h-12 px-6 border-slate-700 bg-slate-800/50 hover:bg-slate-800 text-slate-300 hover:text-white rounded-2xl transition-all"
-                        onClick={handleSmartBackfill}
-                        disabled={backfilling}
-                    >
-                        {backfilling ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                            <Sparkles className="mr-2 h-4 w-4" />
-                        )}
-                        Auto-Classify
-                    </Button>
+                    {canManage && (
+                        <Button
+                            variant="outline"
+                            size="lg"
+                            className="h-12 px-6 border-slate-700 bg-slate-800/50 hover:bg-slate-800 text-slate-300 hover:text-white rounded-2xl transition-all"
+                            onClick={handleSmartBackfill}
+                            disabled={backfilling}
+                        >
+                            {backfilling ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            ) : (
+                                <Sparkles className="mr-2 h-4 w-4" />
+                            )}
+                            Auto-Classify
+                        </Button>
+                    )}
 
-                    <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-                        <DialogTrigger asChild>
-                            <Button size="lg" className="h-12 px-8 bg-primary hover:bg-primary/90 text-white shadow-2xl shadow-primary/20 transition-all hover:scale-[1.03] active:scale-95 font-bold rounded-2xl group border-0">
-                                <Plus className="mr-2 h-5 w-5 transition-transform" />
-                                Create Workstream
-                            </Button>
-                        </DialogTrigger>
-                        <DialogContent className="bg-slate-900/95 border-slate-800 backdrop-blur-2xl sm:max-w-md rounded-3xl">
-                            <form onSubmit={handleCreate} className="space-y-6">
-                                <DialogHeader>
-                                    <DialogTitle className="text-2xl font-bold text-white">Create Workstream</DialogTitle>
-                                    <DialogDescription className="text-slate-400 text-base">
-                                        Add a new workstream with a clear description for AI classification.
-                                    </DialogDescription>
-                                </DialogHeader>
-                                <div className="space-y-5 py-2">
-                                    <div className="space-y-2.5">
-                                        <Label htmlFor="name" className="text-slate-300 ml-1">Workstream Name</Label>
-                                        <div className="relative">
-                                            <Tag className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-                                            <Input
-                                                id="name"
-                                                value={name}
-                                                onChange={(e) => setName(e.target.value)}
-                                                placeholder="e.g., Sales, Support, Billing"
-                                                className="pl-10 bg-slate-800/50 border-slate-700 focus:border-primary text-white h-11 rounded-xl transition-all"
-                                                required
-                                                maxLength={100}
-                                            />
+                    {canManage && (
+                        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+                            <DialogTrigger asChild>
+                                <Button size="lg" className="h-12 px-8 bg-primary hover:bg-primary/90 text-white shadow-2xl shadow-primary/20 transition-all hover:scale-[1.03] active:scale-95 font-bold rounded-2xl group border-0">
+                                    <Plus className="mr-2 h-5 w-5 transition-transform" />
+                                    Create Workstream
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent className="bg-slate-900/95 border-slate-800 backdrop-blur-2xl sm:max-w-md rounded-3xl">
+                                <form onSubmit={handleCreate} className="space-y-6">
+                                    <DialogHeader>
+                                        <DialogTitle className="text-2xl font-bold text-white">Create Workstream</DialogTitle>
+                                        <DialogDescription className="text-slate-400 text-base">
+                                            Add a new workstream with a clear description for AI classification.
+                                        </DialogDescription>
+                                    </DialogHeader>
+                                    <div className="space-y-5 py-2">
+                                        <div className="space-y-2.5">
+                                            <Label htmlFor="name" className="text-slate-300 ml-1">Workstream Name</Label>
+                                            <div className="relative">
+                                                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                                                <Input
+                                                    id="name"
+                                                    value={name}
+                                                    onChange={(e) => setName(e.target.value)}
+                                                    placeholder="e.g., Sales, Support, Billing"
+                                                    className="pl-10 bg-slate-800/50 border-slate-700 focus:border-primary text-white h-11 rounded-xl transition-all"
+                                                    required
+                                                    maxLength={100}
+                                                />
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="space-y-2.5">
-                                        <Label htmlFor="description" className="text-slate-300 ml-1">Description</Label>
-                                        <Textarea
-                                            id="description"
-                                            value={description}
-                                            onChange={(e) => setDescription(e.target.value)}
-                                            placeholder="Describe what this workstream handles. Be specific to help AI classify emails correctly. E.g., 'Questions about pricing, quotes, product purchases, and payment methods.'"
-                                            className="bg-slate-800/50 border-slate-700 focus:border-primary text-white min-h-[120px] rounded-xl transition-all resize-none"
-                                            required
-                                            minLength={10}
-                                        />
-                                        <p className="text-xs text-slate-500 ml-1">
-                                            Minimum 10 characters for effective AI classification
-                                        </p>
-                                    </div>
-                                    {error && (
-                                        <Alert className="bg-red-500/10 border-red-500/20 rounded-xl">
-                                            <XCircle className="h-4 w-4 text-red-400" />
-                                            <AlertDescription className="text-red-300 ml-2">{error}</AlertDescription>
-                                        </Alert>
-                                    )}
-                                </div>
-                                <DialogFooter>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        onClick={() => setCreateDialogOpen(false)}
-                                        className="text-slate-400 hover:text-white hover:bg-white/5 rounded-xl px-6"
-                                    >
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        type="submit"
-                                        disabled={actionLoading}
-                                        className="bg-primary hover:bg-primary/90 rounded-xl px-8 h-11 font-bold shadow-lg shadow-primary/20"
-                                    >
-                                        {actionLoading ? (
-                                            <Loader2 className="h-4 w-4 animate-spin" />
-                                        ) : (
-                                            "Create Workstream"
+                                        <div className="space-y-2.5">
+                                            <Label htmlFor="description" className="text-slate-300 ml-1">Description</Label>
+                                            <Textarea
+                                                id="description"
+                                                value={description}
+                                                onChange={(e) => setDescription(e.target.value)}
+                                                placeholder="Describe what this workstream handles. Be specific to help AI classify emails correctly. E.g., 'Questions about pricing, quotes, product purchases, and payment methods.'"
+                                                className="bg-slate-800/50 border-slate-700 focus:border-primary text-white min-h-[120px] rounded-xl transition-all resize-none"
+                                                required
+                                                minLength={10}
+                                            />
+                                            <p className="text-xs text-slate-500 ml-1">
+                                                Minimum 10 characters for effective AI classification
+                                            </p>
+                                        </div>
+                                        {error && (
+                                            <Alert className="bg-red-500/10 border-red-500/20 rounded-xl">
+                                                <XCircle className="h-4 w-4 text-red-400" />
+                                                <AlertDescription className="text-red-300 ml-2">{error}</AlertDescription>
+                                            </Alert>
                                         )}
-                                    </Button>
-                                </DialogFooter>
-                            </form>
-                        </DialogContent>
-                    </Dialog>
+                                    </div>
+                                    <DialogFooter>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            onClick={() => setCreateDialogOpen(false)}
+                                            className="text-slate-400 hover:text-white hover:bg-white/5 rounded-xl px-6"
+                                        >
+                                            Cancel
+                                        </Button>
+                                        <Button
+                                            type="submit"
+                                            disabled={actionLoading}
+                                            className="bg-primary hover:bg-primary/90 rounded-xl px-8 h-11 font-bold shadow-lg shadow-primary/20"
+                                        >
+                                            {actionLoading ? (
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                            ) : (
+                                                "Create Workstream"
+                                            )}
+                                        </Button>
+                                    </DialogFooter>
+                                </form>
+                            </DialogContent>
+                        </Dialog>
+                    )}
                 </div>
             </div>
 
@@ -394,10 +404,12 @@ export default function DepartmentsView() {
                         <p className="text-slate-400 max-w-xs mx-auto mb-6">
                             Create your first workstream to start auto-classifying incoming emails.
                         </p>
-                        <Button onClick={() => setCreateDialogOpen(true)} className="bg-primary hover:bg-primary/90 rounded-xl px-6">
-                            <Plus className="mr-2 h-4 w-4" />
-                            Create First Workstream
-                        </Button>
+                        {canManage && (
+                            <Button onClick={() => setCreateDialogOpen(true)} className="bg-primary hover:bg-primary/90 rounded-xl px-6">
+                                <Plus className="mr-2 h-4 w-4" />
+                                Create First Workstream
+                            </Button>
+                        )}
                     </Card>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
@@ -428,31 +440,41 @@ export default function DepartmentsView() {
                                     </p>
 
                                     <div className="flex items-center gap-2 pt-4 border-t border-slate-800/50">
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => openAssignDialog(dept)}
-                                            className="flex-1 h-9 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-all"
-                                        >
-                                            <Users className="h-4 w-4 mr-1.5" />
-                                            Assign
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => openEditDialog(dept)}
-                                            className="h-9 px-3 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-blue-400/5"
-                                        >
-                                            <Edit className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => openDeleteDialog(dept)}
-                                            className="h-9 px-3 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-400/5"
-                                        >
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
+                                        {canManage ? (
+                                            <>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => openAssignDialog(dept)}
+                                                    className="flex-1 h-9 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/10 transition-all"
+                                                >
+                                                    <Users className="h-4 w-4 mr-1.5" />
+                                                    Assign
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => openEditDialog(dept)}
+                                                    className="h-9 px-3 rounded-lg text-slate-400 hover:text-blue-400 hover:bg-blue-400/5"
+                                                >
+                                                    <Edit className="h-4 w-4" />
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => openDeleteDialog(dept)}
+                                                    className="h-9 px-3 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-400/5"
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </>
+                                        ) : (
+                                            <div className="flex items-center justify-center w-full py-1">
+                                                <Badge variant="outline" className="bg-slate-800/50 border-slate-700 text-slate-500 font-normal">
+                                                    Read-Only
+                                                </Badge>
+                                            </div>
+                                        )}
                                     </div>
                                 </Card>
                             </div>

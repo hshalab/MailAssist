@@ -62,6 +62,7 @@ export default function Sidebar({ activeView, setActiveView, onLogout, currentUs
   const [isCollapsed, setIsCollapsed] = useState(true)
   const isAdmin = currentUser?.role === "admin"
   const isManager = currentUser?.role === "manager"
+  const isAgent = currentUser?.role === "agent"
 
   return (
     <aside
@@ -121,24 +122,28 @@ export default function Sidebar({ activeView, setActiveView, onLogout, currentUs
           )
         })}
 
+        {/* Admin Items (Team only for Agents too, but restricted in view) */}
+        <Divider isCollapsed={isCollapsed} />
+        {/* Team is now visible to everyone (read-only for agents) */}
+        <NavButton
+          isActive={activeView === 'team'}
+          isCollapsed={isCollapsed}
+          icon={<UsersIcon className="w-5 h-5 flex-shrink-0" />}
+          label="Team Management"
+          onClick={() => setActiveView('team')}
+        />
+
+        {/* Workstreams visible to everyone (Read-only for agents) */}
+        <NavButton
+          isActive={activeView === 'departments'}
+          isCollapsed={isCollapsed}
+          icon={<DepartmentsIcon className="w-5 h-5 flex-shrink-0" />}
+          label="Workstreams"
+          onClick={() => setActiveView('departments')}
+        />
+
         {isAdmin && (
           <>
-            <Divider isCollapsed={isCollapsed} />
-            {ADMIN_NAV_ITEMS.map((item) => {
-              const isActive = activeView === item.id
-              const Icon = item.icon
-
-              return (
-                <NavButton
-                  key={item.id}
-                  isActive={isActive}
-                  isCollapsed={isCollapsed}
-                  icon={<Icon className="w-5 h-5 flex-shrink-0" />}
-                  label={item.label}
-                  onClick={() => setActiveView(item.id)}
-                />
-              )
-            })}
           </>
         )}
 

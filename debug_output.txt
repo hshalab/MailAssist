@@ -1,0 +1,65 @@
+--- Deep Dive Audit ---
+
+Ticket Distribution:
+{
+  "unclassified": 241,
+  "df8b0b4b-5a33-4ec0-af82-574406abced2": 6
+}
+Sample Classified Tickets:
+[
+  {
+    "id": "7e045a38-82eb-4362-bdf4-6fa653d5692f",
+    "subject": "Seating Plan of Final Exam for Saturday (December 20, 2025) - Fall-2025",
+    "deptId": "df8b0b4b-5a33-4ec0-af82-574406abced2",
+    "userEmail": "i221885@nu.edu.pk",
+    "ownerEmail": "i221885@nu.edu.pk",
+    "assignee": null
+  },
+  {
+    "id": "0ce23d70-bc81-4e03-b9d2-bcc798051185",
+    "subject": "Seating Plan of Final Exam for Tuesday, December 30, 2025 (Morning 09:00-12:00) - Fall-2025",
+    "deptId": "df8b0b4b-5a33-4ec0-af82-574406abced2",
+    "userEmail": "i221885@nu.edu.pk",
+    "ownerEmail": "i221885@nu.edu.pk",
+    "assignee": null
+  },
+  {
+    "id": "ead244f2-3ca0-4fc4-8035-443b0c18e062",
+    "subject": "New announcement: \"Dear Students,\n\n\nThe marks for…\"",
+    "deptId": "df8b0b4b-5a33-4ec0-af82-574406abced2",
+    "userEmail": "i221885@nu.edu.pk",
+    "ownerEmail": "i221885@nu.edu.pk",
+    "assignee": null
+  },
+  {
+    "id": "f8526986-e17a-4a4b-92ae-fee06babff50",
+    "subject": "Bank The Unbanked Ideathon (No-code Hackathon)",
+    "deptId": "df8b0b4b-5a33-4ec0-af82-574406abced2",
+    "userEmail": "i221885@nu.edu.pk",
+    "ownerEmail": "i221885@nu.edu.pk",
+    "assignee": null
+  },
+  {
+    "id": "6d3d4b63-8c81-4954-97d5-577c62e522ed",
+    "subject": "Your Year in Code",
+    "deptId": "df8b0b4b-5a33-4ec0-af82-574406abced2",
+    "userEmail": "i221885@nu.edu.pk",
+    "ownerEmail": "i221885@nu.edu.pk",
+    "assignee": null
+  }
+]
+
+Agent: Muhammad Salman (muhammad.salman1205@gmail.com)
+Agent User Email (Scope): null
+Assigned Dept IDs: ["df8b0b4b-5a33-4ec0-af82-574406abced2","05eafb28-1c6b-4bbc-a5ff-55e57d24b58d"]
+Should see 0 automatic tickets (Dept match + Scope match)
+(Dept match only count: 6)
+
+Active Tokens:
+[
+  {
+    "user_email": "i221885@nu.edu.pk",
+    "business_id": "109846d9-803b-4550-8142-43171c6d19bb",
+    "updated_at": "2026-01-06T16:12:27.682754+00:00"
+  }
+]

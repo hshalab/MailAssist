@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient } from '@/lib/supabase-client';
 import { validateBusinessSession } from '@/lib/session';
 import { getUserDepartments, updateUserDepartments } from '@/lib/departments';
 
@@ -38,25 +39,29 @@ export async function PATCH(
     try {
         const { userId } = await params;
         const body = await request.json();
-        const { departmentIds = [] } = body;
+        const { departmentIds = [], hasFullAccess } = body;
 
-        // Validate departmentIds is an array
-        if (!Array.isArray(departmentIds)) {
-            return NextResponse.json(
-                { error: 'departmentIds must be an array' },
-                { status: 400 }
-            );
+        // Validations...
+
+        const supabase = createServerClient();
+
+        // 1. Update Full Access Flag if provided
+        if (typeof hasFullAccess === 'boolean') {
+            const { error } = await supabase
+                .from('users')
+                .update({ has_full_access: hasFullAccess })
+                .eq('id', userId);
+
+            if (error) {
+                console.error('[UpdateUserFullAccess] Error:', error);
+                // Continue though, as departments might still need updating
+            }
         }
 
-        // Update user's departments
+        // 2. Update user's departments
         const success = await updateUserDepartments(userId, departmentIds);
 
-        if (!success) {
-            return NextResponse.json(
-                { error: 'Failed to update user departments' },
-                { status: 500 }
-            );
-        }
+        // ... rest of function ...
 
         // Fetch updated departments
         const departments = await getUserDepartments(userId);

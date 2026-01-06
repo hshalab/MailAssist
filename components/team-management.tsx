@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
@@ -50,11 +51,18 @@ interface PendingInvitation {
   status: string
   expires_at: string
   created_at: string
+  has_full_access?: boolean
 }
 
-export default function TeamManagementView() {
+interface TeamManagementViewProps {
+  currentUser?: { id: string; name: string; role: string; business_id?: string } | null
+}
+
+export default function TeamManagementView({ currentUser }: TeamManagementViewProps) {
   const [members, setMembers] = useState<TeamMember[]>([])
   const [invitations, setInvitations] = useState<PendingInvitation[]>([])
+
+
   const [loading, setLoading] = useState(true)
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
   const [inviteLoading, setInviteLoading] = useState(false)
@@ -76,7 +84,10 @@ export default function TeamManagementView() {
   const [editDepartmentsDialogOpen, setEditDepartmentsDialogOpen] = useState(false)
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null)
   const [editMemberDepartments, setEditMemberDepartments] = useState<string[]>([])
+  const [editMemberFullAccess, setEditMemberFullAccess] = useState(false)
   const [savingDepartments, setSavingDepartments] = useState(false)
+
+  const canManage = currentUser?.role === 'admin' || currentUser?.role === 'manager'
 
   useEffect(() => {
     loadTeamData()
@@ -167,6 +178,7 @@ export default function TeamManagementView() {
 
   const handleEditDepartments = async (member: TeamMember) => {
     setEditingMember(member)
+    setEditMemberFullAccess((member as any).has_full_access || false)
     setEditDepartmentsDialogOpen(true)
 
     // Fetch member's current departments
@@ -192,7 +204,10 @@ export default function TeamManagementView() {
       const response = await fetch(`/api/agents/${editingMember.id}/departments`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ departmentIds: editMemberDepartments }),
+        body: JSON.stringify({
+          departmentIds: editMemberDepartments,
+          hasFullAccess: editMemberFullAccess
+        }),
       })
 
       if (!response.ok) {
@@ -266,129 +281,131 @@ export default function TeamManagementView() {
           </p>
         </div>
 
-        <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="lg" className="h-12 px-8 bg-primary hover:bg-primary/90 text-white shadow-2xl shadow-primary/20 transition-all hover:scale-[1.03] active:scale-95 font-bold rounded-2xl group border-0">
-              <UserPlus className="mr-2 h-5 w-5 transition-transform" />
-              Invite Member
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="bg-slate-900/95 border-slate-800 backdrop-blur-2xl sm:max-w-md rounded-3xl">
-            <form onSubmit={handleInvite} className="space-y-6">
-              <DialogHeader>
-                <DialogTitle className="text-2xl font-bold text-white">Invite Team Member</DialogTitle>
-                <DialogDescription className="text-slate-400 text-base">
-                  Send a secure invitation to your team.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-5 py-2">
-                <div className="space-y-2.5">
-                  <Label htmlFor="name" className="text-slate-300 ml-1">Full Name</Label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-                    <Input
-                      id="name"
-                      value={inviteName}
-                      onChange={(e) => setInviteName(e.target.value)}
-                      placeholder="Jane Cooper"
-                      className="pl-10 bg-slate-800/50 border-slate-700 focus:border-primary text-white h-11 rounded-xl transition-all"
-                      required
-                    />
+        {canManage && (
+          <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
+            <DialogTrigger asChild>
+              <Button size="lg" className="h-12 px-8 bg-primary hover:bg-primary/90 text-white shadow-2xl shadow-primary/20 transition-all hover:scale-[1.03] active:scale-95 font-bold rounded-2xl group border-0">
+                <UserPlus className="mr-2 h-5 w-5 transition-transform" />
+                Invite Member
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="bg-slate-900/95 border-slate-800 backdrop-blur-2xl sm:max-w-md rounded-3xl">
+              <form onSubmit={handleInvite} className="space-y-6">
+                <DialogHeader>
+                  <DialogTitle className="text-2xl font-bold text-white">Invite Team Member</DialogTitle>
+                  <DialogDescription className="text-slate-400 text-base">
+                    Send a secure invitation to your team.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-5 py-2">
+                  <div className="space-y-2.5">
+                    <Label htmlFor="name" className="text-slate-300 ml-1">Full Name</Label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                      <Input
+                        id="name"
+                        value={inviteName}
+                        onChange={(e) => setInviteName(e.target.value)}
+                        placeholder="Jane Cooper"
+                        className="pl-10 bg-slate-800/50 border-slate-700 focus:border-primary text-white h-11 rounded-xl transition-all"
+                        required
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="space-y-2.5">
-                  <Label htmlFor="email" className="text-slate-300 ml-1">Work Email</Label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-                    <Input
-                      id="email"
-                      type="email"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      placeholder="jane@company.com"
-                      className="pl-10 bg-slate-800/50 border-slate-700 focus:border-primary text-white h-11 rounded-xl transition-all"
-                      required
-                    />
+                  <div className="space-y-2.5">
+                    <Label htmlFor="email" className="text-slate-300 ml-1">Work Email</Label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                      <Input
+                        id="email"
+                        type="email"
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        placeholder="jane@company.com"
+                        className="pl-10 bg-slate-800/50 border-slate-700 focus:border-primary text-white h-11 rounded-xl transition-all"
+                        required
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="space-y-2.5">
-                  <Label htmlFor="role" className="text-slate-300 ml-1">Account Role</Label>
-                  <Select value={inviteRole} onValueChange={(value: any) => setInviteRole(value)}>
-                    <SelectTrigger className="bg-slate-800/50 border-slate-700 focus:border-primary text-white h-11 rounded-xl transition-all">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-slate-900 border-slate-800 rounded-xl">
-                      <SelectItem value="agent">Agent (Standard access)</SelectItem>
-                      <SelectItem value="manager">Manager (Can invite others)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2.5">
-                  <Label className="text-slate-300 ml-1">Workstreams (Optional)</Label>
-                  <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 max-h-48 overflow-y-auto">
-                    {loadingDepartments ? (
-                      <div className="text-sm text-slate-400 text-center py-2">Loading workstreams...</div>
-                    ) : departments.length === 0 ? (
-                      <div className="text-sm text-slate-400 text-center py-2">No workstreams available</div>
-                    ) : (
-                      <div className="space-y-2">
-                        {departments.map((dept) => (
-                          <div key={dept.id} className="flex items-center space-x-2 p-2 hover:bg-slate-700/50 rounded-lg transition-colors">
-                            <Checkbox
-                              id={`dept-${dept.id}`}
-                              checked={inviteDepartments.includes(dept.id)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setInviteDepartments([...inviteDepartments, dept.id])
-                                } else {
-                                  setInviteDepartments(inviteDepartments.filter(id => id !== dept.id))
-                                }
-                              }}
-                            />
-                            <label
-                              htmlFor={`dept-${dept.id}`}
-                              className="text-sm text-slate-300 cursor-pointer flex-1"
-                            >
-                              {dept.name}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                  <div className="space-y-2.5">
+                    <Label htmlFor="role" className="text-slate-300 ml-1">Account Role</Label>
+                    <Select value={inviteRole} onValueChange={(value: any) => setInviteRole(value)}>
+                      <SelectTrigger className="bg-slate-800/50 border-slate-700 focus:border-primary text-white h-11 rounded-xl transition-all">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-slate-900 border-slate-800 rounded-xl">
+                        <SelectItem value="agent">Agent (Standard access)</SelectItem>
+                        <SelectItem value="manager">Manager (Can invite others)</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <p className="text-xs text-slate-500 ml-1">Select workstreams this member can access</p>
-                </div>
-                {error && (
-                  <Alert className="bg-red-500/10 border-red-500/20 rounded-xl">
-                    <XCircle className="h-4 w-4 text-red-400" />
-                    <AlertDescription className="text-red-300 ml-2">{error}</AlertDescription>
-                  </Alert>
-                )}
-              </div>
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setInviteDialogOpen(false)}
-                  className="text-slate-400 hover:text-white hover:bg-white/5 rounded-xl px-6"
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={inviteLoading}
-                  className="bg-primary hover:bg-primary/90 rounded-xl px-8 h-11 font-bold shadow-lg shadow-primary/20"
-                >
-                  {inviteLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    "Send Invitation"
+                  <div className="space-y-2.5">
+                    <Label className="text-slate-300 ml-1">Workstreams (Optional)</Label>
+                    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 max-h-48 overflow-y-auto">
+                      {loadingDepartments ? (
+                        <div className="text-sm text-slate-400 text-center py-2">Loading workstreams...</div>
+                      ) : departments.length === 0 ? (
+                        <div className="text-sm text-slate-400 text-center py-2">No workstreams available</div>
+                      ) : (
+                        <div className="space-y-2">
+                          {departments.map((dept) => (
+                            <div key={dept.id} className="flex items-center space-x-2 p-2 hover:bg-slate-700/50 rounded-lg transition-colors">
+                              <Checkbox
+                                id={`dept-${dept.id}`}
+                                checked={inviteDepartments.includes(dept.id)}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    setInviteDepartments([...inviteDepartments, dept.id])
+                                  } else {
+                                    setInviteDepartments(inviteDepartments.filter(id => id !== dept.id))
+                                  }
+                                }}
+                              />
+                              <label
+                                htmlFor={`dept-${dept.id}`}
+                                className="text-sm text-slate-300 cursor-pointer flex-1"
+                              >
+                                {dept.name}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 ml-1">Select workstreams this member can access</p>
+                  </div>
+                  {error && (
+                    <Alert className="bg-red-500/10 border-red-500/20 rounded-xl">
+                      <XCircle className="h-4 w-4 text-red-400" />
+                      <AlertDescription className="text-red-300 ml-2">{error}</AlertDescription>
+                    </Alert>
                   )}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setInviteDialogOpen(false)}
+                    className="text-slate-400 hover:text-white hover:bg-white/5 rounded-xl px-6"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={inviteLoading}
+                    className="bg-primary hover:bg-primary/90 rounded-xl px-8 h-11 font-bold shadow-lg shadow-primary/20"
+                  >
+                    {inviteLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "Send Invitation"
+                    )}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
 
       {success && (
@@ -403,17 +420,19 @@ export default function TeamManagementView() {
 
         {/* Active Members - Left 2 Columns */}
         <div className="xl:col-span-2 space-y-6">
-          <div className="flex items-center gap-2 px-1">
-            <h3 className="text-xl font-bold text-white">Active Members</h3>
-            <Badge variant="outline" className="bg-white/5 border-white/10 text-slate-400 rounded-full font-mono">
-              {members.length}
-            </Badge>
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-3">
+              <h3 className="text-xl font-bold text-white">Active Members</h3>
+              <Badge variant="outline" className="bg-white/5 border-white/10 text-slate-400 rounded-full font-mono px-3">
+                {members.length}
+              </Badge>
+            </div>
           </div>
 
           {loading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="h-40 bg-slate-900/40 border border-slate-800/50 rounded-3xl animate-pulse" />
+                <div key={i} className="h-[140px] bg-slate-900/40 border border-slate-800/50 rounded-2xl animate-pulse" />
               ))}
             </div>
           ) : members.length === 0 ? (
@@ -427,43 +446,44 @@ export default function TeamManagementView() {
               </p>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {members.map((member, index) => (
                 <div
                   key={member.id}
                   className="group relative"
-                  style={{ animationDelay: `${index * 100}ms` }}
+                  style={{ animationDelay: `${index * 50}ms` }}
                 >
-                  <Card className="bg-slate-900/60 border-slate-800/80 backdrop-blur-sm rounded-3xl p-6 transition-all duration-300 hover:border-primary/40 hover:shadow-2xl hover:shadow-primary/5">
+                  <Card className="bg-slate-900/40 border-slate-800/60 hover:bg-slate-800/60 hover:border-slate-700/80 backdrop-blur-sm rounded-2xl p-5 transition-all duration-200 h-full flex flex-col justify-between">
                     <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl flex items-center justify-center border border-slate-700/50 relative overflow-hidden">
-                          <div className="absolute inset-0 bg-primary/5 group-hover:bg-primary/10 transition-colors" />
-                          <User className="h-7 w-7 text-primary/80 transition-transform" />
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl flex items-center justify-center border border-slate-700/50 relative overflow-hidden flex-shrink-0">
+                          <User className="h-5 w-5 text-slate-400 group-hover:text-primary transition-colors" />
                         </div>
-                        <div>
-                          <h4 className="text-lg font-bold text-white group-hover:text-primary transition-colors">{member.name}</h4>
-                          <p className="text-slate-400 text-sm font-medium">{member.email}</p>
+                        <div className="min-w-0">
+                          <h4 className="text-sm font-bold text-white group-hover:text-primary transition-colors truncate pr-2">{member.name}</h4>
+                          <p className="text-slate-400 text-xs font-medium truncate">{member.email}</p>
                         </div>
                       </div>
-                      <Badge className={`rounded-xl px-2.5 py-0.5 border font-semibold text-[10px] uppercase tracking-wider ${getRoleBadgeColor(member.role)}`}>
+                      <Badge className={`rounded-lg px-2 py-0.5 border font-semibold text-[10px] uppercase tracking-wider flex-shrink-0 ${getRoleBadgeColor(member.role)}`}>
                         {member.role}
                       </Badge>
                     </div>
 
-                    <div className="flex items-center justify-between pt-4 border-t border-slate-800/50 mt-2">
-                      <div className="flex items-center text-xs text-slate-500">
-                        <Clock className="w-3.5 h-3.5 mr-1.5" />
-                        Joined {formatDate(member.created_at)}
+                    <div className="flex items-center justify-between pt-3 border-t border-slate-800/50">
+                      <div className="flex items-center text-[10px] text-slate-500 font-mono">
+                        <Clock className="w-3 h-3 mr-1.5" />
+                        {formatDate(member.created_at)}
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 rounded-lg text-slate-400 hover:text-primary hover:bg-primary/5"
-                        onClick={() => handleEditDepartments(member)}
-                      >
-                        Edit Workstreams
-                      </Button>
+                      {canManage && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs rounded-lg text-slate-400 hover:text-white hover:bg-white/5"
+                          onClick={() => handleEditDepartments(member)}
+                        >
+                          Edit Access
+                        </Button>
+                      )}
                     </div>
                   </Card>
                 </div>
@@ -477,20 +497,20 @@ export default function TeamManagementView() {
           <div className="flex items-center gap-2 px-1">
             <h3 className="text-xl font-bold text-white">Pending Invitations</h3>
             {invitations.length > 0 && (
-              <Badge className="bg-yellow-500/20 border-yellow-500/30 text-yellow-500 rounded-full font-mono text-xs">
+              <Badge className="bg-yellow-500/10 border-yellow-500/20 text-yellow-500 rounded-full font-mono text-xs px-2">
                 {invitations.length}
               </Badge>
             )}
           </div>
 
-          <Card className="bg-slate-900/40 border-slate-800/80 backdrop-blur-xl rounded-3xl overflow-hidden shadow-2xl min-h-[320px] flex flex-col">
-            <div className="p-1 space-y-1 flex-grow flex flex-col overflow-y-auto custom-scrollbar">
+          <Card className="bg-slate-900/40 border-slate-800/60 backdrop-blur-xl rounded-2xl overflow-hidden min-h-[200px] flex flex-col">
+            <div className="p-2 space-y-1 flex-grow flex flex-col overflow-y-auto custom-scrollbar max-h-[400px]">
               {invitations.length === 0 ? (
-                <div className="flex-grow flex flex-col items-center justify-center p-10 text-center space-y-4">
-                  <div className="w-14 h-14 bg-slate-800/30 rounded-full flex items-center justify-center mx-auto opacity-50">
-                    <Mail className="h-7 w-7 text-slate-500" />
+                <div className="flex-grow flex flex-col items-center justify-center p-8 text-center space-y-3">
+                  <div className="w-12 h-12 bg-slate-800/30 rounded-full flex items-center justify-center mx-auto opacity-50">
+                    <Mail className="h-6 w-6 text-slate-500" />
                   </div>
-                  <p className="text-slate-500 text-sm font-medium italic">No pending invites</p>
+                  <p className="text-slate-500 text-sm font-medium">No pending invites</p>
                 </div>
               ) : (
                 invitations.map((invitation, index) => {
@@ -498,23 +518,23 @@ export default function TeamManagementView() {
                   return (
                     <div
                       key={invitation.id}
-                      className="group relative p-4 rounded-[22px] hover:bg-white/5 transition-all border border-transparent hover:border-white/5"
+                      className="group relative p-3 rounded-xl hover:bg-white/5 transition-all border border-transparent hover:border-white/5"
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${expired ? 'bg-red-500/10 border-red-500/20 text-red-400' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'}`}>
-                            {expired ? <XCircle className="h-5 w-5" /> : <Mail className="h-5 w-5" />}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 border ${expired ? 'bg-red-500/10 border-red-500/20 text-red-400' : 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400'}`}>
+                            {expired ? <XCircle className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
                           </div>
-                          <div className="space-y-0.5">
-                            <h5 className="text-sm font-bold text-white truncate max-w-[140px]">{invitation.name}</h5>
-                            <p className="text-[11px] text-slate-500 font-medium truncate max-w-[140px]">{invitation.email}</p>
+                          <div className="min-w-0">
+                            <h5 className="text-sm font-bold text-white truncate">{invitation.name}</h5>
+                            <p className="text-[11px] text-slate-500 font-medium truncate">{invitation.email}</p>
                           </div>
                         </div>
-                        <div className="flex flex-col items-end gap-1.5">
-                          <Badge className={`text-[9px] px-2 py-0 border-0 rounded-full ${getStatusBadgeColor(expired ? "expired" : invitation.status)}`}>
+                        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                          <Badge className={`text-[9px] px-1.5 py-0 border-0 rounded-md ${getStatusBadgeColor(expired ? "expired" : invitation.status)}`}>
                             {expired ? "Expired" : "Pending"}
                           </Badge>
-                          <span className="text-[10px] text-slate-500 font-mono">
+                          <span className="text-[10px] text-slate-600 font-mono">
                             {expired ? "Closed" : "12h left"}
                           </span>
                         </div>
@@ -527,13 +547,13 @@ export default function TeamManagementView() {
           </Card>
 
           {/* Tips/Info Card */}
-          <div className="p-6 bg-gradient-to-br from-primary/10 to-transparent border border-primary/20 rounded-3xl space-y-3">
-            <div className="flex items-center gap-2 text-primary">
-              <Shield className="h-4 w-4" />
-              <span className="text-xs font-bold uppercase tracking-widest">Security Tip</span>
+          <div className="p-5 bg-blue-500/5 border border-blue-500/10 rounded-2xl space-y-2">
+            <div className="flex items-center gap-2 text-blue-400">
+              <Shield className="h-3.5 w-3.5" />
+              <span className="text-xs font-bold uppercase tracking-widest">Access Control</span>
             </div>
-            <p className="text-slate-400 text-sm leading-relaxed">
-              Role permissions are scoped to specific modules. Invite managers only if they need to manage other team members.
+            <p className="text-slate-400 text-xs leading-relaxed">
+              Role permissions are scoped to specific modules. Only Managers and Admins can invite net members.
             </p>
           </div>
         </div>
@@ -580,6 +600,20 @@ export default function TeamManagementView() {
                 </div>
               )}
             </div>
+
+            <div className="flex items-center space-x-2 bg-slate-800/50 p-3 rounded-xl border border-slate-700/50">
+              <Switch
+                id="full-access"
+                checked={editMemberFullAccess}
+                onCheckedChange={setEditMemberFullAccess}
+                className="data-[state=checked]:bg-green-500"
+              />
+              <div className="flex flex-col">
+                <Label htmlFor="full-access" className="text-slate-200 font-medium cursor-pointer">Full Email Access</Label>
+                <span className="text-[10px] text-slate-400">Allow user to view ALL tickets, regardless of assignment.</span>
+              </div>
+            </div>
+
             <p className="text-xs text-slate-500">Select workstreams this member can access</p>
             {error && (
               <Alert className="bg-red-500/10 border-red-500/20 rounded-xl">

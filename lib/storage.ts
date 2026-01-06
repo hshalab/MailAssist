@@ -6,30 +6,60 @@
 import crypto from 'crypto';
 import { generateEmbedding } from './embeddings';
 import { createEmailContext } from './similarity';
+import { createClient } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 import { getValidTokens } from './token-refresh';
 import { getUserProfile } from './gmail';
-import { getSessionUserEmail } from './session';
+import { getSessionUserEmail, validateBusinessSession } from './session';
 
 /**
  * Get current user's email address for data scoping
- * CRITICAL: Only uses session cookie to prevent cross-account data access
- * If session cookie is missing, returns null (don't guess from database)
+ * 1. Checks session cookie (Personal / Direct Connect)
+ * 2. If cookie missing, checks Business Session -> Fetches Business's Connected Email
  */
 export async function getCurrentUserEmail(): Promise<string | null> {
   try {
-    // CRITICAL: Only use session cookie - this is device-specific and prevents cross-account issues
-    // DO NOT fall back to database tokens as that would allow cross-account access
+    // 1. Check for Business Session (Agents/Managers/Admins in Team Mode)
+    const businessUser = await validateBusinessSession();
+
+    if (businessUser && businessUser.businessId) {
+      // Use Admin Client to bypass RLS for token lookup
+      let adminClient = supabase;
+
+      // Ensure we have a client before proceeding
+      if (!adminClient && process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+        adminClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+          auth: { persistSession: false }
+        });
+      }
+
+      if (adminClient) {
+        // Find the primary email connected to this business
+        const { data: tokenData } = await adminClient
+          .from('tokens')
+          .select('user_email')
+          .eq('business_id', businessUser.businessId)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (tokenData?.user_email) {
+          // Priority: Return the Business Connected Email (e.g. support@company.com)
+          // INSTEAD of the user's login email (e.g. agent@company.com)
+          // This ensures everyone sees the shared mailbox data
+          return tokenData.user_email;
+        }
+      }
+    }
+
+    // 2. Fallback: Session cookie (Personal / Direct Connect / No Business Token)
     const sessionEmail = await getSessionUserEmail();
     if (sessionEmail) {
       return sessionEmail;
     }
 
-    // If no session cookie, return null - don't try to guess from database
-    // This ensures each device only accesses its own account's data
     return null;
   } catch (error) {
-    // Don't log errors here - it's expected to fail if user isn't logged in
     return null;
   }
 }
@@ -596,13 +626,24 @@ export async function loadTokens(userEmail?: string | null, businessId?: string)
 /**
  * Load ALL stored OAuth tokens for a business
  */
+/* Existing code for loadBusinessTokens */
 export async function loadBusinessTokens(businessId: string | null, userEmail?: string | null): Promise<Array<{ email: string, tokens: StoredTokens }>> {
   if (!supabase || (!businessId && !userEmail)) {
+    console.log('[Storage] loadBusinessTokens: missing supabase or ids', { businessId, userEmail });
     return [];
   }
 
   try {
-    let query = supabase
+    // Bypass RLS using Service Role Key if available (for agents to read admin tokens)
+    let adminClient = supabase;
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      adminClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { persistSession: false }
+      });
+      console.log('[Storage] loadBusinessTokens: Using dedicated Service Role Client');
+    }
+
+    let query = adminClient
       .from('tokens')
       .select('*');
 
@@ -620,6 +661,14 @@ export async function loadBusinessTokens(businessId: string | null, userEmail?: 
     }
 
     const { data, error } = await query;
+
+    console.log(`[Storage] loadBusinessTokens query result:`, {
+      businessId,
+      userEmail,
+      count: data?.length,
+      error: error?.message,
+      usingAdmin: adminClient !== supabase
+    });
 
     if (error) {
       console.error('Error loading business tokens:', error);
