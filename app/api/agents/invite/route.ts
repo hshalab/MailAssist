@@ -127,11 +127,12 @@ export async function POST(request: NextRequest) {
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
     const inviteUrl = `${appUrl}/invite/${invitationToken}`
 
-    const companyName = process.env.COMPANY_NAME || 'Mail Assistant'
+    const companyName = process.env.COMPANY_NAME || 'Mail Assistant';
+    const fromEmail = process.env.EMAIL_FROM || 'onboarding@resend.dev';
 
     try {
       const resendResult = await resend.emails.send({
-        from: `${companyName} <onboarding@resend.dev>`,
+        from: `${companyName} <${fromEmail}>`,
         to: email,
         subject: `You've been invited to join ${sessionUser.businessName}`,
         html: `

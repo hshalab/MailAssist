@@ -23,9 +23,12 @@ export const sendEmail = {
 
     try {
       const companyName = process.env.COMPANY_NAME || 'Mail Assistant';
+      const fromEmail = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+
+      console.log(`[EmailService] Attempting to send OTP from: ${companyName} <${fromEmail}> to: ${to}`);
 
       const { data, error } = await resend.emails.send({
-        from: `${companyName} <onboarding@resend.dev>`,
+        from: `${companyName} <${fromEmail}>`,
         to,
         subject: `Your verification code for ${businessName}`,
         html: `
@@ -57,6 +60,8 @@ export const sendEmail = {
           </html>
         `
       });
+
+      console.log('[EmailService] Resend Response:', { data, error });
 
       if (error) {
         console.error('[EmailService] Resend API error:', error);

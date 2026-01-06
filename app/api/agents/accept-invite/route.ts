@@ -113,6 +113,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // 7.5 Assign departments if any
+    if (invitation.department_ids && Array.isArray(invitation.department_ids) && invitation.department_ids.length > 0) {
+      const departmentInserts = invitation.department_ids.map((deptId: string) => ({
+        user_id: newUser.id,
+        department_id: deptId
+      }));
+
+      const { error: deptError } = await supabase
+        .from('user_departments')
+        .insert(departmentInserts);
+
+      if (deptError) {
+        console.error('[AcceptInvite] Error assigning departments:', deptError);
+        // Don't fail the request, just log it. Admin can assign manually later.
+      } else {
+        console.log(`[AcceptInvite] Assigned ${invitation.department_ids.length} departments to user`);
+      }
+    }
+
     // 8. Generate session
     const { token: sessionToken, expiresAt } = generateSession()
 
@@ -133,7 +152,7 @@ export async function POST(request: NextRequest) {
     // 10. Update invitation status
     await supabase
       .from('agent_invitations')
-      .update({ 
+      .update({
         status: 'accepted',
         accepted_at: new Date().toISOString()
       })
