@@ -43,14 +43,15 @@ export function getSessionUserEmailFromRequest(request: NextRequest): string | n
  */
 export async function setSessionUserEmail(userEmail: string): Promise<void> {
   try {
-    // In Vercel production, all requests are HTTPS, so secure should be true
-    // Use VERCEL env var or NODE_ENV to detect production
-    const isProduction = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+    // In Vercel production, all requests are HTTPS.
+    // In self-hosted (EC2), we might be HTTP. 
+    // Only set secure=true if VERCEL is set, or if NEXT_PUBLIC_APP_URL starts with https
+    const isSecure = process.env.VERCEL === '1' || process.env.NEXT_PUBLIC_APP_URL?.startsWith('https');
 
     const cookieStore = await cookies();
     cookieStore.set(SESSION_COOKIE_NAME, userEmail, {
       httpOnly: true,
-      secure: isProduction, // true on Vercel (HTTPS), false in local dev (HTTP)
+      secure: !!isSecure, // true on Vercel (HTTPS), false in local dev (HTTP)
       sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 365, // 1 year
       path: '/',
@@ -71,11 +72,13 @@ export function setSessionUserEmailInResponse(
   try {
     // In Vercel production, all requests are HTTPS, so secure should be true
     // Use VERCEL env var or NODE_ENV to detect production
-    const isProduction = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+    // In Vercel production, all requests are HTTPS.
+    // In self-hosted (EC2), we might be HTTP. 
+    const isSecure = process.env.VERCEL === '1' || process.env.NEXT_PUBLIC_APP_URL?.startsWith('https');
 
     response.cookies.set(SESSION_COOKIE_NAME, userEmail, {
       httpOnly: true,
-      secure: isProduction, // true on Vercel (HTTPS), false in local dev (HTTP)
+      secure: !!isSecure, // true on Vercel (HTTPS), false in local dev (HTTP)
       sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 365, // 1 year
       path: '/',

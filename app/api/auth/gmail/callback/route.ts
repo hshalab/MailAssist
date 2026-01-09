@@ -209,14 +209,18 @@ export async function GET(request: NextRequest) {
       console.log('[OAuth Callback] Login successful for:', gmailEmail, 'userId:', userId, 'businessId:', businessId);
       console.log('[OAuth Callback] Session token:', sessionToken.substring(0, 8) + '...');
 
-      // Determine if we're in production (Vercel or NODE_ENV)
-      const isProduction = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+      // Determine if we should use Secure cookies (HTTPS)
+      // On Vercel (Production) it's always HTTPS.
+      // On self-hosted EC2 etc, it might be HTTP, so we verify URL scheme.
+      const isSecure = process.env.VERCEL === '1' || process.env.NEXT_PUBLIC_APP_URL?.startsWith('https');
+
+      console.log('[OAuth Callback] Secure Cookies Enabled:', !!isSecure);
 
       // Create redirect URL
       const redirectUrl = accountInfo.exists ? `${frontendUrl}/?auth=success` : `${frontendUrl}/?auth=success&newAccount=true`;
 
       // Build cookie strings manually for Set-Cookie header
-      const cookieBase = `Path=/; ${isProduction ? 'Secure; ' : ''}SameSite=Lax; Expires=${expiresAt.toUTCString()}`;
+      const cookieBase = `Path=/; ${isSecure ? 'Secure; ' : ''}SameSite=Lax; Expires=${expiresAt.toUTCString()}`;
       const sessionCookie = `session_token=${sessionToken}; HttpOnly; ${cookieBase}`;
       const userIdCookie = `current_user_id=${userId}; HttpOnly; ${cookieBase}`;
       const emailCookie = `gmail_user_email=${gmailEmail}; ${cookieBase}`;
@@ -224,7 +228,7 @@ export async function GET(request: NextRequest) {
       console.log('[OAuth Callback] Setting cookies manually:', {
         session: sessionToken.substring(0, 8) + '...',
         userId,
-        isProduction
+        isSecure
       });
 
       // Use JavaScript redirect for maximum compatibility
