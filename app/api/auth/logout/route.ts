@@ -17,8 +17,12 @@ export async function POST() {
       message: 'Logged out successfully.'
     });
 
-    // CRITICAL: Clear session cookie to prevent access to this user's data
+    // CRITICAL: Clear ALL session cookies to prevent stale data
     clearSessionInResponse(response);
+    response.cookies.delete('session_token');
+    response.cookies.delete('gmail_user_email');
+
+    console.log('[Logout] Cleared all session cookies');
 
     return response;
   } catch (error) {

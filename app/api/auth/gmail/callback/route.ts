@@ -116,8 +116,11 @@ export async function GET(request: NextRequest) {
     // MODE: LOGIN (Sign in with Google / Create Personal Account)
     // ============================================================
     if (mode === 'login') {
+      console.log('[OAuth Login] Starting login flow for:', gmailEmail);
+
       // Check if Google login is allowed for this email
       const googleLoginCheck = await canLoginWithGoogle(gmailEmail);
+      console.log('[OAuth Login] canLoginWithGoogle result:', googleLoginCheck);
 
       if (!googleLoginCheck.canLogin) {
         // Business account with password exists - redirect with error
@@ -126,6 +129,8 @@ export async function GET(request: NextRequest) {
       }
 
       const accountInfo = await getAccountInfo(gmailEmail);
+      console.log('[OAuth Login] getAccountInfo result:', accountInfo);
+
       let userId: string | undefined;
       let userName: string | undefined;
       let businessId: string | null = null;
@@ -134,6 +139,7 @@ export async function GET(request: NextRequest) {
       if (accountInfo.exists && accountInfo.userId) {
         userId = accountInfo.userId;
         businessId = accountInfo.businessId || null;
+        console.log('[OAuth Login] Found existing user - userId:', userId, 'businessId:', businessId);
 
         // Get user details
         const { data: existingUser } = await supabase
@@ -144,7 +150,7 @@ export async function GET(request: NextRequest) {
 
         if (existingUser) {
           userName = existingUser.name;
-          console.log('Found existing user:', gmailEmail, 'accountType:', accountInfo.accountType, 'businessId:', businessId);
+          console.log('[OAuth Login] User details - email:', existingUser.email, 'name:', existingUser.name, 'role:', existingUser.role);
         }
       } else {
         // Create new personal account
@@ -201,14 +207,23 @@ export async function GET(request: NextRequest) {
       const redirectUrl = accountInfo.exists ? `${frontendUrl}/?auth=success` : `${frontendUrl}/?auth=success&newAccount=true`;
       const response = NextResponse.redirect(redirectUrl);
 
-      // 4. Set Cookies
+      // Determine if we're in production (Vercel or NODE_ENV)
+      const isProduction = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+
+      // 4. Set Cookies - CRITICAL: Make sure these are set correctly for the redirect
+      console.log('[OAuth Login] Setting cookies for session:', sessionToken.substring(0, 8), 'userId:', userId, 'isProduction:', isProduction);
+
       response.cookies.set('session_token', sessionToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: isProduction,
         sameSite: 'lax',
         expires: expiresAt,
         path: '/',
+        // Don't set domain - let browser use the current domain
       });
+
+      // Also delete any old session tokens to prevent conflicts
+      response.cookies.delete('current_user_id');
 
       // Use helper to set current_user_id with proper flags
       setCurrentUserIdInResponse(response, userId!);
@@ -219,14 +234,8 @@ export async function GET(request: NextRequest) {
       // 5. Save Tokens (Linked to this user's business if they have one)
       await saveTokens(tokens, businessId || undefined);
 
-      console.log('[OAuth Callback] Login successful for:', gmailEmail, 'businessId:', businessId);
-      console.log('[OAuth Callback] Cookies set:', {
-        session_token: !!sessionToken,
-        current_user_id: userId,
-        gmail_user_email: gmailEmail,
-        env: process.env.NODE_ENV,
-        isVercel: process.env.VERCEL === '1'
-      });
+      console.log('[OAuth Callback] Login successful for:', gmailEmail, 'userId:', userId, 'businessId:', businessId);
+      console.log('[OAuth Callback] Session created at:', new Date().toISOString());
       return response;
     }
 
