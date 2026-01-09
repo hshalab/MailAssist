@@ -526,11 +526,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         url += `&account=${encodeURIComponent(selectedAccount)}`
       }
 
+      // CRITICAL: Send user ID in header from sessionStorage (per-tab) to prevent cookie sharing issues
+      // This ensures each tab uses its own user ID even when cookies are shared
+      const userIdHeader = currentUserId ? { 'x-user-id': currentUserId } : {};
+      
       const response = await fetch(url, {
         cache: "no-store",
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
+          'Pragma': 'no-cache',
+          ...userIdHeader
         }
       })
       if (!response.ok) {
@@ -573,16 +578,25 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
     }
 
+    // Ensure loading state is set before fetch
+    setLoading(true)
+    
     // OPTIMIZED: Fetch all data in parallel instead of sequentially
     // This makes initial page load much faster
-    Promise.all([
-      fetchTickets(),
-      fetchUsers(),
-      fetchTicketViews(),
-      fetchAccounts(),
-      fetchAgentDepartments(),
-      ...(currentUserId ? [fetchQuickReplies()] : [])
-    ]).catch(err => console.error('Error loading initial data:', err))
+    // Use setTimeout to ensure React has rendered the skeleton before fetch starts
+    // This is especially important in production builds
+    const timeoutId = setTimeout(() => {
+      Promise.all([
+        fetchTickets(),
+        fetchUsers(),
+        fetchTicketViews(),
+        fetchAccounts(),
+        fetchAgentDepartments(),
+        ...(currentUserId ? [fetchQuickReplies()] : [])
+      ]).catch(err => console.error('Error loading initial data:', err))
+    }, 0)
+    
+    return () => clearTimeout(timeoutId)
   }, [currentUserId, refreshKey, fetchTickets]) // currentUserRole is stable
 
   const fetchAccounts = async () => {

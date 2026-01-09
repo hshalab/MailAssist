@@ -171,13 +171,32 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     return () => clearInterval(pollInterval)
   }, [limit])
 
-  // Reset and fetch when viewType or selectedAccount changes
+  // Initial fetch on mount and when viewType or selectedAccount changes
   useEffect(() => {
+    // Ensure loading state is explicitly set to true before any async operations
+    // This is critical for production builds where hydration timing differs
+    setLoading(true)
+    onLoadingChange?.(true)
     setEmails([])
     setError(null)
     setLimit(150)
     setHasMore(true)
-    fetchEmails(150)
+    
+    // Use requestAnimationFrame + setTimeout to ensure React has fully rendered
+    // the skeleton before fetch starts. This is especially important in production.
+    let rafId: number
+    let timeoutId: NodeJS.Timeout
+    
+    rafId = requestAnimationFrame(() => {
+      timeoutId = setTimeout(() => {
+        fetchEmails(150)
+      }, 10) // Small delay to ensure skeleton renders
+    })
+    
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId)
+      if (timeoutId) clearTimeout(timeoutId)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewType, selectedAccount])
 

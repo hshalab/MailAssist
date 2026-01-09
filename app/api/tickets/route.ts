@@ -13,11 +13,15 @@ import { validateBusinessSession } from '@/lib/session';
 
 export async function GET(request: NextRequest) {
   try {
-    // Try getting userId from cookie first
-    let userId = getCurrentUserIdFromRequest(request);
+    // CRITICAL FIX: Check for userId in header first (from sessionStorage, per-tab)
+    // This prevents cookie sharing issues when multiple users are logged in on different tabs
+    const headerUserId = request.headers.get('x-user-id');
+    
+    // Try getting userId from header (per-tab), then cookie, then business session
+    let userId = headerUserId || getCurrentUserIdFromRequest(request);
     const businessSession = await validateBusinessSession();
 
-    // If no cookie, fallback to business session
+    // If no header/cookie, fallback to business session
     if (!userId && businessSession?.id) {
       userId = businessSession.id;
     }
@@ -30,6 +34,22 @@ export async function GET(request: NextRequest) {
         { error: 'Not authenticated' },
         { status: 401 }
       );
+    }
+
+    // CRITICAL: Validate that the userId from header/cookie actually belongs to the current session
+    // This prevents one user from accessing another user's tickets
+    if (businessSession && userId !== businessSession.id) {
+      // If we have a business session, verify the userId matches
+      // This ensures users can't spoof user IDs
+      const { getUserById } = await import('@/lib/users');
+      const user = await getUserById(userId);
+      if (!user || user.businessId !== businessSession.businessId) {
+        console.warn(`[Tickets API] User ID ${userId} does not belong to business ${businessSession.businessId}`);
+        return NextResponse.json(
+          { error: 'Unauthorized: User does not belong to this business' },
+          { status: 403 }
+        );
+      }
     }
 
     if (!userEmail) {

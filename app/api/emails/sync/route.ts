@@ -363,6 +363,23 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
   
   const skippedOld = inboxEmails.length - recentEmails.length;
   console.log(`[SYNC] Ticket creation summary: ${ticketsCreated} tickets created/updated, ${ticketsSkipped} skipped/failed out of ${recentEmails.length} recent emails (${skippedOld} old emails filtered out)`);
+  
+  // Trigger auto-classification after creating tickets (server-side, works in production)
+  if (ticketsCreated > 0) {
+    try {
+      console.log(`[SYNC] Triggering auto-classification for ${ticketsCreated} newly created tickets...`);
+      const { runAutoClassify } = await import('@/lib/auto-classify');
+      // Run classification in background (non-blocking)
+      runAutoClassify({ limit: Math.min(ticketsCreated, 50) }).then(result => {
+        console.log(`[SYNC] Auto-classification completed: ${result.processed} processed, ${result.success} successful, ${result.failed} failed`);
+      }).catch(err => {
+        console.error('[SYNC] Auto-classification error (non-blocking):', err);
+      });
+    } catch (error) {
+      console.error('[SYNC] Failed to trigger auto-classification:', error);
+      // Don't throw - this is non-critical
+    }
+  }
 }
 
 /**

@@ -95,12 +95,32 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
         }
 
         if (!tickets || tickets.length === 0) {
+            console.log('[Auto-Classify] No unclassified tickets found to process');
             return {
                 processed: 0,
                 success: 0,
                 failed: 0,
             };
         }
+
+        console.log(`[Auto-Classify] Found ${tickets.length} unclassified tickets to process`);
+
+        // Check if departments exist before processing
+        const { getAllDepartments } = await import('./departments');
+        const businessId = user.accountType === 'business' && user.businessId ? user.businessId : null;
+        const scopeEmail = businessId ? null : user.email;
+        const departments = await getAllDepartments(scopeEmail, businessId);
+
+        if (!departments || departments.length === 0) {
+            console.log('[Auto-Classify] No departments configured, skipping classification. User needs to create departments first.');
+            return {
+                processed: 0,
+                success: 0,
+                failed: 0,
+            };
+        }
+
+        console.log(`[Auto-Classify] Found ${departments.length} departments, proceeding with classification`);
 
         // Process concurrently
         const results = await Promise.allSettled(
