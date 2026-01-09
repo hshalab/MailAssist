@@ -215,14 +215,27 @@ export async function GET(request: NextRequest) {
       // Create redirect URL
       const redirectUrl = accountInfo.exists ? `${frontendUrl}/?auth=success` : `${frontendUrl}/?auth=success&newAccount=true`;
 
-      // CRITICAL FIX: Use HTML response with meta-refresh instead of NextResponse.redirect()
-      // This ensures cookies are properly set before the browser navigates
+      // Build cookie strings manually for Set-Cookie header
+      const cookieBase = `Path=/; ${isProduction ? 'Secure; ' : ''}SameSite=Lax; Expires=${expiresAt.toUTCString()}`;
+      const sessionCookie = `session_token=${sessionToken}; HttpOnly; ${cookieBase}`;
+      const userIdCookie = `current_user_id=${userId}; HttpOnly; ${cookieBase}`;
+      const emailCookie = `gmail_user_email=${gmailEmail}; ${cookieBase}`;
+
+      console.log('[OAuth Callback] Setting cookies manually:', {
+        session: sessionToken.substring(0, 8) + '...',
+        userId,
+        isProduction
+      });
+
+      // Use JavaScript redirect for maximum compatibility
       const html = `
         <!DOCTYPE html>
         <html>
           <head>
-            <meta http-equiv="refresh" content="0;url=${redirectUrl}">
-            <title>Redirecting...</title>
+            <title>Logging in...</title>
+            <script>
+              window.location.replace("${redirectUrl}");
+            </script>
           </head>
           <body>
             <p>Logging you in... <a href="${redirectUrl}">Click here if not redirected</a></p>
@@ -230,30 +243,19 @@ export async function GET(request: NextRequest) {
         </html>
       `;
 
+      // Create response with explicit Set-Cookie headers
+      const headers = new Headers();
+      headers.set('Content-Type', 'text/html');
+      headers.append('Set-Cookie', sessionCookie);
+      headers.append('Set-Cookie', userIdCookie);
+      headers.append('Set-Cookie', emailCookie);
+
       const response = new NextResponse(html, {
         status: 200,
-        headers: {
-          'Content-Type': 'text/html',
-        }
+        headers
       });
 
-      // Set session_token cookie with proper flags
-      const cookieOptions = {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'lax' as const,
-        expires: expiresAt,
-        path: '/',
-      };
-
-      response.cookies.set('session_token', sessionToken, cookieOptions);
-      response.cookies.set('current_user_id', userId!, cookieOptions);
-      response.cookies.set('gmail_user_email', gmailEmail, {
-        ...cookieOptions,
-        httpOnly: false, // Allow JS access for frontend
-      });
-
-      console.log('[OAuth Callback] Cookies set, redirecting to:', redirectUrl);
+      console.log('[OAuth Callback] Cookies set via headers, redirecting to:', redirectUrl);
       return response;
     }
 
