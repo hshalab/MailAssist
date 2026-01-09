@@ -194,8 +194,10 @@ export async function POST(request: NextRequest) {
     if (shouldProcessInboxEmails && inboxEmails.length > 0) {
       console.log(`[SYNC] Creating tickets from ${inboxEmails.length} inbox emails (isContinuing: ${isContinuing})...`);
       const businessId = businessSession?.businessId || null;
+      // For business accounts, use business session email; for personal accounts, use userEmail
+      const emailForClassify = businessSession?.email || userEmail || null;
       try {
-        await processInboxEmailsForTickets(inboxEmails, businessId);
+        await processInboxEmailsForTickets(inboxEmails, businessId, emailForClassify);
         console.log(`[SYNC] Finished processing inbox emails for tickets`);
       } catch (err) {
         console.error('[SYNC] Error creating tickets from inbox emails:', err);
@@ -242,9 +244,10 @@ export async function POST(request: NextRequest) {
 /**
  * Process inbox emails to create tickets (non-blocking)
  * Only creates tickets for emails that don't already have tickets
+ * Auto-classifies tickets in batches as they are created
  */
-async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: string | null): Promise<void> {
-  console.log(`[SYNC] processInboxEmailsForTickets called with ${inboxEmails.length} emails, businessId: ${businessId}`);
+async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: string | null, userEmailForClassify?: string | null): Promise<void> {
+  console.log(`[SYNC] processInboxEmailsForTickets called with ${inboxEmails.length} emails, businessId: ${businessId}, userEmail: ${userEmailForClassify}`);
   
   // Filter emails by date - only process emails from the last 30-60 days
   // This prevents creating tickets for very old emails that are likely already resolved
@@ -299,9 +302,39 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
   let ticketsUpdated = 0;
   let ticketsSkipped = 0;
   
+  // Get businessId and userEmail for auto-classify (needed for each batch)
+  const businessIdForClassify = businessId || null;
+  let emailForAutoClassify: string | null = userEmailForClassify || null;
+  
+  // If no email provided, try to get it from current user context
+  if (!emailForAutoClassify) {
+    try {
+      emailForAutoClassify = await getCurrentUserEmail();
+    } catch (err) {
+      console.warn('[SYNC] Could not get user email for auto-classify:', err);
+    }
+  }
+  
+  // For business accounts, try to get email from business session if still not available
+  if (!emailForAutoClassify && businessId) {
+    const { validateBusinessSession } = await import('@/lib/session');
+    const session = await validateBusinessSession();
+    if (session) {
+      emailForAutoClassify = session.email;
+    }
+  }
+  
+  if (!emailForAutoClassify) {
+    console.warn('[SYNC] No user email available for auto-classify, skipping classification');
+  } else {
+    console.log(`[SYNC] Auto-classify will use email: ${emailForAutoClassify} (businessId: ${businessIdForClassify || 'personal'})`);
+  }
+  
   for (let i = 0; i < recentEmails.length; i += BATCH_SIZE) {
     const batch = recentEmails.slice(i, i + BATCH_SIZE);
-    console.log(`[SYNC] Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(inboxEmails.length / BATCH_SIZE)} (${batch.length} emails)`);
+    const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(recentEmails.length / BATCH_SIZE);
+    console.log(`[SYNC] Processing batch ${batchNumber}/${totalBatches} (${batch.length} emails)`);
     
     // Process batch in parallel
     const results = await Promise.allSettled(
@@ -353,7 +386,30 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
     ticketsCreated += successful;
     ticketsSkipped += failed;
     
-    console.log(`[SYNC] Batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(recentEmails.length / BATCH_SIZE)}: ${successful} tickets created/updated, ${failed} skipped/failed`);
+    console.log(`[SYNC] Batch ${batchNumber}/${totalBatches}: ${successful} tickets created/updated, ${failed} skipped/failed`);
+    
+    // Trigger auto-classification after each batch (runs during sync, works in production)
+    if (successful > 0) {
+      try {
+        console.log(`[SYNC] Triggering auto-classification for batch ${batchNumber} (${successful} new tickets)...`);
+        const { runAutoClassify } = await import('@/lib/auto-classify');
+        
+        // Run classification synchronously (await it) so it happens during sync
+        // This ensures tickets are classified as they're created, not just at the end
+        // Works for both business and personal accounts
+        const classifyResult = await runAutoClassify({ 
+          limit: Math.min(successful, 30), // Smaller batch size per sync batch
+          businessId: businessIdForClassify,
+          userEmail: emailForAutoClassify
+        });
+        
+        console.log(`[SYNC] Batch ${batchNumber} auto-classification completed: ${classifyResult.processed} processed, ${classifyResult.success} successful, ${classifyResult.failed} failed`);
+      } catch (error) {
+        console.error(`[SYNC] Auto-classification error for batch ${batchNumber} (non-blocking):`, error);
+        console.error(`[SYNC] Auto-classification error details:`, error instanceof Error ? error.stack : error);
+        // Don't throw - continue processing batches even if classification fails
+      }
+    }
     
     // Small delay between batches to avoid rate limits
     if (i + BATCH_SIZE < recentEmails.length) {
@@ -363,33 +419,6 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
   
   const skippedOld = inboxEmails.length - recentEmails.length;
   console.log(`[SYNC] Ticket creation summary: ${ticketsCreated} tickets created/updated, ${ticketsSkipped} skipped/failed out of ${recentEmails.length} recent emails (${skippedOld} old emails filtered out)`);
-  
-  // Trigger auto-classification after creating tickets (server-side, works in production)
-  if (ticketsCreated > 0) {
-    try {
-      console.log(`[SYNC] Triggering auto-classification for ${ticketsCreated} newly created tickets...`);
-      const { runAutoClassify } = await import('@/lib/auto-classify');
-      // Run classification in background (non-blocking) with explicit businessId/userEmail
-      // This ensures it works in serverless contexts where getCurrentUser() might fail
-      const businessId = businessSession?.businessId || null;
-      const userEmailForClassify = userEmail || businessSession?.email || null;
-      
-      runAutoClassify({ 
-        limit: Math.min(ticketsCreated, 50),
-        businessId: businessId,
-        userEmail: userEmailForClassify
-      }).then(result => {
-        console.log(`[SYNC] Auto-classification completed: ${result.processed} processed, ${result.success} successful, ${result.failed} failed`);
-      }).catch(err => {
-        console.error('[SYNC] Auto-classification error (non-blocking):', err);
-        console.error('[SYNC] Auto-classification error details:', err instanceof Error ? err.stack : err);
-      });
-    } catch (error) {
-      console.error('[SYNC] Failed to trigger auto-classification:', error);
-      console.error('[SYNC] Failed to trigger auto-classification details:', error instanceof Error ? error.stack : error);
-      // Don't throw - this is non-critical
-    }
-  }
 }
 
 /**
