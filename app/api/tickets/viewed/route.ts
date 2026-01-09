@@ -5,14 +5,7 @@ import { getTicketViewsForUser } from "@/lib/ticket-views"
 
 export async function GET(request: NextRequest) {
   try {
-    // Try getting userId from cookie first, then fallback to business session
-    let userId = getCurrentUserIdFromRequest(request)
-    if (!userId) {
-      const { validateBusinessSession } = await import('@/lib/session')
-      const businessSession = await validateBusinessSession()
-      userId = businessSession?.id || null
-    }
-
+    const userId = getCurrentUserIdFromRequest(request)
     if (!userId) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
     }

@@ -7,6 +7,7 @@
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { getCookieOptions, getClientCookieOptions } from '@/lib/cookie-config';
 
 const SESSION_COOKIE_NAME = 'gmail_user_email';
 const CURRENT_USER_ID_COOKIE_NAME = 'current_user_id';
@@ -43,19 +44,11 @@ export function getSessionUserEmailFromRequest(request: NextRequest): string | n
  */
 export async function setSessionUserEmail(userEmail: string): Promise<void> {
   try {
-    // In Vercel production, all requests are HTTPS.
-    // In self-hosted (EC2), we might be HTTP. 
-    // Only set secure=true if VERCEL is set, or if NEXT_PUBLIC_APP_URL starts with https
-    const isSecure = process.env.VERCEL === '1' || process.env.NEXT_PUBLIC_APP_URL?.startsWith('https');
-
     const cookieStore = await cookies();
-    cookieStore.set(SESSION_COOKIE_NAME, userEmail, {
+    cookieStore.set(SESSION_COOKIE_NAME, userEmail, getCookieOptions({
       httpOnly: true,
-      secure: !!isSecure, // true on Vercel (HTTPS), false in local dev (HTTP)
-      sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 365, // 1 year
-      path: '/',
-    });
+    }));
   } catch (error) {
     console.error('Error setting session cookie:', error);
   }
@@ -70,19 +63,10 @@ export function setSessionUserEmailInResponse(
   userEmail: string
 ): NextResponse {
   try {
-    // In Vercel production, all requests are HTTPS, so secure should be true
-    // Use VERCEL env var or NODE_ENV to detect production
-    // In Vercel production, all requests are HTTPS.
-    // In self-hosted (EC2), we might be HTTP. 
-    const isSecure = process.env.VERCEL === '1' || process.env.NEXT_PUBLIC_APP_URL?.startsWith('https');
-
-    response.cookies.set(SESSION_COOKIE_NAME, userEmail, {
+    response.cookies.set(SESSION_COOKIE_NAME, userEmail, getCookieOptions({
       httpOnly: true,
-      secure: !!isSecure, // true on Vercel (HTTPS), false in local dev (HTTP)
-      sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 365, // 1 year
-      path: '/',
-    });
+    }));
   } catch (error) {
     console.error('Error setting session cookie in response:', error);
   }
@@ -145,13 +129,9 @@ export function getCurrentUserIdFromRequest(request: NextRequest): string | null
 export async function setCurrentUserId(userId: string): Promise<void> {
   try {
     const cookieStore = await cookies();
-    cookieStore.set(CURRENT_USER_ID_COOKIE_NAME, userId, {
-      httpOnly: true,
-      secure: process.env.VERCEL === '1' || process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+    cookieStore.set(CURRENT_USER_ID_COOKIE_NAME, userId, getClientCookieOptions({
       maxAge: 60 * 60 * 24 * 365, // 1 year
-      path: '/',
-    });
+    }));
   } catch (error) {
     console.error('Error setting current user ID cookie:', error);
   }
@@ -165,14 +145,9 @@ export function setCurrentUserIdInResponse(
   userId: string
 ): NextResponse {
   try {
-    const isProduction = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
-    response.cookies.set(CURRENT_USER_ID_COOKIE_NAME, userId, {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'lax',
+    response.cookies.set(CURRENT_USER_ID_COOKIE_NAME, userId, getClientCookieOptions({
       maxAge: 60 * 60 * 24 * 365, // 1 year
-      path: '/',
-    });
+    }));
   } catch (error) {
     console.error('Error setting current user ID in response:', error);
   }

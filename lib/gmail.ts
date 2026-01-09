@@ -209,11 +209,13 @@ export async function fetchInboxEmails(
   // Only fetch full body if explicitly needed
   const format = includeBody ? 'full' : 'metadata';
 
-  // OPTIMIZED: Batch fetch messages with controlled concurrency
-  // Gmail API has rate limits, so we batch requests to avoid hitting limits
-  const BATCH_SIZE = 10; // Process 10 emails at a time
+  // OPTIMIZED: Fetch messages with controlled concurrency
+  // Gmail API allows ~50 requests/second per user, so we use larger batches
+  // with concurrent processing to maximize throughput while respecting rate limits
+  const BATCH_SIZE = 30; // Process 30 emails at a time (increased from 10 for faster loading)
   const emailDetails: any[] = [];
 
+  // Process messages in larger batches with Promise.all for maximum concurrency
   for (let i = 0; i < messages.length; i += BATCH_SIZE) {
     const batch = messages.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.all(
@@ -232,7 +234,7 @@ export async function fetchInboxEmails(
       })
     );
 
-    // Filter out null results from failed fetches
+    // Filter out null results from failed fetches and add to results
     emailDetails.push(...batchResults.filter((email) => email !== null));
   }
 
@@ -267,11 +269,13 @@ export async function fetchSentEmails(
   // Only fetch full body if explicitly needed (e.g., for embeddings)
   const format = includeBody ? 'full' : 'metadata';
 
-  // OPTIMIZED: Batch fetch messages with controlled concurrency
-  // Gmail API has rate limits, so we batch requests to avoid hitting limits
-  const BATCH_SIZE = 10; // Process 10 emails at a time
+  // OPTIMIZED: Fetch messages with controlled concurrency
+  // Gmail API allows ~50 requests/second per user, so we use larger batches
+  // with concurrent processing to maximize throughput while respecting rate limits
+  const BATCH_SIZE = 30; // Process 30 emails at a time (increased from 10 for faster loading)
   const emailDetails: any[] = [];
 
+  // Process messages in larger batches with Promise.all for maximum concurrency
   for (let i = 0; i < messages.length; i += BATCH_SIZE) {
     const batch = messages.slice(i, i + BATCH_SIZE);
     const batchResults = await Promise.all(
@@ -290,7 +294,7 @@ export async function fetchSentEmails(
       })
     );
 
-    // Filter out null results from failed fetches
+    // Filter out null results from failed fetches and add to results
     emailDetails.push(...batchResults.filter((email) => email !== null));
   }
 

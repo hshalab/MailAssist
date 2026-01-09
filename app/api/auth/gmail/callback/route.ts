@@ -116,11 +116,8 @@ export async function GET(request: NextRequest) {
     // MODE: LOGIN (Sign in with Google / Create Personal Account)
     // ============================================================
     if (mode === 'login') {
-      console.log('[OAuth Login] Starting login flow for:', gmailEmail);
-
       // Check if Google login is allowed for this email
       const googleLoginCheck = await canLoginWithGoogle(gmailEmail);
-      console.log('[OAuth Login] canLoginWithGoogle result:', googleLoginCheck);
 
       if (!googleLoginCheck.canLogin) {
         // Business account with password exists - redirect with error
@@ -129,8 +126,6 @@ export async function GET(request: NextRequest) {
       }
 
       const accountInfo = await getAccountInfo(gmailEmail);
-      console.log('[OAuth Login] getAccountInfo result:', accountInfo);
-
       let userId: string | undefined;
       let userName: string | undefined;
       let businessId: string | null = null;
@@ -139,7 +134,6 @@ export async function GET(request: NextRequest) {
       if (accountInfo.exists && accountInfo.userId) {
         userId = accountInfo.userId;
         businessId = accountInfo.businessId || null;
-        console.log('[OAuth Login] Found existing user - userId:', userId, 'businessId:', businessId);
 
         // Get user details
         const { data: existingUser } = await supabase
@@ -150,7 +144,7 @@ export async function GET(request: NextRequest) {
 
         if (existingUser) {
           userName = existingUser.name;
-          console.log('[OAuth Login] User details - email:', existingUser.email, 'name:', existingUser.name, 'role:', existingUser.role);
+          console.log('Found existing user:', gmailEmail, 'accountType:', accountInfo.accountType, 'businessId:', businessId);
         }
       } else {
         // Create new personal account
@@ -203,63 +197,34 @@ export async function GET(request: NextRequest) {
         throw new Error(`Failed to create session: ${sessionError.message}`);
       }
 
+      // Create redirect response
+      const redirectUrl = accountInfo.exists ? `${frontendUrl}/?auth=success` : `${frontendUrl}/?auth=success&newAccount=true`;
+      const response = NextResponse.redirect(redirectUrl);
+
+      // 4. Set Cookies
+      const { getCookieOptions } = await import('@/lib/cookie-config')
+      response.cookies.set('session_token', sessionToken, getCookieOptions({
+        httpOnly: true,
+        expires: expiresAt,
+      }));
+
+      // Use helper to set current_user_id with proper flags
+      setCurrentUserIdInResponse(response, userId!);
+
+      // Set gmail_user_email cookie for session management
+      setSessionUserEmailInResponse(response, gmailEmail);
+
       // 5. Save Tokens (Linked to this user's business if they have one)
       await saveTokens(tokens, businessId || undefined);
 
-      console.log('[OAuth Callback] Login successful for:', gmailEmail, 'userId:', userId, 'businessId:', businessId);
-      console.log('[OAuth Callback] Session token:', sessionToken.substring(0, 8) + '...');
-
-      // Determine if we should use Secure cookies (HTTPS)
-      // On Vercel (Production) it's always HTTPS.
-      // On self-hosted EC2 etc, it might be HTTP, so we verify URL scheme.
-      const isSecure = process.env.VERCEL === '1' || process.env.NEXT_PUBLIC_APP_URL?.startsWith('https');
-
-      console.log('[OAuth Callback] Secure Cookies Enabled:', !!isSecure);
-
-      // Create redirect URL
-      const redirectUrl = accountInfo.exists ? `${frontendUrl}/?auth=success` : `${frontendUrl}/?auth=success&newAccount=true`;
-
-      // Build cookie strings manually for Set-Cookie header
-      const cookieBase = `Path=/; ${isSecure ? 'Secure; ' : ''}SameSite=Lax; Expires=${expiresAt.toUTCString()}`;
-      const sessionCookie = `session_token=${sessionToken}; HttpOnly; ${cookieBase}`;
-      const userIdCookie = `current_user_id=${userId}; HttpOnly; ${cookieBase}`;
-      const emailCookie = `gmail_user_email=${gmailEmail}; ${cookieBase}`;
-
-      console.log('[OAuth Callback] Setting cookies manually:', {
-        session: sessionToken.substring(0, 8) + '...',
-        userId,
-        isSecure
+      console.log('[OAuth Callback] Login successful for:', gmailEmail, 'businessId:', businessId);
+      console.log('[OAuth Callback] Cookies set:', {
+        session_token: !!sessionToken,
+        current_user_id: userId,
+        gmail_user_email: gmailEmail,
+        env: process.env.NODE_ENV,
+        isVercel: process.env.VERCEL === '1'
       });
-
-      // Use JavaScript redirect for maximum compatibility
-      const html = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Logging in...</title>
-            <script>
-              window.location.replace("${redirectUrl}");
-            </script>
-          </head>
-          <body>
-            <p>Logging you in... <a href="${redirectUrl}">Click here if not redirected</a></p>
-          </body>
-        </html>
-      `;
-
-      // Create response with explicit Set-Cookie headers
-      const headers = new Headers();
-      headers.set('Content-Type', 'text/html');
-      headers.append('Set-Cookie', sessionCookie);
-      headers.append('Set-Cookie', userIdCookie);
-      headers.append('Set-Cookie', emailCookie);
-
-      const response = new NextResponse(html, {
-        status: 200,
-        headers
-      });
-
-      console.log('[OAuth Callback] Cookies set via headers, redirecting to:', redirectUrl);
       return response;
     }
 

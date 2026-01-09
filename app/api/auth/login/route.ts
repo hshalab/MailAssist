@@ -202,34 +202,26 @@ export async function POST(req: NextRequest) {
 
     // 8. Set session cookies
     const cookieStore = await cookies()
+    const { getCookieOptions, getClientCookieOptions } = await import('@/lib/cookie-config')
+    const cookieMaxAge = 30 * 24 * 60 * 60 // 30 days
 
     // Set session token
-    cookieStore.set('session_token', sessionToken, {
+    cookieStore.set('session_token', sessionToken, getCookieOptions({
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60, // 30 days
-      path: '/',
-    })
+      maxAge: cookieMaxAge,
+    }))
 
     // Set current_user_id (CRITICAL: Must match CURRENT_USER_ID_COOKIE_NAME in lib/session.ts)
-    cookieStore.set('current_user_id', targetUser.id, {
-      httpOnly: false, // Accessible to client-side
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60,
-      path: '/',
-    })
+    cookieStore.set('current_user_id', targetUser.id, getClientCookieOptions({
+      maxAge: cookieMaxAge,
+    }))
 
     // Set gmail_user_email (CRITICAL: Must match SESSION_COOKIE_NAME in lib/session.ts)
     // This is required for getSessionUserEmailFromRequest to work
-    cookieStore.set('gmail_user_email', targetUser.email || targetUser.user_email, {
+    cookieStore.set('gmail_user_email', targetUser.email || targetUser.user_email, getCookieOptions({
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60,
-      path: '/',
-    })
+      maxAge: cookieMaxAge,
+    }))
 
     // 9. Return success
     return NextResponse.json({

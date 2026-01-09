@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDepartmentById, updateDepartment, deleteDepartment } from '@/lib/departments';
 import { getCurrentUser } from '@/lib/session';
+import { runAutoClassify } from '@/lib/auto-classify';
 
 export async function GET(
     request: NextRequest,
@@ -127,6 +128,12 @@ export async function PATCH(
                 { status: 500 }
             );
         }
+
+        // Trigger auto-classification for unclassified emails (non-blocking)
+        // This helps re-classify tickets with updated department descriptions
+        runAutoClassify({ limit: 50 }).catch(err => {
+            console.warn('[Department] Failed to trigger auto-classification after department update:', err);
+        });
 
         return NextResponse.json({
             success: true,

@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAllDepartments, createDepartment } from '@/lib/departments';
 import { getCurrentUser } from '@/lib/session';
 import { getSessionUserEmailFromRequest } from '@/lib/session';
+import { runAutoClassify } from '@/lib/auto-classify';
 
 export async function GET(request: NextRequest) {
     try {
@@ -101,6 +102,12 @@ export async function POST(request: NextRequest) {
                 { status: 500 }
             );
         }
+
+        // Trigger auto-classification for unclassified emails (non-blocking)
+        // This helps classify existing unclassified tickets with the new department
+        runAutoClassify({ limit: 50 }).catch(err => {
+            console.warn('[Department] Failed to trigger auto-classification after department creation:', err);
+        });
 
         return NextResponse.json({
             success: true,

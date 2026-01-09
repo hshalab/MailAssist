@@ -24,10 +24,10 @@ export async function GET(request: NextRequest) {
 
     // Safely parse maxResults to avoid NaN/invalid values (e.g., "[object Object]")
     const maxResultsRaw = searchParams.get('maxResults');
-    const parsedMax = maxResultsRaw ? Number(maxResultsRaw) : 50;
+    const parsedMax = maxResultsRaw ? Number(maxResultsRaw) : 150;
     const maxResults = Number.isFinite(parsedMax)
-      ? Math.min(Math.max(parsedMax, 1), 200) // clamp between 1 and 200 to protect API usage
-      : 50;
+      ? Math.min(Math.max(parsedMax, 1), 300) // clamp between 1 and 300 for faster initial load
+      : 150;
 
     let emails;
 

@@ -37,16 +37,14 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [limit, setLimit] = useState(100) // Start with 100 emails
+  const [limit, setLimit] = useState(150) // Start with 150 emails for better coverage and faster initial load
   const [hasMore, setHasMore] = useState(true)
   const [showImapForm, setShowImapForm] = useState(false)
   const listContainerRef = useRef<HTMLDivElement>(null)
 
-  // Client-side cache for email details
+  // Client-side cache for email details to make clicking instant
   const emailCacheRef = useRef<Map<string, any>>(new Map())
   const prefetchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  const [retryCount, setRetryCount] = useState(0)
-  const MAX_RETRIES = 3
 
   const fetchEmails = async (newLimit = limit, isLoadMore = false, silent = false) => {
     try {
@@ -63,10 +61,13 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       if (viewType === "sent") {
         url = `/api/emails?type=sent&maxResults=${newLimit}`
       } else if (viewType === "spam") {
+        // Use Gmail search query to only retrieve spam (in:spam is the standard Gmail syntax)
         url = `/api/emails?type=inbox&maxResults=${newLimit}&q=in:spam`
       } else if (viewType === "trash") {
+        // Use Gmail search query to only retrieve trash (in:trash is the standard Gmail syntax)
         url = `/api/emails?type=inbox&maxResults=${newLimit}&q=in:trash`
       } else {
+        // default inbox view; backend already filters out SPAM/TRASH when creating tickets
         url = `/api/emails?type=inbox&maxResults=${newLimit}`
       }
 
@@ -75,6 +76,10 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
         url += `&account=${encodeURIComponent(selectedAccount)}`
       }
 
+      // Cache strategy:
+      // - Initial loads: Use 'no-cache' to revalidate with server (can use stale-while-revalidate)
+      // - Load more: Use 'default' to leverage browser cache for faster pagination
+      // The API response includes Cache-Control headers (30s cache, 60s stale-while-revalidate)
       const response = await fetch(url, {
         cache: isLoadMore ? 'default' : 'no-cache'
       })
@@ -88,20 +93,16 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       }
 
       const data = await response.json()
-      const fetchedEmails = data.emails || []
-
-      if (fetchedEmails.length > 0) {
-        setRetryCount(MAX_RETRIES + 1) // Stop retrying if we found emails
-      }
-
-      setEmails(fetchedEmails)
+      setEmails(data.emails || [])
       setLimit(newLimit)
-      setHasMore(Array.isArray(fetchedEmails) && fetchedEmails.length >= newLimit)
+      // If we received at least as many as we asked for, assume there might be more
+      setHasMore(Array.isArray(data.emails) && data.emails.length >= newLimit)
 
       // PERFORMANCE: Prefetch the first 3 emails for instant loading
-      if (!isLoadMore && fetchedEmails.length > 0) {
-        const topEmails = fetchedEmails.slice(0, 3)
+      if (!isLoadMore && data.emails?.length > 0) {
+        const topEmails = data.emails.slice(0, 3)
         topEmails.forEach((email: Email, idx: number) => {
+          // Stagger prefetch slightly to avoid overwhelming the API
           setTimeout(() => prefetchEmailDetails(email.id), idx * 100)
         })
       }
@@ -116,19 +117,6 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       }
     }
   }
-
-  // Retry logic for empty Inbox
-  useEffect(() => {
-    // Only retry for Inbox view, if empty, not loading, no error, and retries remaining
-    if (viewType === 'inbox' && !loading && emails.length === 0 && !error && retryCount < MAX_RETRIES) {
-      const timeout = setTimeout(() => {
-        console.log(`[EmailList] Empty list, retrying fetch (${retryCount + 1}/${MAX_RETRIES})...`);
-        setRetryCount(prev => prev + 1);
-        fetchEmails(limit, false, true); // Silent fetch
-      }, 2000); // Wait 2s
-      return () => clearTimeout(timeout);
-    }
-  }, [emails.length, loading, error, retryCount, viewType, limit]);
 
   // Prefetch email details for instant loading when clicked
   const prefetchEmailDetails = async (emailId: string) => {
@@ -187,9 +175,9 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   useEffect(() => {
     setEmails([])
     setError(null)
-    setLimit(100)
+    setLimit(150)
     setHasMore(true)
-    fetchEmails(100)
+    fetchEmails(150)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewType, selectedAccount])
 

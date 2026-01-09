@@ -21,20 +21,31 @@ export async function GET(request: NextRequest) {
 
     const supabase = createServerClient()
 
-    // Get all users in the same business
-    // If no business ID, just return the current user (personal account mode)
-    if (!sessionUser.businessId) {
+    // For personal accounts (businessId is null), return only the current user
+    // For business accounts, return all users in the same business
+    if (!sessionUser.businessId || sessionUser.accountType === 'personal') {
+      // Personal account - return only the current user
+      const { data: currentUser, error } = await supabase
+        .from('users')
+        .select('id, name, email, role, created_at')
+        .eq('id', sessionUser.id)
+        .single()
+
+      if (error) {
+        console.error('[ListAgents] Error fetching current user:', error)
+        return NextResponse.json(
+          { error: 'Failed to load user information' },
+          { status: 500 }
+        )
+      }
+
       return NextResponse.json({
         success: true,
-        members: [{
-          id: sessionUser.id,
-          name: sessionUser.name,
-          email: sessionUser.email,
-          role: sessionUser.role,
-        }],
+        members: currentUser ? [currentUser] : [],
       })
     }
 
+    // Business account - get all users in the same business
     const { data: members, error } = await supabase
       .from('users')
       .select('id, name, email, role, created_at')

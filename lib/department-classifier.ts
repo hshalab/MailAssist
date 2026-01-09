@@ -19,7 +19,7 @@ export interface ClassificationResult {
     departmentName?: string;
 }
 
-const CONFIDENCE_THRESHOLD = 40; // Minimum confidence to auto-assign (increased to 40% as requested)
+const CONFIDENCE_THRESHOLD = 30; // Minimum confidence to auto-assign (lowered to 30% to catch more emails)
 
 /**
  * Classify an email to the most appropriate department using AI

@@ -24,6 +24,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Check if this is a personal account (businessId is null)
+    if (!sessionUser.businessId || sessionUser.accountType === 'personal') {
+      return NextResponse.json(
+        { error: 'Team member invitations are only available for business accounts. Please upgrade to a business plan to invite team members.' },
+        { status: 403 }
+      )
+    }
+
     if (sessionUser.role !== 'admin' && sessionUser.role !== 'manager') {
       return NextResponse.json(
         { error: 'Only admins and managers can invite agents' },
@@ -31,17 +39,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // NEW: Prevent personal accounts from inviting members
-    if (!sessionUser.businessId) {
-      return NextResponse.json(
-        { error: 'Personal accounts or accounts without a business profile cannot invite team members.' },
-        { status: 403 }
-      )
-    }
-
     // 2. Parse request body
     const body = await request.json()
-    const { name, email, role = 'agent', departmentIds = [] } = body
+    const { name, email, role = 'agent', departmentIds = [], hasFullAccess = false } = body
 
     if (!name || !email) {
       return NextResponse.json(
@@ -118,7 +118,8 @@ export async function POST(request: NextRequest) {
         token: invitationToken, // for backward compatibility
         status: 'pending',
         expires_at: expiresAt.toISOString(),
-        department_ids: departmentIds, // Store department IDs for assignment after acceptance
+        department_ids: hasFullAccess ? [] : departmentIds, // Store department IDs (empty if full access)
+        has_full_access: hasFullAccess, // Store full access flag
       })
       .select()
       .single()

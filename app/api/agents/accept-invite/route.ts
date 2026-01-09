@@ -113,8 +113,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 7.5 Assign departments if any
-    if (invitation.department_ids && Array.isArray(invitation.department_ids) && invitation.department_ids.length > 0) {
+    // 7.5 Assign departments or full access
+    if (invitation.has_full_access) {
+      // User has full access - no department restrictions
+      console.log('[AcceptInvite] User granted full access to all emails');
+    } else if (invitation.department_ids && Array.isArray(invitation.department_ids) && invitation.department_ids.length > 0) {
+      // Assign specific departments
       const departmentInserts = invitation.department_ids.map((deptId: string) => ({
         user_id: newUser.id,
         department_id: deptId
@@ -160,29 +164,21 @@ export async function POST(request: NextRequest) {
 
     // 11. Set session cookies
     const cookieStore = await cookies()
-    cookieStore.set('session_token', sessionToken, {
+    const { getCookieOptions, getClientCookieOptions } = await import('@/lib/cookie-config')
+    const cookieMaxAge = 30 * 24 * 60 * 60 // 30 days
+
+    cookieStore.set('session_token', sessionToken, getCookieOptions({
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60, // 30 days
-      path: '/',
-    })
+      maxAge: cookieMaxAge,
+    }))
 
-    cookieStore.set('user_id', newUser.id, {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60,
-      path: '/',
-    })
+    cookieStore.set('user_id', newUser.id, getClientCookieOptions({
+      maxAge: cookieMaxAge,
+    }))
 
-    cookieStore.set('current_user_id', newUser.id, {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60,
-      path: '/',
-    })
+    cookieStore.set('current_user_id', newUser.id, getClientCookieOptions({
+      maxAge: cookieMaxAge,
+    }))
 
     console.log('[AcceptInvite] User created and session established')
 

@@ -99,6 +99,7 @@ function PageContent() {
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('trigger_sync_after_connect', 'true')
           sessionStorage.setItem('trigger_backfill_after_sync', 'true')
+          sessionStorage.setItem('trigger_backfill_on_connect', 'true') // Also trigger immediately after connection
         }
       }
 
@@ -125,6 +126,7 @@ function PageContent() {
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('trigger_sync_after_connect', 'true')
         sessionStorage.setItem('trigger_backfill_after_sync', 'true')
+        sessionStorage.setItem('trigger_backfill_on_connect', 'true') // Also trigger immediately after connection
       }
       window.history.replaceState({}, "", window.location.pathname)
       return
@@ -376,44 +378,57 @@ function PageContent() {
   }, [isConnected])
 
   const startSync = useCallback(
-    async (maxResults = 300) => {
+    async (maxResults = 300, silent = false) => {
       if (!isConnected) throw new Error("Connect Gmail first to sync emails.")
-      setSyncError(null)
-      setHideSyncToast(false)
+      
+      // Only update UI state if not silent mode
+      if (!silent) {
+        setSyncError(null)
+        setHideSyncToast(false)
+      }
 
       const response = await fetch(`/api/emails/sync?maxResults=${maxResults}`, { method: "POST" })
       const data = await response.json().catch(() => ({}))
 
       if (response.status === 202 && data?.processing) {
-        setSyncInProgress(true)
-        setSyncTarget(data.queued ?? syncTarget ?? maxResults)
-        setSyncBaseline(syncStatus?.sentWithEmbeddings ?? 0)
+        if (!silent) {
+          setSyncInProgress(true)
+          setSyncTarget(data.queued ?? syncTarget ?? maxResults)
+          setSyncBaseline(syncStatus?.sentWithEmbeddings ?? 0)
+        }
         return
       }
 
       if (!response.ok) {
         const message = data?.error || "Failed to start sync"
-        setSyncInProgress(false)
-        setSyncTarget(null)
-        setSyncBaseline(0)
-        setSyncError(message)
+        if (!silent) {
+          setSyncInProgress(false)
+          setSyncTarget(null)
+          setSyncBaseline(0)
+          setSyncError(message)
+        }
         throw new Error(message)
       }
 
       const baseline = syncStatus?.sentWithEmbeddings ?? 0
-      setSyncBaseline(baseline)
-      setSyncTarget(data?.queued ?? maxResults)
-      setSyncInProgress(true)
+      if (!silent) {
+        setSyncBaseline(baseline)
+        setSyncTarget(data?.queued ?? maxResults)
+        setSyncInProgress(true)
+      }
       await fetchSyncStatus()
 
       if (data?.continue) {
         setSyncContinueCount(prev => prev + 1)
         setTimeout(() => {
-          startSync(maxResults)
+          startSync(maxResults, silent)
         }, 1000)
       } else if (!data?.continue) {
         // Reset counter when sync completes
         setSyncContinueCount(0)
+        if (!silent) {
+          setSyncInProgress(false)
+        }
       }
     },
     [isConnected, syncStatus, fetchSyncStatus, syncTarget]
@@ -481,6 +496,27 @@ function PageContent() {
       })
     }
   }, [isConnected, syncStatus?.processing, syncInProgress, startSync])
+
+  // Automatic background sync - runs every 5 minutes when connected
+  useEffect(() => {
+    if (!isConnected) return
+
+    const backgroundSyncInterval = setInterval(() => {
+      // Only sync if not already syncing (check both UI state and server state)
+      if (!syncInProgress && !syncStatus?.processing) {
+        console.log('[Background Sync] Starting automatic background sync...')
+        // Use silent sync (smaller batch, doesn't show UI updates)
+        startSync(100, true).catch(err => {
+          console.error('[Background Sync] Failed:', err)
+          // Don't show error to user for background syncs
+        })
+      } else {
+        console.log('[Background Sync] Skipping - sync already in progress')
+      }
+    }, 5 * 60 * 1000) // Every 5 minutes
+
+    return () => clearInterval(backgroundSyncInterval)
+  }, [isConnected, syncInProgress, syncStatus?.processing, startSync])
 
   const checkAuthStatus = async () => {
     try {
@@ -767,6 +803,91 @@ function PageContent() {
     }
   }, [isSyncComplete, activeView])
 
+  // NEW: Trigger auto-classification immediately when Gmail is first connected
+  useEffect(() => {
+    if (!isConnected || typeof window === 'undefined') return
+
+    const shouldTriggerOnConnect = sessionStorage.getItem('trigger_backfill_on_connect')
+    if (shouldTriggerOnConnect === 'true') {
+      sessionStorage.removeItem('trigger_backfill_on_connect')
+      
+      // Wait a bit for initial sync to create some tickets, then classify
+      console.log('[Auto-Classify] Gmail connected, scheduling initial auto-classification...')
+      const timeoutId = setTimeout(async () => {
+        try {
+          console.log('[Auto-Classify] Running initial auto-classification after Gmail connection...')
+          const response = await fetch('/api/departments/backfill', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ limit: 50 }) // Larger batch for initial connection
+          })
+          
+          if (response.ok) {
+            const data = await response.json()
+            console.log('[Auto-Classify] Initial classification result:', data)
+            
+            // Refresh tickets view if we're on that screen
+            if (activeView === 'tickets') {
+              setTicketsVersion(v => v + 1)
+            }
+          } else {
+            console.warn('[Auto-Classify] Initial classification failed:', await response.text())
+          }
+        } catch (error) {
+          console.error('[Auto-Classify] Initial classification error:', error)
+        }
+      }, 2 * 60 * 1000) // Wait 2 minutes for initial sync to create tickets
+
+      return () => clearTimeout(timeoutId)
+    }
+  }, [isConnected, activeView])
+
+  // NEW: Automatic periodic auto-classification (every hour)
+  useEffect(() => {
+    if (!isConnected) return
+
+    const AUTO_CLASSIFY_INTERVAL_MS = 60 * 60 * 1000 // 1 hour
+    let intervalId: NodeJS.Timeout
+
+    const runAutoClassify = async () => {
+      try {
+        console.log('[Auto-Classify] Running periodic auto-classification...')
+        const response = await fetch('/api/departments/backfill', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: 30 }) // Smaller batch for periodic runs
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          console.log('[Auto-Classify] Result:', data)
+          
+          // Refresh tickets view if we're on that screen
+          if (activeView === 'tickets') {
+            setTicketsVersion(v => v + 1)
+          }
+        } else {
+          console.warn('[Auto-Classify] Failed:', await response.text())
+        }
+      } catch (error) {
+        console.error('[Auto-Classify] Error:', error)
+      }
+    }
+
+    // Start interval
+    intervalId = setInterval(runAutoClassify, AUTO_CLASSIFY_INTERVAL_MS)
+    
+    // Run once after a delay (to avoid running on initial load, but after initial connection classification)
+    const initialTimeout = setTimeout(() => {
+      runAutoClassify()
+    }, 10 * 60 * 1000) // Run after 10 minutes (after initial connection classification)
+
+    return () => {
+      clearInterval(intervalId)
+      clearTimeout(initialTimeout)
+    }
+  }, [isConnected, activeView])
+
   const showSyncToast = ((syncStatus?.processing ?? syncInProgress) || syncError || isSyncComplete) && !hideSyncToast
 
   return (
@@ -789,9 +910,9 @@ function PageContent() {
                 </div>
               </div>
             ) : !isConnected ? (
-              // Redirect to welcome page when not connected at all
               <div className="flex items-center justify-center h-full p-4">
                 {(() => {
+                  // Redirect to welcome page
                   if (typeof window !== 'undefined') {
                     window.location.href = '/welcome'
                   }
@@ -804,7 +925,6 @@ function PageContent() {
                 })()}
               </div>
             ) : (
-              // Show UserSelector when connected but no user selected
               <UserSelector
                 onUserSelected={handleUserSelected}
                 currentUserId={currentUserId}

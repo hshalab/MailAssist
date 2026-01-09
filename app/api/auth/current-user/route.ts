@@ -32,7 +32,6 @@ export async function GET(request: NextRequest) {
     const userId = getCurrentUserIdFromRequest(request);
 
     if (!userId) {
-      console.log('[Current User] No userId cookie found.');
       return NextResponse.json(
         { error: 'No user selected' },
         { status: 404 }
@@ -41,10 +40,7 @@ export async function GET(request: NextRequest) {
 
     // Get current Gmail account from session
     const sessionGmailEmail = getSessionUserEmailFromRequest(request);
-    console.log(`[Current User] Check for userId: ${userId}, gmail: ${sessionGmailEmail}`);
-
     if (!sessionGmailEmail) {
-      console.log('[Current User] No gmail session cookie.');
       return NextResponse.json(
         { error: 'Not authenticated' },
         { status: 401 }

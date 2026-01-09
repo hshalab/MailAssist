@@ -22,14 +22,6 @@ export async function GET(request: NextRequest) {
     const supabase = createServerClient()
 
     // Get all pending invitations for this business
-    // If no business ID, return empty list (personal accounts don't have team invitations)
-    if (!sessionUser.businessId) {
-      return NextResponse.json({
-        success: true,
-        invitations: [],
-      })
-    }
-
     const { data: invitations, error } = await supabase
       .from('agent_invitations')
       .select('id, email, name, role, status, expires_at, created_at')

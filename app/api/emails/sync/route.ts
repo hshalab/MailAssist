@@ -32,15 +32,28 @@ export async function POST(request: NextRequest) {
     const businessSession = await validateBusinessSession();
 
     let sentEmails: any[] = [];
+    let inboxEmails: any[] = [];
     let userEmail: string | null = null;
 
     if (businessSession) {
       console.log('[SYNC] Business session detected:', businessSession.businessId);
-      const { fetchAllSentEmails } = await import('@/lib/email-service');
+      const { fetchAllSentEmails, fetchAllInboxEmails } = await import('@/lib/email-service');
       const { loadBusinessTokens } = await import('@/lib/storage');
 
       // Fetch from all accounts (capped at 500)
       sentEmails = await fetchAllSentEmails(businessSession.businessId, maxResults, businessSession.email);
+      
+      // Also fetch inbox emails to create tickets from them
+      console.log('[SYNC] Fetching inbox emails to create tickets...');
+      inboxEmails = await fetchAllInboxEmails(businessSession.businessId, maxResults, undefined, businessSession.email);
+      
+      // Filter out spam/trash from inbox emails
+      inboxEmails = inboxEmails.filter((email: any) => {
+        const labels = email.labels || [];
+        const blockedLabels = ['SPAM', 'TRASH'];
+        return !labels.some((label: string) => blockedLabels.includes(label));
+      });
+      console.log(`[SYNC] Found ${inboxEmails.length} inbox emails (after filtering spam/trash)`);
 
       // Get the first account's email to use as the "primary" user for sync state
       const accounts = await loadBusinessTokens(businessSession.businessId, businessSession.email);
@@ -59,12 +72,30 @@ export async function POST(request: NextRequest) {
       }
 
       sentEmails = await fetchSentEmails(tokens, maxResults);
+      
+      // Also fetch inbox emails to create tickets
+      console.log('[SYNC] Fetching inbox emails to create tickets...');
+      const { fetchInboxEmails } = await import('@/lib/gmail');
+      inboxEmails = await fetchInboxEmails(tokens, maxResults);
+      
+      // Filter out spam/trash
+      inboxEmails = inboxEmails.filter((email: any) => {
+        const labels = email.labels || [];
+        const blockedLabels = ['SPAM', 'TRASH'];
+        return !labels.some((label: string) => blockedLabels.includes(label));
+      });
+      console.log(`[SYNC] Found ${inboxEmails.length} inbox emails (after filtering spam/trash)`);
+      
       userEmail = await getCurrentUserEmail();
     }
 
     // Use explicit userEmail for sync state operations
     const currentSyncState = await loadSyncState(userEmail || undefined);
     const isContinuing = currentSyncState.status === 'running';
+    
+    // Always process inbox emails for tickets, even when continuing (to catch any missed emails)
+    // But only do full processing on first sync
+    const shouldProcessInboxEmails = !isContinuing || inboxEmails.length > 0;
 
     console.log(`[SYNC] ${isContinuing ? 'Continuing' : 'Starting new'} sync job. Current state:`, {
       status: currentSyncState.status,
@@ -158,6 +189,22 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Process inbox emails to create tickets (synchronous to ensure completion)
+    // Process on first sync, or if we have inbox emails and not continuing a sent email sync
+    if (shouldProcessInboxEmails && inboxEmails.length > 0) {
+      console.log(`[SYNC] Creating tickets from ${inboxEmails.length} inbox emails (isContinuing: ${isContinuing})...`);
+      const businessId = businessSession?.businessId || null;
+      try {
+        await processInboxEmailsForTickets(inboxEmails, businessId);
+        console.log(`[SYNC] Finished processing inbox emails for tickets`);
+      } catch (err) {
+        console.error('[SYNC] Error creating tickets from inbox emails:', err);
+        console.error('[SYNC] Error details:', err instanceof Error ? err.stack : err);
+      }
+    } else {
+      console.log(`[SYNC] Skipping inbox email processing: shouldProcess=${shouldProcessInboxEmails}, inboxCount=${inboxEmails.length}, isContinuing=${isContinuing}`);
+    }
+
     // Update state with progress
     const currentState = await getSyncState();
     const totalProcessed = (currentState.processed || 0) + batchProcessed;
@@ -190,6 +237,132 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+/**
+ * Process inbox emails to create tickets (non-blocking)
+ * Only creates tickets for emails that don't already have tickets
+ */
+async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: string | null): Promise<void> {
+  console.log(`[SYNC] processInboxEmailsForTickets called with ${inboxEmails.length} emails, businessId: ${businessId}`);
+  
+  // Filter emails by date - only process emails from the last 30-60 days
+  // This prevents creating tickets for very old emails that are likely already resolved
+  const DAYS_TO_SYNC = 60; // Configurable: 30 for more conservative, 60 for broader coverage
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - DAYS_TO_SYNC);
+  
+  const recentEmails = inboxEmails.filter(email => {
+    try {
+      const emailDate = new Date(email.date);
+      return emailDate >= cutoffDate;
+    } catch (error) {
+      console.warn(`[SYNC] Invalid date for email ${email.id}: ${email.date}`);
+      return false; // Skip emails with invalid dates
+    }
+  });
+  
+  console.log(`[SYNC] Filtered to ${recentEmails.length} recent emails (last ${DAYS_TO_SYNC} days) out of ${inboxEmails.length} total`);
+  
+  // Count unique threads
+  const uniqueThreads = new Set(recentEmails.map(e => e.threadId || e.id));
+  console.log(`[SYNC] Found ${uniqueThreads.size} unique threads out of ${recentEmails.length} emails`);
+  
+  const { ensureTicketForEmail } = await import('@/lib/tickets');
+  
+  // Get list of connected account emails to determine if email is from agent
+  let agentEmails: string[] = [];
+  try {
+    const userEmail = await getCurrentUserEmail();
+    console.log(`[SYNC] Current user email: ${userEmail}`);
+    if (userEmail) {
+      agentEmails.push(userEmail);
+    }
+    
+    // For business accounts, also check all connected accounts
+    if (businessId) {
+      const { loadBusinessTokens } = await import('@/lib/storage');
+      const accounts = await loadBusinessTokens(businessId);
+      const accountEmails = accounts.map(acc => acc.email);
+      console.log(`[SYNC] Found ${accounts.length} connected accounts: ${accountEmails.join(', ')}`);
+      agentEmails.push(...accountEmails);
+    }
+  } catch (error) {
+    console.warn('[SYNC] Error loading agent emails, using current user only:', error);
+  }
+  
+  console.log(`[SYNC] Agent emails list: ${agentEmails.join(', ')}`);
+  
+  // Process in batches to avoid overwhelming the database
+  const BATCH_SIZE = 20;
+  let ticketsCreated = 0;
+  let ticketsUpdated = 0;
+  let ticketsSkipped = 0;
+  
+  for (let i = 0; i < recentEmails.length; i += BATCH_SIZE) {
+    const batch = recentEmails.slice(i, i + BATCH_SIZE);
+    console.log(`[SYNC] Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(inboxEmails.length / BATCH_SIZE)} (${batch.length} emails)`);
+    
+    // Process batch in parallel
+    const results = await Promise.allSettled(
+      batch.map(async (email) => {
+        try {
+          // Determine if email is from agent (check if from matches any connected account)
+          // Extract email address from "Name <email@domain.com>" format
+          const extractEmail = (emailStr: string) => {
+            const match = emailStr?.match(/<([^>]+)>/) || emailStr?.match(/([^\s<>]+@[^\s<>]+)/);
+            return match ? match[1].toLowerCase() : emailStr?.toLowerCase();
+          };
+          
+          const emailFrom = extractEmail(email.from || '');
+          const isFromAgent = agentEmails.some(agentEmail => {
+            const agentEmailLower = agentEmail.toLowerCase();
+            return emailFrom === agentEmailLower || emailFrom.includes(agentEmailLower) || email.from?.toLowerCase().includes(agentEmailLower);
+          });
+          
+          console.log(`[SYNC] Email ${email.id}: from="${email.from}", isFromAgent=${isFromAgent}`);
+          
+          const ticket = await ensureTicketForEmail(
+            {
+              id: email.id,
+              threadId: email.threadId,
+              subject: email.subject,
+              from: email.from,
+              to: email.to,
+              date: email.date,
+            },
+            isFromAgent
+          );
+          
+          if (ticket) {
+            // Check if this was a new ticket or existing one by checking if it was just created
+            // (We can't easily tell, so we'll count all as created/updated)
+            return { created: true, ticketId: ticket.id };
+          }
+          return { created: false, ticketId: null };
+        } catch (error) {
+          console.error(`[SYNC] Error creating ticket for email ${email.id} (thread: ${email.threadId}):`, error);
+          return { created: false, ticketId: null, error: error instanceof Error ? error.message : String(error) };
+        }
+      })
+    );
+    
+    // Count successful ticket creations/updates
+    const successful = results.filter(r => r.status === 'fulfilled' && r.value?.created).length;
+    const failed = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value?.created)).length;
+    ticketsCreated += successful;
+    ticketsSkipped += failed;
+    
+    console.log(`[SYNC] Batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(recentEmails.length / BATCH_SIZE)}: ${successful} tickets created/updated, ${failed} skipped/failed`);
+    
+    // Small delay between batches to avoid rate limits
+    if (i + BATCH_SIZE < recentEmails.length) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+  
+  const skippedOld = inboxEmails.length - recentEmails.length;
+  console.log(`[SYNC] Ticket creation summary: ${ticketsCreated} tickets created/updated, ${ticketsSkipped} skipped/failed out of ${recentEmails.length} recent emails (${skippedOld} old emails filtered out)`);
 }
 
 /**

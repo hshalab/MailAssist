@@ -55,7 +55,7 @@ interface PendingInvitation {
 }
 
 interface TeamManagementViewProps {
-  currentUser?: { id: string; name: string; role: string; business_id?: string } | null
+  currentUser?: { id: string; name: string; role: string; businessId?: string | null; business_id?: string } | null
 }
 
 export default function TeamManagementView({ currentUser }: TeamManagementViewProps) {
@@ -75,6 +75,7 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
   const [inviteEmail, setInviteEmail] = useState("")
   const [inviteRole, setInviteRole] = useState<"agent" | "manager">("agent")
   const [inviteDepartments, setInviteDepartments] = useState<string[]>([])
+  const [inviteFullAccess, setInviteFullAccess] = useState(false)
 
   // Departments state
   const [departments, setDepartments] = useState<any[]>([])
@@ -87,12 +88,72 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
   const [editMemberFullAccess, setEditMemberFullAccess] = useState(false)
   const [savingDepartments, setSavingDepartments] = useState(false)
 
-  // Only Admins/Managers of BUSINESS accounts can invite users
-  const canManage = (currentUser?.role === 'admin' || currentUser?.role === 'manager') && !!currentUser?.business_id
+  // State to hold fresh user data from API
+  const [freshUserData, setFreshUserData] = useState<{ businessId?: string | null; role?: string } | null>(null)
+  const [checkingAccountType, setCheckingAccountType] = useState(true) // Prevent flash of wrong UI
+
+  // Fetch fresh user data to ensure businessId is up-to-date
+  useEffect(() => {
+    const fetchCurrentUser = async () => {
+      try {
+        const response = await fetch('/api/auth/current-user')
+        if (response.ok) {
+          const data = await response.json()
+          if (data.user) {
+            console.log('[TeamManagement] Fetched fresh user data:', {
+              id: data.user.id,
+              businessId: data.user.businessId,
+              role: data.user.role
+            })
+            setFreshUserData({
+              businessId: data.user.businessId,
+              role: data.user.role
+            })
+          }
+        }
+      } catch (error) {
+        console.error('[TeamManagement] Error fetching current user:', error)
+      } finally {
+        setCheckingAccountType(false) // Done checking, safe to show UI
+      }
+    }
+    
+    fetchCurrentUser()
+  }, []) // Run once on mount
+
+  // Use fresh user data if available, otherwise fall back to prop
+  const effectiveBusinessId = freshUserData?.businessId ?? currentUser?.businessId ?? currentUser?.business_id
+  const effectiveRole = freshUserData?.role ?? currentUser?.role
+
+  const canManage = effectiveRole === 'admin' || effectiveRole === 'manager'
+  const isBusinessAccount = effectiveBusinessId !== null && effectiveBusinessId !== undefined && effectiveBusinessId !== ''
+  const canInvite = canManage && isBusinessAccount
+
+  // Debug logging
+  useEffect(() => {
+    console.log('[TeamManagement] Current user state:', {
+      propBusinessId: currentUser?.businessId,
+      propBusiness_id: currentUser?.business_id,
+      freshBusinessId: freshUserData?.businessId,
+      effectiveBusinessId,
+      propRole: currentUser?.role,
+      effectiveRole,
+      isBusinessAccount,
+      canManage,
+      canInvite
+    })
+  }, [currentUser, freshUserData, effectiveBusinessId, effectiveRole, isBusinessAccount, canManage, canInvite])
 
   useEffect(() => {
     loadTeamData()
-  }, [])
+  }, [currentUser, freshUserData]) // Reload when currentUser or freshUserData changes
+
+  // Load departments when invite dialog opens
+  useEffect(() => {
+    if (inviteDialogOpen && isBusinessAccount) {
+      loadDepartments()
+    }
+  }, [inviteDialogOpen, isBusinessAccount])
 
   const loadTeamData = async () => {
     setLoading(true)
@@ -102,19 +163,100 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
       if (membersRes.ok) {
         const membersData = await membersRes.json()
         setMembers(membersData.members || [])
+      } else {
+        // If API fails, at least show current user for personal accounts
+        if (!isBusinessAccount && currentUser) {
+          // Fetch user email from API if not available
+          try {
+            const userRes = await fetch(`/api/users/${currentUser.id}`)
+            if (userRes.ok) {
+              const userData = await userRes.json()
+              setMembers([{
+                id: currentUser.id,
+                name: currentUser.name,
+                email: userData.user?.email || '',
+                role: currentUser.role as "admin" | "manager" | "agent",
+                created_at: userData.user?.created_at || new Date().toISOString()
+              }])
+            } else {
+              // Fallback without email
+              setMembers([{
+                id: currentUser.id,
+                name: currentUser.name,
+                email: '',
+                role: currentUser.role as "admin" | "manager" | "agent",
+                created_at: new Date().toISOString()
+              }])
+            }
+          } catch {
+            // Fallback without email
+            setMembers([{
+              id: currentUser.id,
+              name: currentUser.name,
+              email: '',
+              role: currentUser.role as "admin" | "manager" | "agent",
+              created_at: new Date().toISOString()
+            }])
+          }
+        }
       }
 
-      // Load pending invitations
-      const invitationsRes = await fetch("/api/agents/invitations")
-      if (invitationsRes.ok) {
-        const invitationsData = await invitationsRes.json()
-        setInvitations(invitationsData.invitations || [])
+      // Load pending invitations (only for business accounts)
+      if (isBusinessAccount) {
+        const invitationsRes = await fetch("/api/agents/invitations")
+        if (invitationsRes.ok) {
+          const invitationsData = await invitationsRes.json()
+          setInvitations(invitationsData.invitations || [])
+        }
+      } else {
+        // Personal accounts don't have invitations
+        setInvitations([])
       }
 
-      // Load departments
-      await loadDepartments()
+      // Load departments (only for business accounts)
+      // Use effectiveBusinessId to check if it's a business account
+      const effectiveBusinessId = freshUserData?.businessId ?? currentUser?.businessId ?? currentUser?.business_id
+      if (effectiveBusinessId !== null && effectiveBusinessId !== undefined && effectiveBusinessId !== '') {
+        await loadDepartments()
+      } else {
+        setDepartments([])
+        setLoadingDepartments(false)
+      }
     } catch (err) {
       console.error("Error loading team data:", err)
+      // Fallback: show current user for personal accounts even on error
+      if (!isBusinessAccount && currentUser) {
+        // Try to fetch user email
+        try {
+          const userRes = await fetch(`/api/users/${currentUser.id}`)
+          if (userRes.ok) {
+            const userData = await userRes.json()
+            setMembers([{
+              id: currentUser.id,
+              name: currentUser.name,
+              email: userData.user?.email || '',
+              role: currentUser.role as "admin" | "manager" | "agent",
+              created_at: userData.user?.created_at || new Date().toISOString()
+            }])
+          } else {
+            setMembers([{
+              id: currentUser.id,
+              name: currentUser.name,
+              email: '',
+              role: currentUser.role as "admin" | "manager" | "agent",
+              created_at: new Date().toISOString()
+            }])
+          }
+        } catch {
+          setMembers([{
+            id: currentUser.id,
+            name: currentUser.name,
+            email: '',
+            role: currentUser.role as "admin" | "manager" | "agent",
+            created_at: new Date().toISOString()
+          }])
+        }
+      }
     } finally {
       setLoading(false)
     }
@@ -149,7 +291,8 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
           name: inviteName,
           email: inviteEmail,
           role: inviteRole,
-          departmentIds: inviteDepartments,
+          departmentIds: inviteFullAccess ? [] : inviteDepartments, // Clear departments if full access
+          hasFullAccess: inviteFullAccess,
         }),
       })
 
@@ -167,6 +310,7 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
       setInviteEmail("")
       setInviteRole("agent")
       setInviteDepartments([])
+      setInviteFullAccess(false)
 
       // Reload data to show new invitation
       await loadTeamData()
@@ -282,19 +426,7 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
           </p>
         </div>
 
-        {!currentUser?.business_id && (
-          <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 max-w-md">
-            <h4 className="text-amber-400 font-bold flex items-center gap-2 mb-1">
-              <Shield className="h-4 w-4" />
-              Personal Account
-            </h4>
-            <p className="text-amber-200/70 text-sm">
-              You are currently using a personal account. Team management and member invitations are available for Business accounts only.
-            </p>
-          </div>
-        )}
-
-        {canManage && (
+        {checkingAccountType ? null : canInvite ? (
           <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
             <DialogTrigger asChild>
               <Button size="lg" className="h-12 px-8 bg-primary hover:bg-primary/90 text-white shadow-2xl shadow-primary/20 transition-all hover:scale-[1.03] active:scale-95 font-bold rounded-2xl group border-0">
@@ -352,40 +484,65 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2.5">
-                    <Label className="text-slate-300 ml-1">Workstreams (Optional)</Label>
-                    <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 max-h-48 overflow-y-auto">
-                      {loadingDepartments ? (
-                        <div className="text-sm text-slate-400 text-center py-2">Loading workstreams...</div>
-                      ) : departments.length === 0 ? (
-                        <div className="text-sm text-slate-400 text-center py-2">No workstreams available</div>
-                      ) : (
-                        <div className="space-y-2">
-                          {departments.map((dept) => (
-                            <div key={dept.id} className="flex items-center space-x-2 p-2 hover:bg-slate-700/50 rounded-lg transition-colors">
-                              <Checkbox
-                                id={`dept-${dept.id}`}
-                                checked={inviteDepartments.includes(dept.id)}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setInviteDepartments([...inviteDepartments, dept.id])
-                                  } else {
-                                    setInviteDepartments(inviteDepartments.filter(id => id !== dept.id))
-                                  }
-                                }}
-                              />
-                              <label
-                                htmlFor={`dept-${dept.id}`}
-                                className="text-sm text-slate-300 cursor-pointer flex-1"
-                              >
-                                {dept.name}
-                              </label>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                  <div className="space-y-3">
+                    <div className="flex items-center space-x-3 p-3 bg-slate-800/50 border border-slate-700 rounded-xl">
+                      <Checkbox
+                        id="invite-full-access"
+                        checked={inviteFullAccess}
+                        onCheckedChange={(checked) => {
+                          setInviteFullAccess(!!checked)
+                          if (checked) {
+                            setInviteDepartments([]) // Clear departments when full access is enabled
+                          }
+                        }}
+                      />
+                      <div className="flex-1">
+                        <Label htmlFor="invite-full-access" className="text-slate-200 font-medium cursor-pointer">
+                          Full Email Access
+                        </Label>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          Grant access to all emails and workstreams
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-500 ml-1">Select workstreams this member can access</p>
+                    
+                    {!inviteFullAccess && (
+                      <div className="space-y-2.5">
+                        <Label className="text-slate-300 ml-1">Workstreams (Optional)</Label>
+                        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 max-h-48 overflow-y-auto">
+                          {loadingDepartments ? (
+                            <div className="text-sm text-slate-400 text-center py-2">Loading workstreams...</div>
+                          ) : departments.length === 0 ? (
+                            <div className="text-sm text-slate-400 text-center py-2">No workstreams available</div>
+                          ) : (
+                            <div className="space-y-2">
+                              {departments.map((dept) => (
+                                <div key={dept.id} className="flex items-center space-x-2 p-2 hover:bg-slate-700/50 rounded-lg transition-colors">
+                                  <Checkbox
+                                    id={`dept-${dept.id}`}
+                                    checked={inviteDepartments.includes(dept.id)}
+                                    onCheckedChange={(checked) => {
+                                      if (checked) {
+                                        setInviteDepartments([...inviteDepartments, dept.id])
+                                      } else {
+                                        setInviteDepartments(inviteDepartments.filter(id => id !== dept.id))
+                                      }
+                                    }}
+                                  />
+                                  <label
+                                    htmlFor={`dept-${dept.id}`}
+                                    className="text-sm text-slate-300 cursor-pointer flex-1"
+                                  >
+                                    {dept.name}
+                                  </label>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 ml-1">Select workstreams this member can access</p>
+                      </div>
+                    )}
                   </div>
                   {error && (
                     <Alert className="bg-red-500/10 border-red-500/20 rounded-xl">
@@ -418,6 +575,20 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
               </form>
             </DialogContent>
           </Dialog>
+        ) : checkingAccountType ? null : (
+          <div className="px-6 py-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl max-w-md">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5">
+                <UserPlus className="h-5 w-5 text-blue-400" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-white mb-1">Team Invitations</h3>
+                <p className="text-sm text-slate-400 leading-relaxed">
+                  Team member invitations are only available for business accounts. Upgrade to a business plan to invite team members and collaborate with your team.
+                </p>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
@@ -455,7 +626,9 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
               </div>
               <h4 className="text-xl font-semibold text-white mb-2">Build your team</h4>
               <p className="text-slate-400 max-w-xs mx-auto">
-                Invite colleagues to help you manage your support emails more effectively.
+                {isBusinessAccount 
+                  ? "Invite colleagues to help you manage your support emails more effectively."
+                  : "Team member invitations are only available for business accounts. Upgrade to a business plan to invite team members."}
               </p>
             </Card>
           ) : (
@@ -487,7 +660,7 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
                         <Clock className="w-3 h-3 mr-1.5" />
                         {formatDate(member.created_at)}
                       </div>
-                      {canManage && (
+                      {canManage && isBusinessAccount && member.id !== currentUser?.id && (
                         <Button
                           variant="ghost"
                           size="sm"

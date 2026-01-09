@@ -158,30 +158,22 @@ export async function POST(req: NextRequest) {
 
     // 9. Set session cookie
     const cookieStore = await cookies()
-    cookieStore.set('session_token', sessionToken, {
+    const { getCookieOptions, getClientCookieOptions } = await import('@/lib/cookie-config')
+    const cookieMaxAge = 30 * 24 * 60 * 60 // 30 days
+
+    cookieStore.set('session_token', sessionToken, getCookieOptions({
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60, // 30 days
-      path: '/',
-    })
+      maxAge: cookieMaxAge,
+    }))
 
     // Set user_id and current_user_id for backward compatibility
-    cookieStore.set('user_id', adminUser.id, {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60,
-      path: '/',
-    })
+    cookieStore.set('user_id', adminUser.id, getClientCookieOptions({
+      maxAge: cookieMaxAge,
+    }))
     
-    cookieStore.set('current_user_id', adminUser.id, {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 30 * 24 * 60 * 60,
-      path: '/',
-    })
+    cookieStore.set('current_user_id', adminUser.id, getClientCookieOptions({
+      maxAge: cookieMaxAge,
+    }))
 
     console.log('[VerifyOTP] Session created and cookies set')
 

@@ -108,32 +108,24 @@ export async function POST(req: NextRequest) {
 
         // Set cookies
         const cookieStore = await cookies()
+        const { getCookieOptions, getClientCookieOptions } = await import('@/lib/cookie-config')
+        const cookieMaxAge = 30 * 24 * 60 * 60 // 30 days
 
-        cookieStore.set('session_token', sessionToken, {
+        cookieStore.set('session_token', sessionToken, getCookieOptions({
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
             expires: expiresAt,
-            path: '/',
-        })
+        }))
 
         // Set client-accessible cookies for UI state
-        cookieStore.set('current_user_id', newUser.id, {
-            httpOnly: false,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            path: '/',
-            maxAge: 30 * 24 * 60 * 60
-        })
+        cookieStore.set('current_user_id', newUser.id, getClientCookieOptions({
+            maxAge: cookieMaxAge,
+        }))
 
         // Set gmail_user_email for session management
-        cookieStore.set('gmail_user_email', normalizedEmail, {
+        cookieStore.set('gmail_user_email', normalizedEmail, getCookieOptions({
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            path: '/',
-            maxAge: 30 * 24 * 60 * 60,
-        })
+            maxAge: cookieMaxAge,
+        }))
 
         return NextResponse.json({
             success: true,
