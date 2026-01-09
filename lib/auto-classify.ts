@@ -44,14 +44,50 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - days);
 
-        // Fetch unclassified, open, recent tickets
-        const { data: tickets, error: fetchError } = await supabase
+        // Build query based on account type
+        let ticketsQuery = supabase
             .from('tickets')
             .select('id, subject, user_email, created_at')
             .is('department_id', null)
             .neq('status', 'closed')
-            .gte('created_at', cutoffDate.toISOString())
-            .limit(limit);
+            .gte('created_at', cutoffDate.toISOString());
+
+        // Filter by account scope - works for both personal and business accounts
+        if (user.accountType === 'business' && user.businessId) {
+            // Business account: Get all tickets for connected Gmail accounts in this business
+            // Get all connected account emails from tokens table
+            const { data: tokens } = await supabase
+                .from('tokens')
+                .select('user_email')
+                .eq('business_id', user.businessId)
+                .not('user_email', 'is', null);
+
+            if (tokens && tokens.length > 0) {
+                // Get unique user emails from connected accounts
+                const accountEmails = [...new Set(tokens.map(t => t.user_email).filter(Boolean))];
+                
+                console.log(`[Auto-Classify] Business account: Found ${accountEmails.length} connected accounts: ${accountEmails.join(', ')}`);
+                
+                if (accountEmails.length > 0) {
+                    // Filter tickets by user_email matching any connected account
+                    ticketsQuery = ticketsQuery.in('user_email', accountEmails);
+                } else {
+                    // Fallback: filter by current user's email
+                    console.log(`[Auto-Classify] Business account: No connected accounts found, using user email: ${user.email}`);
+                    ticketsQuery = ticketsQuery.eq('user_email', user.email);
+                }
+            } else {
+                // Fallback: filter by current user's email
+                console.log(`[Auto-Classify] Business account: No tokens found, using user email: ${user.email}`);
+                ticketsQuery = ticketsQuery.eq('user_email', user.email);
+            }
+        } else {
+            // Personal account: filter by user_email
+            console.log(`[Auto-Classify] Personal account: Filtering by user email: ${user.email}`);
+            ticketsQuery = ticketsQuery.eq('user_email', user.email);
+        }
+
+        const { data: tickets, error: fetchError } = await ticketsQuery.limit(limit);
 
         if (fetchError) {
             console.error('[Auto-Classify] Fetch error:', fetchError);

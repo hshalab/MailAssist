@@ -49,10 +49,15 @@ export async function GET(request: NextRequest) {
 
     const user = await getUserById(userId);
     if (!user) {
-      return NextResponse.json(
-        { error: 'User not found' },
+      // User was deleted - return 404 with a specific message
+      console.log('[Current User] User not found - data may have been deleted:', userId);
+      const response = NextResponse.json(
+        { error: 'User not found. Your account data may have been removed.' },
         { status: 404 }
       );
+      // Clear the invalid user ID cookie
+      response.cookies.delete('current_user_id');
+      return response;
     }
 
     // CRITICAL: Verify user belongs to current Gmail account
