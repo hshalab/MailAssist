@@ -81,16 +81,37 @@ function PageContent() {
   const searchParams = useSearchParams()
 
   useEffect(() => {
-    checkAuthStatus()
-    checkUserSelection()
-
     const params = new URLSearchParams(window.location.search)
+    const isOAuthReturn = params.get("auth") === "success" || 
+                          params.get("businessAuth") === "true" || 
+                          params.get("connected") === "true"
+    
+    let timeoutId: NodeJS.Timeout | null = null
+    
+    // If this is an OAuth return, skip initial checks and handle it specially
+    if (!isOAuthReturn) {
+      checkAuthStatus()
+      checkUserSelection()
+    }
+
     if (params.get("auth") === "success") {
       setIsConnected(true)
       try {
         window.localStorage.setItem(LOCAL_STORAGE_KEY, "true")
       } catch {
         // Ignore localStorage errors (e.g. in private mode)
+      }
+
+      // Ensure skeleton flag is set if it exists (user clicked connect button)
+      // This is critical for production where timing differs
+      if (typeof window !== 'undefined') {
+        const hasSkeletonFlag = sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
+        if (!hasSkeletonFlag) {
+          // Set it if user just connected (they likely clicked connect button)
+          sessionStorage.setItem('show_inbox_skeleton_on_return', 'true')
+        }
+        // Ensure we're on inbox view to show skeleton
+        setActiveView("inbox")
       }
 
       if (params.get("newAccount") === "true") {
@@ -105,22 +126,37 @@ function PageContent() {
 
       window.history.replaceState({}, "", window.location.pathname)
       // After Gmail auth, check if user is selected
-      checkUserSelection()
-      return
-    }
-
-    // Check if user came from business auth
-    const businessAuth = params.get("businessAuth")
-    if (businessAuth === "true") {
+      // Ensure checkingUser is set to false after checkUserSelection completes
+      Promise.all([
+        checkAuthStatus(),
+        checkUserSelection()
+      ]).finally(() => {
+        setCheckingUser(false)
+        setCheckingAuth(false)
+      })
+      
+      // Safety timeout to ensure loading state is cleared even if API calls hang
+      timeoutId = setTimeout(() => {
+        setCheckingUser(false)
+        setCheckingAuth(false)
+      }, 5000) // 5 second timeout
+    } else if (params.get("businessAuth") === "true") {
       setIsConnected(true)
-      checkUserSelection()
       window.history.replaceState({}, "", window.location.pathname)
-      return
-    }
-
-    // Check if user just connected Gmail (from connect mode)
-    const justConnected = params.get("connected")
-    if (justConnected === "true") {
+      Promise.all([
+        checkAuthStatus(),
+        checkUserSelection()
+      ]).finally(() => {
+        setCheckingUser(false)
+        setCheckingAuth(false)
+      })
+      
+      // Safety timeout
+      timeoutId = setTimeout(() => {
+        setCheckingUser(false)
+        setCheckingAuth(false)
+      }, 5000)
+    } else if (params.get("connected") === "true") {
       setIsConnected(true)
       // Store flag to trigger sync and auto-classification after component is ready
       if (typeof window !== 'undefined') {
@@ -133,15 +169,25 @@ function PageContent() {
       // Ensure we're on inbox view to show skeleton
       setActiveView("inbox")
       window.history.replaceState({}, "", window.location.pathname)
-      return
+      // Ensure checkingUser is set to false after checkUserSelection completes
+      Promise.all([
+        checkAuthStatus(),
+        checkUserSelection()
+      ]).finally(() => {
+        setCheckingUser(false)
+        setCheckingAuth(false)
+      })
+      
+      // Safety timeout
+      timeoutId = setTimeout(() => {
+        setCheckingUser(false)
+        setCheckingAuth(false)
+      }, 5000)
     }
     
-    // Also check for auth=success (from business account creation flow)
-    if (params.get("auth") === "success") {
-      // Check if we should show skeleton (user clicked connect button)
-      if (typeof window !== 'undefined' && sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true') {
-        // Ensure we're on inbox view to show skeleton
-        setActiveView("inbox")
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId)
       }
     }
 
@@ -154,6 +200,18 @@ function PageContent() {
         }
       })
       .catch(() => { })
+      .finally(() => {
+        // Ensure checking states are set to false after all initialization
+        // Only set if checkUserSelection hasn't already set them
+        // Use a small timeout to let checkUserSelection complete first
+        setTimeout(() => {
+          setCheckingAuth(false)
+          // Only set checkingUser if no user was selected
+          if (!currentUserId) {
+            setCheckingUser(false)
+          }
+        }, 100)
+      })
   }, [])
 
   // Listen to ticketId in the URL to deep-link into a specific ticket from notifications
@@ -233,6 +291,7 @@ function PageContent() {
               })
               setIsConnected(true) // FIX: Ensure connection state is synced
               setCheckingUser(false)
+              setCheckingAuth(false)
               return
             }
           }
@@ -266,6 +325,12 @@ function PageContent() {
             sessionStorage.setItem("current_user_business_id", data.user.businessId || "")
             console.log('[DEBUG] Stored businessId in sessionStorage:', data.user.businessId) // DEBUG
           }
+          setCheckingUser(false)
+          setCheckingAuth(false)
+        } else {
+          // No user found but response was ok - set checking to false
+          setCheckingUser(false)
+          setCheckingAuth(false)
         }
       } else if (response.status === 403 || response.status === 404) {
         // User doesn't belong to current account or not found
@@ -310,12 +375,19 @@ function PageContent() {
         }
         setCurrentUserId(null)
         setCurrentUser(null)
+        setCheckingUser(false)
+        setCheckingAuth(false)
+      } else {
+        // Other status codes - still set checking to false
+        setCheckingUser(false)
+        setCheckingAuth(false)
       }
       // If 404, no user selected - that's okay, we'll show selector
-    } catch {
-      // Ignore errors
-    } finally {
+    } catch (error) {
+      console.error('[checkUserSelection] Error:', error)
+      // Always set checking to false even on error
       setCheckingUser(false)
+      setCheckingAuth(false)
     }
   }
 
@@ -939,7 +1011,8 @@ function PageContent() {
   return (
     <>
       {/* Only show full layout if user is selected, otherwise show UserSelector in a centered card */}
-      {(!isConnected || !currentUserId || (checkingUser && !currentUser)) ? (
+      {/* Don't show main layout while checking auth to prevent double spinners */}
+      {(!isConnected || !currentUserId || checkingAuth || (checkingUser && !currentUser)) ? (
         <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
           <div className="max-w-md w-full">
             {checkingAuth || checkingUser ? (
@@ -1080,7 +1153,7 @@ function PageContent() {
 
 export default function Page() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center h-screen"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div></div>}>
+    <Suspense fallback={null}>
       <PageContent />
     </Suspense>
   )

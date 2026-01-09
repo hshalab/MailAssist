@@ -189,18 +189,22 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     // Use requestAnimationFrame + setTimeout to ensure React has fully rendered
     // the skeleton before fetch starts. This is especially important in production.
     // If returning from OAuth, add a longer delay to ensure skeleton is visible
+    // In production, we need even more time for the skeleton to render
     let rafId: number
     let timeoutId: NodeJS.Timeout
     
     rafId = requestAnimationFrame(() => {
-      timeoutId = setTimeout(() => {
-        fetchEmails(150).finally(() => {
-          // Clear the skeleton flag once emails are loaded
-          if (shouldShowSkeleton && typeof window !== 'undefined') {
-            sessionStorage.removeItem('show_inbox_skeleton_on_return')
-          }
-        })
-      }, shouldShowSkeleton ? 100 : 10) // Longer delay if returning from OAuth
+      // Double RAF for production to ensure skeleton renders
+      requestAnimationFrame(() => {
+        timeoutId = setTimeout(() => {
+          fetchEmails(150).finally(() => {
+            // Clear the skeleton flag once emails are loaded
+            if (shouldShowSkeleton && typeof window !== 'undefined') {
+              sessionStorage.removeItem('show_inbox_skeleton_on_return')
+            }
+          })
+        }, shouldShowSkeleton ? 200 : 10) // Longer delay if returning from OAuth (200ms for production)
+      })
     })
     
     return () => {
@@ -264,7 +268,12 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     }
   }
 
-  if (loading && !loadingMore) {
+  // Check if we should show skeleton (returning from Gmail OAuth)
+  const shouldShowSkeleton = typeof window !== 'undefined' && 
+    sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
+  
+  // Always show skeleton if loading OR if we have the skeleton flag (for production OAuth returns)
+  if ((loading || shouldShowSkeleton) && !loadingMore) {
     return (
       <div className="p-3 space-y-2 animate-in fade-in duration-300">
         {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
@@ -334,7 +343,8 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     )
   }
 
-  if (emails.length === 0 && !loadingMore) {
+  // Don't show "No emails found" if we're still loading or have skeleton flag
+  if (emails.length === 0 && !loadingMore && !shouldShowSkeleton && !loading) {
     // Check if we are filtering by a specific account
     const isFiltering = !!selectedAccount;
 

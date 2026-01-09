@@ -155,13 +155,35 @@ export async function GET(request: NextRequest) {
               .eq('id', businessId)
               .single();
             
-            if (business && business.business_email === gmailEmail) {
-              console.log('[Gmail Callback] Business owner email detected, promoting user to admin:', userId);
-              await supabase
+            // Case-insensitive email comparison
+            if (business && business.business_email?.toLowerCase() === gmailEmail.toLowerCase()) {
+              console.log('[Gmail Callback] Business owner email detected, promoting user to admin:', userId, 'email:', gmailEmail, 'business_email:', business.business_email);
+              const { error: updateError } = await supabase
                 .from('users')
                 .update({ role: 'admin' })
                 .eq('id', userId);
-              console.log('[Gmail Callback] User promoted to admin');
+              
+              if (updateError) {
+                console.error('[Gmail Callback] Error promoting user to admin:', updateError);
+              } else {
+                console.log('[Gmail Callback] User promoted to admin successfully');
+                // Refresh user data to ensure role is updated
+                const { data: updatedUser } = await supabase
+                  .from('users')
+                  .select('*')
+                  .eq('id', userId)
+                  .single();
+                if (updatedUser) {
+                  existingUser.role = 'admin';
+                  console.log('[Gmail Callback] User role confirmed as admin:', updatedUser.role);
+                }
+              }
+            } else {
+              console.log('[Gmail Callback] Email does not match business owner:', {
+                gmailEmail,
+                businessEmail: business?.business_email,
+                matches: business?.business_email?.toLowerCase() === gmailEmail.toLowerCase()
+              });
             }
           }
         }
@@ -236,11 +258,20 @@ export async function GET(request: NextRequest) {
       // 5. Save Tokens (Linked to this user's business if they have one)
       await saveTokens(tokens, businessId || undefined);
 
+      // Get final user role after potential promotion
+      const { data: finalUser } = await supabase
+        .from('users')
+        .select('role, name, email')
+        .eq('id', userId)
+        .single();
+
       console.log('[OAuth Callback] Login successful for:', gmailEmail, 'businessId:', businessId);
+      console.log('[OAuth Callback] User ID being set:', userId, 'Role:', finalUser?.role, 'Name:', finalUser?.name);
       console.log('[OAuth Callback] Cookies set:', {
         session_token: !!sessionToken,
         current_user_id: userId,
         gmail_user_email: gmailEmail,
+        user_role: finalUser?.role,
         env: process.env.NODE_ENV,
         isVercel: process.env.VERCEL === '1'
       });

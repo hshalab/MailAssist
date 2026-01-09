@@ -230,13 +230,24 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
     // CRITICAL FIX: If user is business owner (email matches business_email), ensure they're admin
     const business = Array.isArray(user.businesses) ? user.businesses[0] : user.businesses
     let userRole = user.role as 'admin' | 'manager' | 'agent'
-    if (business && business.business_email && user.email === business.business_email && userRole !== 'admin') {
-      console.log('[Session] Business owner detected, promoting to admin:', user.id)
-      await supabase
+    // Case-insensitive email comparison for business owner promotion
+    if (business && business.business_email && 
+        business.business_email.toLowerCase() === user.email?.toLowerCase() && 
+        userRole !== 'admin') {
+      console.log('[Session] Business owner detected, promoting to admin:', user.id, 'email:', user.email, 'business_email:', business.business_email)
+      const { error: updateError } = await supabase
         .from('users')
         .update({ role: 'admin' })
         .eq('id', user.id)
-      userRole = 'admin'
+      
+      if (updateError) {
+        console.error('[Session] Error promoting user to admin:', updateError)
+      } else {
+        console.log('[Session] User promoted to admin successfully')
+        // Refresh user role
+        userRole = 'admin'
+        user.role = 'admin'
+      }
     }
 
     return {
