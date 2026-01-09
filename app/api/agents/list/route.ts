@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
   try {
     // Validate user session
     const sessionUser = await validateBusinessSession()
-    
+
     if (!sessionUser) {
       return NextResponse.json(
         { error: 'Unauthorized - please log in' },
@@ -22,6 +22,19 @@ export async function GET(request: NextRequest) {
     const supabase = createServerClient()
 
     // Get all users in the same business
+    // If no business ID, just return the current user (personal account mode)
+    if (!sessionUser.businessId) {
+      return NextResponse.json({
+        success: true,
+        members: [{
+          id: sessionUser.id,
+          name: sessionUser.name,
+          email: sessionUser.email,
+          role: sessionUser.role,
+        }],
+      })
+    }
+
     const { data: members, error } = await supabase
       .from('users')
       .select('id, name, email, role, created_at')

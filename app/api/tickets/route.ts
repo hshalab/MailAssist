@@ -42,6 +42,13 @@ export async function GET(request: NextRequest) {
     // Check if user can view all tickets (Admin/Manager)
     const canViewAll = await canViewAllTickets(userId);
 
+    console.log(`[Tickets API] User: ${userId}, canViewAll: ${canViewAll}`);
+
+    // Debug: Check user role directly
+    const { getUserById } = await import('@/lib/users');
+    const userFn = await getUserById(userId);
+    console.log(`[Tickets API] User Role from DB: ${userFn?.role}, ID: ${userFn?.id}`);
+
     // Get account filter if specified
     const accountFilter = request.nextUrl.searchParams.get('account') || undefined;
 

@@ -87,7 +87,8 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
   const [editMemberFullAccess, setEditMemberFullAccess] = useState(false)
   const [savingDepartments, setSavingDepartments] = useState(false)
 
-  const canManage = currentUser?.role === 'admin' || currentUser?.role === 'manager'
+  // Only Admins/Managers of BUSINESS accounts can invite users
+  const canManage = (currentUser?.role === 'admin' || currentUser?.role === 'manager') && !!currentUser?.business_id
 
   useEffect(() => {
     loadTeamData()
@@ -280,6 +281,18 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
             Organize your workspace, manage permissions, and collaborate with your team.
           </p>
         </div>
+
+        {!currentUser?.business_id && (
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 max-w-md">
+            <h4 className="text-amber-400 font-bold flex items-center gap-2 mb-1">
+              <Shield className="h-4 w-4" />
+              Personal Account
+            </h4>
+            <p className="text-amber-200/70 text-sm">
+              You are currently using a personal account. Team management and member invitations are available for Business accounts only.
+            </p>
+          </div>
+        )}
 
         {canManage && (
           <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>

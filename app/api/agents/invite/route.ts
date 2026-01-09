@@ -31,6 +31,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // NEW: Prevent personal accounts from inviting members
+    if (!sessionUser.businessId) {
+      return NextResponse.json(
+        { error: 'Personal accounts or accounts without a business profile cannot invite team members.' },
+        { status: 403 }
+      )
+    }
+
     // 2. Parse request body
     const body = await request.json()
     const { name, email, role = 'agent', departmentIds = [] } = body

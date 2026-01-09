@@ -44,6 +44,16 @@ export async function GET(request: NextRequest) {
             .eq('email', email.toLowerCase())
             .maybeSingle();
 
+        // Get departments
+        let departments = [];
+        if (user) {
+            const { data: depts } = await supabase
+                .from('user_departments')
+                .select('department_id')
+                .eq('user_id', user.id);
+            if (depts) departments = depts;
+        }
+
         if (userError) {
             return NextResponse.json({ error: userError.message }, { status: 500 });
         }
