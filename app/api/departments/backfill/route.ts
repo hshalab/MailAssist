@@ -1,14 +1,66 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import { getCurrentUser } from '@/lib/session';
+import { getCurrentUser, validateBusinessSession } from '@/lib/session';
 import { classifyTicketToDepartmentAsync } from '@/lib/tickets';
 
 export async function POST(request: NextRequest) {
+    if (!supabase) {
+        return NextResponse.json({ error: 'Database connection failed' }, { status: 500 });
+    }
+
     try {
-        const user = await getCurrentUser();
+        console.log('[Backfill] Starting backfill request...');
+
+        // Robust Auth Check
+        let user = await getCurrentUser();
+
         if (!user) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+            console.log('[Backfill] getCurrentUser returned null. Trying validateBusinessSession...');
+            const businessSession = await validateBusinessSession();
+            if (businessSession) {
+                user = businessSession;
+            } else {
+                console.log('[Backfill] validateBusinessSession returned null. Checking request cookies...');
+
+                // Validation 2: Check request cookies directly (more reliable in some contexts)
+                const userId = request.cookies.get('current_user_id')?.value;
+
+                if (userId) {
+                    console.log('[Backfill] Found current_user_id cookie in request:', userId);
+                    try {
+                        // Try to fetch user manually
+                        const { getUserById } = await import('@/lib/users');
+                        const dbUser = await getUserById(userId);
+                        if (dbUser) {
+                            user = {
+                                id: dbUser.id,
+                                name: dbUser.name,
+                                email: dbUser.email || '',
+                                role: dbUser.role,
+                                businessId: dbUser.businessId || null,
+                                businessName: 'Unknown',
+                                accountType: dbUser.businessId ? 'business' : 'personal'
+                            };
+                        } else {
+                            console.warn('[Backfill] User ID found in cookie but not in DB:', userId);
+                        }
+                    } catch (err) {
+                        console.error('[Backfill] Error fetching user from DB:', err);
+                    }
+                } else {
+                    console.warn('[Backfill] No current_user_id cookie found in request');
+                    // Debug: list all cookies
+                    request.cookies.getAll().forEach(c => console.log(`Cookie: ${c.name}=${c.value.substring(0, 10)}...`));
+                }
+            }
         }
+
+        if (!user) {
+            console.error('[Backfill] Authentication failed. No user found.');
+            return NextResponse.json({ error: 'Unauthorized - Please refresh page' }, { status: 401 });
+        }
+
+        console.log(`[Backfill] Authenticated as user: ${user.email} (${user.id})`);
 
         // Fetch user settings for auto_classify_days
         let settingsQuery = supabase
@@ -27,7 +79,7 @@ export async function POST(request: NextRequest) {
         // Parse options (allow override via body, but default to user settings)
         const body = await request.json().catch(() => ({}));
         const days = body.days || defaultDays;
-        const limit = Math.min(body.limit || 20, 50); // specific batch size, max 50
+        const limit = Math.min(body.limit || 25, 50); // specific batch size, max 50
 
         // Calculate cutoff date
         const cutoffDate = new Date();
