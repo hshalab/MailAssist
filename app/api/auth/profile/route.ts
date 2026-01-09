@@ -14,6 +14,7 @@ export async function GET() {
     const user = await getCurrentUser();
 
     if (user) {
+      console.log('[Profile] Using getCurrentUser:', user.email, 'role:', user.role);
       return NextResponse.json({
         emailAddress: user.email,
         displayName: user.name,
@@ -26,6 +27,7 @@ export async function GET() {
     // 2. Try business session directly (production cookie fallback)
     const businessSession = await validateBusinessSession();
     if (businessSession) {
+      console.log('[Profile] Using validateBusinessSession:', businessSession.email, 'role:', businessSession.role);
       return NextResponse.json({
         emailAddress: businessSession.email,
         displayName: businessSession.name,
@@ -36,9 +38,11 @@ export async function GET() {
     }
 
     // 3. Fall back to Gmail tokens (legacy flow)
+    console.log('[Profile] Falling back to Gmail tokens');
     const tokens = await getValidTokens();
 
     if (!tokens || !tokens.access_token) {
+      console.log('[Profile] No tokens found');
       return NextResponse.json(
         { error: 'Not authenticated' },
         { status: 401 }
@@ -46,12 +50,13 @@ export async function GET() {
     }
 
     const profile = await getUserProfile(tokens);
+    console.log('[Profile] Got Gmail profile:', profile?.emailAddress);
 
     // Look up user in database to get their role
     let role = undefined;
     let businessName = undefined;
     if (profile?.emailAddress && supabase) {
-      const { data: dbUser } = await supabase
+      const { data: dbUser, error: dbError } = await supabase
         .from('users')
         .select(`
           role,
@@ -62,6 +67,8 @@ export async function GET() {
         .eq('email', profile.emailAddress.toLowerCase())
         .maybeSingle();
 
+      console.log('[Profile] DB lookup result:', { email: profile.emailAddress, dbUser, dbError });
+
       if (dbUser) {
         role = dbUser.role;
         const business = Array.isArray(dbUser.businesses) ? dbUser.businesses[0] : dbUser.businesses;
@@ -69,6 +76,7 @@ export async function GET() {
       }
     }
 
+    console.log('[Profile] Returning with role:', role);
     return NextResponse.json({
       ...profile,
       role,

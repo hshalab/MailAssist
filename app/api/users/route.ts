@@ -21,7 +21,14 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const userId = getCurrentUserIdFromRequest(request);
+    // Try getting userId from cookie first, then fallback to business session
+    let userId = getCurrentUserIdFromRequest(request);
+    const { validateBusinessSession, getSessionUserEmail } = await import('@/lib/session');
+    const businessSession = await validateBusinessSession();
+
+    if (!userId && businessSession?.id) {
+      userId = businessSession.id;
+    }
 
     if (!userId) {
       return NextResponse.json(
@@ -30,11 +37,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // For user switching, all authenticated users should be able to see all users
-    // This allows agents to switch to admin/manager accounts
-    // The restriction on user management (create/edit/delete) is still enforced in POST/PATCH/DELETE endpoints
-    const { validateBusinessSession, getSessionUserEmail } = await import('@/lib/session');
-    const businessSession = await validateBusinessSession();
     const sharedGmailEmail = await getSessionUserEmail();
 
     const users = await getAllUsers(businessSession?.businessId, sharedGmailEmail);
