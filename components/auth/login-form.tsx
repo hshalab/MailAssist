@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { LogIn, Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, ArrowLeft, CheckCircle2, Sparkles } from "lucide-react"
+import { LogIn, Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, ArrowLeft, CheckCircle2, Sparkles, KeyRound } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 
 interface LoginFormProps {
   onSuccess: () => void
@@ -30,6 +31,13 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [userType, setUserType] = useState<string | null>(null)
+
+  // Forgot password state
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState("")
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false)
+  const [forgotPasswordSent, setForgotPasswordSent] = useState(false)
+  const [forgotPasswordError, setForgotPasswordError] = useState<string | null>(null)
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -148,6 +156,46 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
     setStep("email")
     setError(null)
     setFormData(prev => ({ ...prev, password: "" }))
+  }
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!forgotPasswordEmail) {
+      setForgotPasswordError("Please enter your email address")
+      return
+    }
+
+    setForgotPasswordLoading(true)
+    setForgotPasswordError(null)
+
+    try {
+      const response = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: forgotPasswordEmail }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        setForgotPasswordError(data.error || "Failed to send reset email")
+        return
+      }
+
+      setForgotPasswordSent(true)
+    } catch (err) {
+      console.error("Forgot password error:", err)
+      setForgotPasswordError("An unexpected error occurred. Please try again.")
+    } finally {
+      setForgotPasswordLoading(false)
+    }
+  }
+
+  const openForgotPasswordDialog = () => {
+    setForgotPasswordEmail(formData.email || "")
+    setForgotPasswordSent(false)
+    setForgotPasswordError(null)
+    setShowForgotPassword(true)
   }
 
   return (
@@ -340,7 +388,7 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
                   type="button"
                   className="text-sm text-primary hover:underline font-medium"
                   disabled={loading}
-                  onClick={() => alert("Password reset feature coming soon!")}
+                  onClick={openForgotPasswordDialog}
                 >
                   Forgot password?
                 </button>
@@ -494,6 +542,83 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
           </Button>
         </CardContent>
       </Card>
+
+      {/* Forgot Password Dialog */}
+      <Dialog open={showForgotPassword} onOpenChange={setShowForgotPassword}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <div className="flex justify-center mb-4">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center">
+                <KeyRound className="w-6 h-6 text-white" />
+              </div>
+            </div>
+            <DialogTitle className="text-center">Reset Password</DialogTitle>
+            <DialogDescription className="text-center">
+              {forgotPasswordSent
+                ? "Check your email for a reset link"
+                : "Enter your email and we'll send you a reset link"}
+            </DialogDescription>
+          </DialogHeader>
+
+          {forgotPasswordSent ? (
+            <div className="text-center space-y-4 py-4">
+              <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-8 h-8 text-green-500" />
+              </div>
+              <p className="text-sm text-muted-foreground">
+                If an account exists for <span className="font-medium text-foreground">{forgotPasswordEmail}</span>, you will receive a password reset link shortly.
+              </p>
+              <Button
+                onClick={() => setShowForgotPassword(false)}
+                className="w-full"
+              >
+                Close
+              </Button>
+            </div>
+          ) : (
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              {forgotPasswordError && (
+                <Alert variant="destructive">
+                  <AlertDescription>{forgotPasswordError}</AlertDescription>
+                </Alert>
+              )}
+
+              <div className="space-y-2">
+                <Label htmlFor="forgot-email">Email Address</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    id="forgot-email"
+                    type="email"
+                    placeholder="name@company.com"
+                    value={forgotPasswordEmail}
+                    onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                    className="pl-10"
+                    disabled={forgotPasswordLoading}
+                    required
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={forgotPasswordLoading}
+              >
+                {forgotPasswordLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                    Sending...
+                  </>
+                ) : (
+                  "Send Reset Link"
+                )}
+              </Button>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

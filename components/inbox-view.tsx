@@ -188,8 +188,9 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Accounts</SelectItem>
-                    {connectedAccounts.map((account) => (
-                      <SelectItem key={account.email} value={account.email}>
+                    {/* Deduplicate accounts by email to prevent duplicate key errors */}
+                    {Array.from(new Map(connectedAccounts.map(a => [a.email, a])).values()).map((account, idx) => (
+                      <SelectItem key={`${account.email}-${idx}`} value={account.email}>
                         {account.email}
                       </SelectItem>
                     ))}

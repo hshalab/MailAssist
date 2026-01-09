@@ -41,7 +41,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   const [hasMore, setHasMore] = useState(true)
   const [showImapForm, setShowImapForm] = useState(false)
   const listContainerRef = useRef<HTMLDivElement>(null)
-  
+
   // Client-side cache for email details to make clicking instant
   const emailCacheRef = useRef<Map<string, any>>(new Map())
   const prefetchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -97,7 +97,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       setLimit(newLimit)
       // If we received at least as many as we asked for, assume there might be more
       setHasMore(Array.isArray(data.emails) && data.emails.length >= newLimit)
-      
+
       // PERFORMANCE: Prefetch the first 3 emails for instant loading
       if (!isLoadMore && data.emails?.length > 0) {
         const topEmails = data.emails.slice(0, 3)
@@ -122,7 +122,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   const prefetchEmailDetails = async (emailId: string) => {
     // Skip if already cached
     if (emailCacheRef.current.has(emailId)) return
-    
+
     try {
       const response = await fetch(`/api/emails/${emailId}`, {
         // Use force-cache to store in browser cache
@@ -239,18 +239,18 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     return (
       <div className="p-3 space-y-2 animate-in fade-in duration-300">
         {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-          <div 
-            key={i} 
+          <div
+            key={i}
             className="relative w-full rounded-xl border border-border/40 bg-gradient-to-br from-card via-card to-muted/5 overflow-hidden"
             style={{ animationDelay: `${i * 30}ms` }}
           >
             {/* Shimmer effect overlay */}
             <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
-            
+
             <div className="flex gap-3 p-3 relative">
               {/* Avatar Skeleton */}
               <div className="w-10 h-10 rounded-full bg-muted/80 flex-shrink-0 shadow-sm" />
-              
+
               {/* Content Skeleton */}
               <div className="flex-1 min-w-0 space-y-2">
                 {/* Row 1: Name and Time */}
@@ -258,16 +258,16 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
                   <div className="h-4 bg-muted/70 rounded-md w-32" />
                   <div className="h-3 bg-muted/50 rounded w-12" />
                 </div>
-                
+
                 {/* Row 2: Subject */}
                 <div className="h-4 bg-muted/70 rounded-md w-3/4" />
-                
+
                 {/* Row 3: Snippet */}
                 <div className="space-y-1.5">
                   <div className="h-3 bg-muted/50 rounded w-full" />
                   <div className="h-3 bg-muted/50 rounded w-2/3" />
                 </div>
-                
+
                 {/* Row 4: Badges */}
                 <div className="flex items-center gap-1.5 pt-1">
                   <div className="h-4 bg-muted/40 rounded-md w-20" />
@@ -392,7 +392,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     <div className="p-3 space-y-2 overflow-x-hidden max-w-full">
       {filteredEmails.map((email, index) => (
         <button
-          key={email.id}
+          key={`${email.id}-${index}`}
           onClick={() => {
             // Get cached full email data if available
             const cachedEmail = emailCacheRef.current.get(email.id)

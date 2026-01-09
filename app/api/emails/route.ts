@@ -127,50 +127,16 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Background processing (ticket creation) - shared logic
-    // We only process tickets if we have emails
-    if (emails && emails.length > 0) {
-      Promise.all(
-        emails.map(async (email: any) => {
-          try {
-            if (type === 'sent') {
-              await storeSentEmail(email);
-              await ensureTicketForEmail(
-                {
-                  id: email.id,
-                  threadId: email.threadId,
-                  subject: email.subject,
-                  from: email.from,
-                  to: email.to,
-                  date: email.date,
-                },
-                true
-              );
-            } else {
-              await storeReceivedEmail(email);
-              const labels = email.labels || [];
-              const isSpamOrTrash = labels.some((label: string) => ['SPAM', 'TRASH'].includes(label));
-
-              if (!isSpamOrTrash) {
-                await ensureTicketForEmail(
-                  {
-                    id: email.id,
-                    threadId: email.threadId,
-                    subject: email.subject,
-                    from: email.from,
-                    to: email.to,
-                    date: email.date,
-                  },
-                  false
-                );
-              }
-            }
-          } catch (error) {
-            console.error(`Error processing email ${email.id}:`, error);
-          }
-        })
-      ).catch(err => console.error('Background ticket processing error:', err));
-    }
+    // ============================================================
+    // REMOVED: Background ticket processing
+    // ============================================================
+    // This was causing tickets to reopen on every page load because
+    // ensureTicketForEmail was being called for ALL emails each time
+    // the inbox was fetched. Ticket creation should ONLY happen:
+    // 1. During initial email sync (sync/route.ts)
+    // 2. When viewing a specific email (/emails/[id])
+    // 3. When receiving push notifications from Gmail
+    // ============================================================
 
     // Enrich emails with department info if available
     if (emails && emails.length > 0) {

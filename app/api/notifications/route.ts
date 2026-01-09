@@ -3,7 +3,16 @@ import { listNotifications, markNotificationRead } from '@/lib/notifications'
 import { getCurrentUserIdFromRequest } from '@/lib/session'
 
 export async function GET(request: NextRequest) {
-  const userId = getCurrentUserIdFromRequest(request)
+  // Try getting userId from cookie first
+  let userId = getCurrentUserIdFromRequest(request)
+
+  // If no cookie, try getting from business session
+  if (!userId) {
+    const { validateBusinessSession } = await import('@/lib/session')
+    const businessSession = await validateBusinessSession()
+    userId = businessSession?.id || null
+  }
+
   if (!userId) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const notifications = await listNotifications(userId)
   return NextResponse.json({ notifications })

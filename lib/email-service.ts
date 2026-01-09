@@ -73,6 +73,78 @@ export const sendEmail = {
       console.error('[EmailService] Failed to send OTP email:', error);
       throw error;
     }
+  },
+
+  /**
+   * Send password reset email
+   */
+  passwordReset: async ({ to, userName, resetLink }: { to: string; userName: string; resetLink: string }) => {
+    // If no API key, just log the link (dev mode)
+    if (!process.env.RESEND_API_KEY) {
+      console.log('=================================================================');
+      console.log(`[DEV MODE] Password Reset for ${to}`);
+      console.log(`User: ${userName}`);
+      console.log(`Reset Link: ${resetLink}`);
+      console.log('=================================================================');
+      return { success: true, id: 'dev-mode' };
+    }
+
+    try {
+      const companyName = process.env.COMPANY_NAME || 'Mail Assistant';
+      const fromEmail = process.env.EMAIL_FROM || 'onboarding@resend.dev';
+
+      console.log(`[EmailService] Sending password reset to: ${to}`);
+
+      const { data, error } = await resend.emails.send({
+        from: `${companyName} <${fromEmail}>`,
+        to,
+        subject: `Reset your password - ${companyName}`,
+        html: `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <style>
+                body { font-family: sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+                .container { background: #f9fafb; border-radius: 12px; padding: 40px; text-align: center; }
+                .button { display: inline-block; background: #4f46e5; color: white !important; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; margin: 20px 0; }
+                .button:hover { background: #4338ca; }
+                .footer { margin-top: 30px; font-size: 12px; color: #666; }
+                .link { word-break: break-all; font-size: 12px; color: #666; margin-top: 20px; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h1>Reset Your Password</h1>
+                <p>Hi ${userName},</p>
+                <p>We received a request to reset your password. Click the button below to create a new password.</p>
+                
+                <a href="${resetLink}" class="button">Reset Password</a>
+                
+                <p>This link will expire in 1 hour.</p>
+                
+                <div class="link">
+                  <p>Or copy this link: ${resetLink}</p>
+                </div>
+                
+                <div class="footer">
+                  <p>If you didn't request this, you can safely ignore this email. Your password will remain unchanged.</p>
+                </div>
+              </div>
+            </body>
+          </html>
+        `
+      });
+
+      if (error) {
+        console.error('[EmailService] Resend API error:', error);
+        throw new Error(error.message);
+      }
+
+      return { success: true, id: data?.id };
+    } catch (error) {
+      console.error('[EmailService] Failed to send password reset email:', error);
+      throw error;
+    }
   }
 };
 
