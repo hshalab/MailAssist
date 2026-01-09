@@ -13,9 +13,16 @@ import { validateBusinessSession } from '@/lib/session';
 
 export async function GET(request: NextRequest) {
   try {
-    const userId = getCurrentUserIdFromRequest(request);
-    const userEmail = await getCurrentUserEmail();
+    // Try getting userId from cookie first
+    let userId = getCurrentUserIdFromRequest(request);
     const businessSession = await validateBusinessSession();
+
+    // If no cookie, fallback to business session
+    if (!userId && businessSession?.id) {
+      userId = businessSession.id;
+    }
+
+    const userEmail = await getCurrentUserEmail();
     const businessId = businessSession?.businessId || null;
 
     if (!userId) {
