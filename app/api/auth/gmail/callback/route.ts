@@ -203,39 +203,57 @@ export async function GET(request: NextRequest) {
         throw new Error(`Failed to create session: ${sessionError.message}`);
       }
 
-      // Create redirect response
-      const redirectUrl = accountInfo.exists ? `${frontendUrl}/?auth=success` : `${frontendUrl}/?auth=success&newAccount=true`;
-      const response = NextResponse.redirect(redirectUrl);
-
-      // Determine if we're in production (Vercel or NODE_ENV)
-      const isProduction = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
-
-      // 4. Set Cookies - CRITICAL: Make sure these are set correctly for the redirect
-      console.log('[OAuth Login] Setting cookies for session:', sessionToken.substring(0, 8), 'userId:', userId, 'isProduction:', isProduction);
-
-      response.cookies.set('session_token', sessionToken, {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'lax',
-        expires: expiresAt,
-        path: '/',
-        // Don't set domain - let browser use the current domain
-      });
-
-      // Also delete any old session tokens to prevent conflicts
-      response.cookies.delete('current_user_id');
-
-      // Use helper to set current_user_id with proper flags
-      setCurrentUserIdInResponse(response, userId!);
-
-      // Set gmail_user_email cookie for session management
-      setSessionUserEmailInResponse(response, gmailEmail);
-
       // 5. Save Tokens (Linked to this user's business if they have one)
       await saveTokens(tokens, businessId || undefined);
 
       console.log('[OAuth Callback] Login successful for:', gmailEmail, 'userId:', userId, 'businessId:', businessId);
-      console.log('[OAuth Callback] Session created at:', new Date().toISOString());
+      console.log('[OAuth Callback] Session token:', sessionToken.substring(0, 8) + '...');
+
+      // Determine if we're in production (Vercel or NODE_ENV)
+      const isProduction = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+
+      // Create redirect URL
+      const redirectUrl = accountInfo.exists ? `${frontendUrl}/?auth=success` : `${frontendUrl}/?auth=success&newAccount=true`;
+
+      // CRITICAL FIX: Use HTML response with meta-refresh instead of NextResponse.redirect()
+      // This ensures cookies are properly set before the browser navigates
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta http-equiv="refresh" content="0;url=${redirectUrl}">
+            <title>Redirecting...</title>
+          </head>
+          <body>
+            <p>Logging you in... <a href="${redirectUrl}">Click here if not redirected</a></p>
+          </body>
+        </html>
+      `;
+
+      const response = new NextResponse(html, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html',
+        }
+      });
+
+      // Set session_token cookie with proper flags
+      const cookieOptions = {
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'lax' as const,
+        expires: expiresAt,
+        path: '/',
+      };
+
+      response.cookies.set('session_token', sessionToken, cookieOptions);
+      response.cookies.set('current_user_id', userId!, cookieOptions);
+      response.cookies.set('gmail_user_email', gmailEmail, {
+        ...cookieOptions,
+        httpOnly: false, // Allow JS access for frontend
+      });
+
+      console.log('[OAuth Callback] Cookies set, redirecting to:', redirectUrl);
       return response;
     }
 
