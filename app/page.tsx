@@ -20,8 +20,7 @@ import TeamManagement from "@/components/team-management"
 import DepartmentsView from "@/components/departments-view"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { User, Sparkles, AlertTriangle } from "lucide-react"
+import { User, Sparkles } from "lucide-react"
 
 type View = SidebarView
 
@@ -65,7 +64,6 @@ function PageContent() {
   const [checkingUser, setCheckingUser] = useState(true)
   const [currentUser, setCurrentUser] = useState<{ id: string; name: string; role: string; businessId?: string | null; businessName?: string | null } | null>(null)
   const [hasAdmin, setHasAdmin] = useState(false)
-  const [dataDeleted, setDataDeleted] = useState(false) // Track if user data was deleted
 
   const [syncStatus, setSyncStatus] = useState<SyncStats | null>(null)
   const [syncInProgress, setSyncInProgress] = useState(false)
@@ -265,9 +263,8 @@ function PageContent() {
         )
 
         if (wasLoggedIn && response.status === 404) {
-          // User data was deleted - clear everything and show message
+          // User data was deleted - clear everything and redirect silently
           console.log('[Auth] User data was deleted, clearing session and redirecting...')
-          setDataDeleted(true)
           
           // Clear all session data
           if (typeof window !== "undefined") {
@@ -284,10 +281,10 @@ function PageContent() {
             console.error("Error during logout:", err)
           }
           
-          setCurrentUserId(null)
-          setCurrentUser(null)
-          setIsConnected(false)
-          setCheckingUser(false)
+          // Automatically redirect to welcome screen
+          if (typeof window !== "undefined") {
+            window.location.href = "/welcome"
+          }
           return
         }
         
@@ -928,41 +925,8 @@ function PageContent() {
 
   return (
     <>
-      {/* Show data deleted message if user data was removed */}
-      {dataDeleted ? (
-        <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-          <Card className="max-w-md w-full mx-4 bg-slate-800/50 border-red-500/20 backdrop-blur-xl">
-            <CardHeader className="text-center pb-4">
-              <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <AlertTriangle className="h-8 w-8 text-red-400" />
-              </div>
-              <CardTitle className="text-2xl font-bold text-white mb-2">
-                Account Data Removed
-              </CardTitle>
-              <CardDescription className="text-slate-400 text-base">
-                Your account data has been removed from the system. You have been logged out for your security.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
-                <p className="text-sm text-blue-300">
-                  To continue using the application, please reconnect your Gmail account or create a new account.
-                </p>
-              </div>
-              <Button
-                onClick={() => {
-                  setDataDeleted(false)
-                  window.location.href = "/welcome"
-                }}
-                className="w-full bg-primary hover:bg-primary/90 text-white"
-                size="lg"
-              >
-                Go to Welcome Screen
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      ) : (!isConnected || !currentUserId || (checkingUser && !currentUser)) ? (
+      {/* Only show full layout if user is selected, otherwise show UserSelector in a centered card */}
+      {(!isConnected || !currentUserId || (checkingUser && !currentUser)) ? (
         <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
           <div className="max-w-md w-full">
             {checkingAuth || checkingUser ? (
