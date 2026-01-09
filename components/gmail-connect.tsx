@@ -14,6 +14,11 @@ export default function GmailConnect({ onConnect }: GmailConnectProps) {
   const handleConnect = async () => {
     try {
       setConnecting(true)
+      // Set flag to show loading skeleton when returning from OAuth
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('show_inbox_skeleton_on_return', 'true')
+      }
+      
       const response = await fetch('/api/auth/gmail')
       
       if (!response.ok) {
@@ -27,6 +32,10 @@ export default function GmailConnect({ onConnect }: GmailConnectProps) {
       console.error('Error connecting Gmail:', error)
       alert('Failed to connect Gmail. Please try again.')
       setConnecting(false)
+      // Clear flag on error
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('show_inbox_skeleton_on_return')
+      }
     }
   }
 

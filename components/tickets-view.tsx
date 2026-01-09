@@ -1971,10 +1971,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full animate-in fade-in duration-300">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-8 h-8 animate-spin text-primary" />
-          <p className="text-sm text-muted-foreground animate-pulse">Loading tickets...</p>
+      <div className="flex items-center justify-center h-full w-full bg-background animate-in fade-in duration-300">
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative">
+            <Loader2 className="w-12 h-12 animate-spin text-primary" />
+            <div className="absolute inset-0 w-12 h-12 border-4 border-primary/20 rounded-full"></div>
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-base font-medium text-foreground">Loading tickets...</p>
+            <p className="text-sm text-muted-foreground">Please wait while we fetch your tickets</p>
+          </div>
         </div>
       </div>
     )

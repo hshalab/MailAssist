@@ -127,9 +127,22 @@ function PageContent() {
         sessionStorage.setItem('trigger_sync_after_connect', 'true')
         sessionStorage.setItem('trigger_backfill_after_sync', 'true')
         sessionStorage.setItem('trigger_backfill_on_connect', 'true') // Also trigger immediately after connection
+        // Keep the skeleton flag - it will be cleared when emails load
+        // Don't remove it here, let EmailList clear it
       }
+      // Ensure we're on inbox view to show skeleton
+      setActiveView("inbox")
       window.history.replaceState({}, "", window.location.pathname)
       return
+    }
+    
+    // Also check for auth=success (from business account creation flow)
+    if (params.get("auth") === "success") {
+      // Check if we should show skeleton (user clicked connect button)
+      if (typeof window !== 'undefined' && sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true') {
+        // Ensure we're on inbox view to show skeleton
+        setActiveView("inbox")
+      }
     }
 
     // NEW: If a valid business session exists, set isConnected to true

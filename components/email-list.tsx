@@ -173,6 +173,10 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
 
   // Initial fetch on mount and when viewType or selectedAccount changes
   useEffect(() => {
+    // Check if we should show skeleton (returning from Gmail OAuth)
+    const shouldShowSkeleton = typeof window !== 'undefined' && 
+      sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
+    
     // Ensure loading state is explicitly set to true before any async operations
     // This is critical for production builds where hydration timing differs
     setLoading(true)
@@ -184,13 +188,19 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     
     // Use requestAnimationFrame + setTimeout to ensure React has fully rendered
     // the skeleton before fetch starts. This is especially important in production.
+    // If returning from OAuth, add a longer delay to ensure skeleton is visible
     let rafId: number
     let timeoutId: NodeJS.Timeout
     
     rafId = requestAnimationFrame(() => {
       timeoutId = setTimeout(() => {
-        fetchEmails(150)
-      }, 10) // Small delay to ensure skeleton renders
+        fetchEmails(150).finally(() => {
+          // Clear the skeleton flag once emails are loaded
+          if (shouldShowSkeleton && typeof window !== 'undefined') {
+            sessionStorage.removeItem('show_inbox_skeleton_on_return')
+          }
+        })
+      }, shouldShowSkeleton ? 100 : 10) // Longer delay if returning from OAuth
     })
     
     return () => {
