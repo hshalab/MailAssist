@@ -144,7 +144,26 @@ export async function GET(request: NextRequest) {
 
         if (existingUser) {
           userName = existingUser.name;
-          console.log('Found existing user:', gmailEmail, 'accountType:', accountInfo.accountType, 'businessId:', businessId);
+          console.log('Found existing user:', gmailEmail, 'accountType:', accountInfo.accountType, 'businessId:', businessId, 'role:', existingUser.role);
+          
+          // CRITICAL FIX: If this is a business account and the email matches the business owner email,
+          // ensure the user is admin (they might have been created as agent)
+          if (businessId && existingUser.role !== 'admin') {
+            const { data: business } = await supabase
+              .from('businesses')
+              .select('business_email')
+              .eq('id', businessId)
+              .single();
+            
+            if (business && business.business_email === gmailEmail) {
+              console.log('[Gmail Callback] Business owner email detected, promoting user to admin:', userId);
+              await supabase
+                .from('users')
+                .update({ role: 'admin' })
+                .eq('id', userId);
+              console.log('[Gmail Callback] User promoted to admin');
+            }
+          }
         }
       } else {
         // Create new personal account

@@ -131,8 +131,13 @@ export async function PATCH(
 
         // Trigger auto-classification for unclassified emails (non-blocking)
         // This helps re-classify tickets with updated department descriptions
-        runAutoClassify({ limit: 50 }).catch(err => {
+        runAutoClassify({ 
+            limit: 50,
+            businessId: currentUser.businessId,
+            userEmail: currentUser.accountType === 'personal' ? currentUser.email : null
+        }).catch(err => {
             console.warn('[Department] Failed to trigger auto-classification after department update:', err);
+            console.warn('[Department] Error details:', err instanceof Error ? err.stack : err);
         });
 
         return NextResponse.json({

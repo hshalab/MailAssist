@@ -369,14 +369,24 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
     try {
       console.log(`[SYNC] Triggering auto-classification for ${ticketsCreated} newly created tickets...`);
       const { runAutoClassify } = await import('@/lib/auto-classify');
-      // Run classification in background (non-blocking)
-      runAutoClassify({ limit: Math.min(ticketsCreated, 50) }).then(result => {
+      // Run classification in background (non-blocking) with explicit businessId/userEmail
+      // This ensures it works in serverless contexts where getCurrentUser() might fail
+      const businessId = businessSession?.businessId || null;
+      const userEmailForClassify = userEmail || businessSession?.email || null;
+      
+      runAutoClassify({ 
+        limit: Math.min(ticketsCreated, 50),
+        businessId: businessId,
+        userEmail: userEmailForClassify
+      }).then(result => {
         console.log(`[SYNC] Auto-classification completed: ${result.processed} processed, ${result.success} successful, ${result.failed} failed`);
       }).catch(err => {
         console.error('[SYNC] Auto-classification error (non-blocking):', err);
+        console.error('[SYNC] Auto-classification error details:', err instanceof Error ? err.stack : err);
       });
     } catch (error) {
       console.error('[SYNC] Failed to trigger auto-classification:', error);
+      console.error('[SYNC] Failed to trigger auto-classification details:', error instanceof Error ? error.stack : error);
       // Don't throw - this is non-critical
     }
   }

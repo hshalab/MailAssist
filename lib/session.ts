@@ -215,7 +215,8 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
         business_id,
         businesses (
           id,
-          business_name
+          business_name,
+          business_email
         )
       `)
       .eq('id', session.user_id)
@@ -226,13 +227,23 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
       return null
     }
 
+    // CRITICAL FIX: If user is business owner (email matches business_email), ensure they're admin
     const business = Array.isArray(user.businesses) ? user.businesses[0] : user.businesses
+    let userRole = user.role as 'admin' | 'manager' | 'agent'
+    if (business && business.business_email && user.email === business.business_email && userRole !== 'admin') {
+      console.log('[Session] Business owner detected, promoting to admin:', user.id)
+      await supabase
+        .from('users')
+        .update({ role: 'admin' })
+        .eq('id', user.id)
+      userRole = 'admin'
+    }
 
     return {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role as 'admin' | 'manager' | 'agent',
+      role: userRole,
       businessId: user.business_id,
       businessName: business?.business_name || 'Unknown Business',
       accountType: user.business_id !== null ? 'business' : 'personal',

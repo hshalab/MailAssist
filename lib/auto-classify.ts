@@ -10,6 +10,8 @@ import { classifyTicketToDepartmentAsync } from './tickets';
 export interface AutoClassifyOptions {
     days?: number;
     limit?: number;
+    businessId?: string | null; // Optional: explicitly provide businessId for server-side calls
+    userEmail?: string | null; // Optional: explicitly provide userEmail for server-side calls
 }
 
 export async function runAutoClassify(options: AutoClassifyOptions = {}): Promise<{
@@ -18,24 +20,41 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
     failed: number;
 }> {
     try {
-        const user = await getCurrentUser();
-        if (!user) {
-            throw new Error('Unauthorized');
+        // Try to get current user, but allow server-side calls without user context
+        let user = null;
+        try {
+            user = await getCurrentUser();
+        } catch (err) {
+            console.warn('[Auto-Classify] Could not get current user (server-side context?), continuing...', err);
         }
+
+        // If no user and no explicit businessId/email provided, we can't proceed
+        if (!user && !options.businessId && !options.userEmail) {
+            console.error('[Auto-Classify] No user context and no explicit businessId/userEmail provided');
+            throw new Error('Unauthorized: No user context available');
+        }
+
+        // Use provided businessId/userEmail or fall back to user's context
+        const businessId = options.businessId || (user?.businessId || null);
+        const userEmail = options.userEmail || (user?.email || null);
+        const accountType = businessId ? 'business' : 'personal';
 
         // Fetch user settings for auto_classify_days
-        let settingsQuery = supabase
-            .from('user_settings')
-            .select('auto_classify_days');
+        let defaultDays = 30;
+        if (supabase) {
+            let settingsQuery = supabase
+                .from('user_settings')
+                .select('auto_classify_days');
 
-        if (user.accountType === 'business' && user.businessId) {
-            settingsQuery = settingsQuery.eq('business_id', user.businessId);
-        } else {
-            settingsQuery = settingsQuery.eq('user_email', user.email);
+            if (businessId) {
+                settingsQuery = settingsQuery.eq('business_id', businessId);
+            } else if (userEmail) {
+                settingsQuery = settingsQuery.eq('user_email', userEmail);
+            }
+
+            const { data: settings } = await settingsQuery.maybeSingle();
+            defaultDays = settings?.auto_classify_days || 30;
         }
-
-        const { data: settings } = await settingsQuery.maybeSingle();
-        const defaultDays = settings?.auto_classify_days || 30;
 
         const days = options.days || defaultDays;
         const limit = Math.min(options.limit || 30, 50); // Default batch size: 30, max 50
@@ -53,13 +72,13 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
             .gte('created_at', cutoffDate.toISOString());
 
         // Filter by account scope - works for both personal and business accounts
-        if (user.accountType === 'business' && user.businessId) {
+        if (businessId) {
             // Business account: Get all tickets for connected Gmail accounts in this business
             // Get all connected account emails from tokens table
             const { data: tokens } = await supabase
-                .from('tokens')
+                ?.from('tokens')
                 .select('user_email')
-                .eq('business_id', user.businessId)
+                .eq('business_id', businessId)
                 .not('user_email', 'is', null);
 
             if (tokens && tokens.length > 0) {
@@ -72,19 +91,23 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
                     // Filter tickets by user_email matching any connected account
                     ticketsQuery = ticketsQuery.in('user_email', accountEmails);
                 } else {
-                    // Fallback: filter by current user's email
-                    console.log(`[Auto-Classify] Business account: No connected accounts found, using user email: ${user.email}`);
-                    ticketsQuery = ticketsQuery.eq('user_email', user.email);
+                    // Fallback: filter by userEmail if provided
+                    if (userEmail) {
+                        console.log(`[Auto-Classify] Business account: No connected accounts found, using user email: ${userEmail}`);
+                        ticketsQuery = ticketsQuery.eq('user_email', userEmail);
+                    }
                 }
             } else {
-                // Fallback: filter by current user's email
-                console.log(`[Auto-Classify] Business account: No tokens found, using user email: ${user.email}`);
-                ticketsQuery = ticketsQuery.eq('user_email', user.email);
+                // Fallback: filter by userEmail if provided
+                if (userEmail) {
+                    console.log(`[Auto-Classify] Business account: No tokens found, using user email: ${userEmail}`);
+                    ticketsQuery = ticketsQuery.eq('user_email', userEmail);
+                }
             }
-        } else {
+        } else if (userEmail) {
             // Personal account: filter by user_email
-            console.log(`[Auto-Classify] Personal account: Filtering by user email: ${user.email}`);
-            ticketsQuery = ticketsQuery.eq('user_email', user.email);
+            console.log(`[Auto-Classify] Personal account: Filtering by user email: ${userEmail}`);
+            ticketsQuery = ticketsQuery.eq('user_email', userEmail);
         }
 
         const { data: tickets, error: fetchError } = await ticketsQuery.limit(limit);
@@ -107,8 +130,7 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
 
         // Check if departments exist before processing
         const { getAllDepartments } = await import('./departments');
-        const businessId = user.accountType === 'business' && user.businessId ? user.businessId : null;
-        const scopeEmail = businessId ? null : user.email;
+        const scopeEmail = businessId ? null : userEmail;
         const departments = await getAllDepartments(scopeEmail, businessId);
 
         if (!departments || departments.length === 0) {
@@ -140,7 +162,7 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
                     t.id,
                     t.subject,
                     bodyContent,
-                    t.user_email || user.email
+                    t.user_email || userEmail || null
                 );
             })
         );

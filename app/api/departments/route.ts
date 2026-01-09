@@ -105,8 +105,13 @@ export async function POST(request: NextRequest) {
 
         // Trigger auto-classification for unclassified emails (non-blocking)
         // This helps classify existing unclassified tickets with the new department
-        runAutoClassify({ limit: 50 }).catch(err => {
+        runAutoClassify({ 
+            limit: 50,
+            businessId: currentUser.businessId,
+            userEmail: currentUser.accountType === 'personal' ? currentUser.email : null
+        }).catch(err => {
             console.warn('[Department] Failed to trigger auto-classification after department creation:', err);
+            console.warn('[Department] Error details:', err instanceof Error ? err.stack : err);
         });
 
         return NextResponse.json({
