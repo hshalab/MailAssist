@@ -5,11 +5,12 @@
 import { NextResponse } from 'next/server';
 import { getValidTokens } from '@/lib/token-refresh';
 import { getUserProfile } from '@/lib/gmail';
+import { supabase } from '@/lib/supabase';
 
 export async function GET() {
   try {
     // 1. Try to get user from business session first
-    const { getCurrentUser } = await import('@/lib/session');
+    const { getCurrentUser, validateBusinessSession } = await import('@/lib/session');
     const user = await getCurrentUser();
 
     if (user) {
@@ -22,7 +23,19 @@ export async function GET() {
       });
     }
 
-    // 2. Fall back to Gmail tokens (legacy flow)
+    // 2. Try business session directly (production cookie fallback)
+    const businessSession = await validateBusinessSession();
+    if (businessSession) {
+      return NextResponse.json({
+        emailAddress: businessSession.email,
+        displayName: businessSession.name,
+        picture: null,
+        role: businessSession.role,
+        businessName: businessSession.businessName
+      });
+    }
+
+    // 3. Fall back to Gmail tokens (legacy flow)
     const tokens = await getValidTokens();
 
     if (!tokens || !tokens.access_token) {
@@ -33,7 +46,34 @@ export async function GET() {
     }
 
     const profile = await getUserProfile(tokens);
-    return NextResponse.json(profile);
+
+    // Look up user in database to get their role
+    let role = undefined;
+    let businessName = undefined;
+    if (profile?.emailAddress && supabase) {
+      const { data: dbUser } = await supabase
+        .from('users')
+        .select(`
+          role,
+          businesses (
+            business_name
+          )
+        `)
+        .eq('email', profile.emailAddress.toLowerCase())
+        .maybeSingle();
+
+      if (dbUser) {
+        role = dbUser.role;
+        const business = Array.isArray(dbUser.businesses) ? dbUser.businesses[0] : dbUser.businesses;
+        businessName = business?.business_name;
+      }
+    }
+
+    return NextResponse.json({
+      ...profile,
+      role,
+      businessName
+    });
   } catch (error) {
     console.error('Error fetching profile:', error);
     return NextResponse.json(
