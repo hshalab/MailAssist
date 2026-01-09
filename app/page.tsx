@@ -788,10 +788,10 @@ function PageContent() {
                   </p>
                 </div>
               </div>
-            ) : !isConnected ? (
+            ) : (
+              // Redirect to welcome page when not connected or no user
               <div className="flex items-center justify-center h-full p-4">
                 {(() => {
-                  // Redirect to welcome page
                   if (typeof window !== 'undefined') {
                     window.location.href = '/welcome'
                   }
@@ -803,11 +803,6 @@ function PageContent() {
                   )
                 })()}
               </div>
-            ) : (
-              <UserSelector
-                onUserSelected={handleUserSelected}
-                currentUserId={currentUserId}
-              />
             )}
           </div>
         </div>
