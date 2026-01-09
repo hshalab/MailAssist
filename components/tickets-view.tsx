@@ -671,30 +671,45 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
 
-  // Background Auto-Classify Polling (Every 60s)
+  // Background Auto-Classify Polling (Groq Free Tier Optimized)
+  // 30 RPM limit typically. We do 10 requests every 25 seconds = 24 RPM.
   useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+
     const runAutoClassify = async () => {
-      if (typeof document !== 'undefined' && document.hidden) return;
+      if (typeof document === 'undefined') return;
+      // If hidden, even slower
+      if (document.hidden) {
+        timeoutId = setTimeout(runAutoClassify, 60000);
+        return;
+      }
+
       try {
         const res = await fetch('/api/departments/backfill', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ limit: 25 })
+          body: JSON.stringify({ limit: 10 }) // Smaller batch
         });
+
         if (res.ok) {
           const data = await res.json();
           if (data.processed > 0) {
-            console.log(`[AutoClassify] Background processed ${data.processed} tickets.`);
+            console.log(`[AutoClassify] Processed ${data.processed} tickets. Pacing...`);
             fetchTickets({ silent: true });
           }
         }
       } catch (e) {
         console.error('[AutoClassify] Background check failed', e);
+      } finally {
+        // Wait 25 seconds before next batch to respect rate limits
+        timeoutId = setTimeout(runAutoClassify, 25000);
       }
     };
 
-    const interval = setInterval(runAutoClassify, 60000); // 1 minute
-    return () => clearInterval(interval);
+    // Initial delay
+    timeoutId = setTimeout(runAutoClassify, 10000);
+
+    return () => clearTimeout(timeoutId);
   }, [fetchTickets]);
 
   // Refresh tickets when window gains focus (to catch updates from inbox)

@@ -48,39 +48,54 @@ export async function POST(request: NextRequest) {
         let errors = 0;
 
         // 2. Process emails to ensure tickets exist
+        // 2. Process emails to ensure tickets exist (Optimized: Dedupe threads + Concurrency)
+
+        // Group emails by threadId
+        const emailsByThread = new Map<string, any[]>();
         for (const email of emails) {
-            try {
-                if (!email.threadId) {
-                    console.warn(`[TicketSync] Email ${email.id} missing threadId, skipping.`);
-                    continue;
-                }
-
-                // Use getOrCreateTicketForThread which handles duplicates safely
-                // It checks DB first, so it won't duplicate or overwrite existing tickets
-                const ticket = await getOrCreateTicketForThread(
-                    email.threadId,
-                    {
-                        subject: email.subject || '(No Subject)',
-                        customerEmail: email.from, // Parse 'from' header usually contains email
-                        customerName: email.from, // Could parse name cleaner if needed
-                        initialStatus: 'open',
-                        priority: undefined,
-                        tags: [],
-                        lastCustomerReplyAt: email.date, // Use email date as last reply
-                    },
-                    email.snippet || '' // Use snippet as body preview
-                );
-
-                if (ticket) {
-                    // Check if it was just created (approximate check based on created_at?)
-                    // actually getOrCreateTicketForThread doesn't return 'isNew' flag easily
-                    // unless we modify it. For now, just count success.
-                    createdCount++;
-                }
-            } catch (err) {
-                console.error(`[TicketSync] Error processing email ${email.id} (Subject: ${email.subject}):`, err);
-                errors++;
+            if (!email.threadId) continue;
+            if (!emailsByThread.has(email.threadId)) {
+                emailsByThread.set(email.threadId, []);
             }
+            emailsByThread.get(email.threadId)!.push(email);
+        }
+
+        const uniqueThreadIds = Array.from(emailsByThread.keys());
+        console.log(`[TicketSync] Consolidating ${emails.length} emails into ${uniqueThreadIds.length} unique threads.`);
+
+        // Process in batches
+        const BATCH_SIZE = 10;
+        for (let i = 0; i < uniqueThreadIds.length; i += BATCH_SIZE) {
+            const batchIds = uniqueThreadIds.slice(i, i + BATCH_SIZE);
+
+            await Promise.all(batchIds.map(async (threadId) => {
+                try {
+                    const threadEmails = emailsByThread.get(threadId)!;
+                    // Sort by date ascending (oldest first) to get original subject
+                    threadEmails.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+                    const seedEmail = threadEmails[0]; // Oldest email
+                    const latestEmail = threadEmails[threadEmails.length - 1]; // Newest for snippet/date
+
+                    const ticket = await getOrCreateTicketForThread(
+                        threadId,
+                        {
+                            subject: seedEmail.subject || '(No Subject)',
+                            customerEmail: seedEmail.from,
+                            customerName: seedEmail.from,
+                            initialStatus: 'open',
+                            tags: [],
+                            lastCustomerReplyAt: latestEmail.date, // Use latest date
+                        },
+                        latestEmail.snippet || ''
+                    );
+
+                    if (ticket) createdCount++;
+                } catch (err) {
+                    console.error(`[TicketSync] Error processing thread ${threadId}:`, err);
+                    errors++;
+                }
+            }));
         }
 
         console.log(`[TicketSync] Sync Summary: ${createdCount} processed (created/verified), ${errors} errors.`);

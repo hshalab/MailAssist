@@ -41,11 +41,11 @@ export async function getAccountInfo(email: string): Promise<AccountInfo> {
             };
         }
 
-        // Check users table for all accounts with this email
+        // Check users table for all accounts with this email (case-insensitive)
         const { data: users, error } = await supabase
             .from('users')
             .select('id, business_id, password_hash, is_email_verified, role')
-            .eq('email', normalizedEmail)
+            .ilike('email', normalizedEmail)
             .eq('is_active', true);
 
         if (error) {
