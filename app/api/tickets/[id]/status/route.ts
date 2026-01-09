@@ -7,6 +7,7 @@ import { updateTicketStatus } from '@/lib/tickets';
 import { getCurrentUserEmail } from '@/lib/storage';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { isValidUUID, isValidTicketStatus } from '@/lib/validation';
+import { validateBusinessSession } from '@/lib/session';
 
 type RouteContext =
   | { params: { id: string } }
@@ -27,7 +28,13 @@ export async function PATCH(
       );
     }
 
-    const userId = getCurrentUserIdFromRequest(request);
+    // Try getting userId from cookie first, then fallback to business session
+    let userId = getCurrentUserIdFromRequest(request);
+    if (!userId) {
+      const businessSession = await validateBusinessSession();
+      userId = businessSession?.id || null;
+    }
+
     if (!userId) {
       return NextResponse.json(
         { error: 'Not authenticated' },

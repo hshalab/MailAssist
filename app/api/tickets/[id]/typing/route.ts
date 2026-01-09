@@ -6,6 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
+import { validateBusinessSession } from '@/lib/session';
 
 // In-memory store for typing indicators (in production, use Redis or database)
 const typingStatus = new Map<string, Map<string, number>>(); // ticketId -> userId -> timestamp
@@ -44,7 +45,13 @@ export async function GET(
       );
     }
 
-    const userId = getCurrentUserIdFromRequest(request);
+    // Try getting userId from cookie first, then fallback to business session
+    let userId = getCurrentUserIdFromRequest(request);
+    if (!userId) {
+      const businessSession = await validateBusinessSession();
+      userId = businessSession?.id || null;
+    }
+
     if (!userId) {
       return NextResponse.json(
         { error: 'Not authenticated' },
@@ -54,7 +61,7 @@ export async function GET(
 
     // Get all users currently typing (excluding current user)
     const typingUsers = typingStatus.get(ticketId);
-    const activeTypingUsers = typingUsers 
+    const activeTypingUsers = typingUsers
       ? Array.from(typingUsers.keys()).filter(id => id !== userId)
       : [];
 
@@ -83,7 +90,13 @@ export async function POST(
       );
     }
 
-    const userId = getCurrentUserIdFromRequest(request);
+    // Try getting userId from cookie first, then fallback to business session
+    let userId = getCurrentUserIdFromRequest(request);
+    if (!userId) {
+      const businessSession = await validateBusinessSession();
+      userId = businessSession?.id || null;
+    }
+
     if (!userId) {
       return NextResponse.json(
         { error: 'Not authenticated' },
@@ -105,9 +118,9 @@ export async function POST(
     if (!typingStatus.has(ticketId)) {
       typingStatus.set(ticketId, new Map());
     }
-    
+
     const users = typingStatus.get(ticketId)!;
-    
+
     if (typing) {
       users.set(userId, Date.now());
     } else {
