@@ -294,115 +294,19 @@ export default function UserSelector({ onUserSelected, onCreateNew, currentUserI
               <p className="text-sm text-muted-foreground font-medium animate-pulse">Loading your accounts...</p>
             </div>
           ) : users.length === 0 ? (
-            <div className="text-center py-10 space-y-8">
-              <div className="flex justify-center">
-                <div className="w-20 h-20 bg-gradient-to-br from-primary/20 via-primary/10 to-transparent rounded-3xl flex items-center justify-center shadow-xl border-2 border-primary/20">
-                  <User className="w-10 h-10 text-primary" />
-                </div>
-              </div>
-              <div className="space-y-3">
-                <p className="text-xl font-bold text-foreground">No team members yet</p>
-                <p className="text-sm text-muted-foreground max-w-xs mx-auto leading-relaxed">
-                  Create the first user (will be Admin with full access)
-                </p>
-              </div>
-              <Dialog open={showCreateDialog} onOpenChange={(open) => {
-                setShowCreateDialog(open)
-                if (!open) {
-                  setDialogError(null)
-                  setNewUserName("")
+            // Redirect to welcome page when no users exist
+            <div className="text-center py-10 space-y-4">
+              {(() => {
+                if (typeof window !== 'undefined') {
+                  window.location.href = '/welcome'
                 }
-              }}>
-                <DialogTrigger asChild>
-                  <Button size="lg" className="w-full shadow-lg hover:shadow-xl transition-all h-12 text-base font-bold">
-                    <User className="w-5 h-5 mr-2" />
-                    Create First User (Admin)
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-md">
-                  <DialogHeader>
-                    <DialogTitle className="flex items-center gap-3 text-xl">
-                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                        <User className="w-5 h-5 text-primary" />
-                      </div>
-                      Create First User
-                    </DialogTitle>
-                    <DialogDescription className="text-sm">
-                      The first user will automatically be an Admin with full access
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  {/* DISPLAY ERROR HERE FOR DIALOG */}
-                  {dialogError && (
-                    <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4" />
-                      {dialogError}
-                    </div>
-                  )}
-
-                  <div className="space-y-5 pt-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="name" className="text-sm font-semibold">Name *</Label>
-                      <Input
-                        id="name"
-                        value={newUserName}
-                        onChange={(e) => setNewUserName(e.target.value)}
-                        placeholder="e.g., Salman"
-                        className="shadow-sm h-11"
-                        autoFocus
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="email" className="text-sm font-semibold">Email (optional)</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={newUserEmail}
-                        onChange={(e) => setNewUserEmail(e.target.value)}
-                        placeholder="personal@example.com"
-                        className="shadow-sm h-11"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="role" className="text-sm font-semibold">Role *</Label>
-                      <Select value={newUserRole} onValueChange={(v: any) => setNewUserRole(v)}>
-                        <SelectTrigger className="shadow-sm h-11">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="admin" className="py-3">
-                            <span className="font-medium">Admin (Required for first user)</span>
-                          </SelectItem>
-                          <SelectItem value="manager" disabled className="py-3">
-                            <span className="font-medium">Manager (Not available for first user)</span>
-                          </SelectItem>
-                          <SelectItem value="agent" disabled className="py-3">
-                            <span className="font-medium">Agent (Not available for first user)</span>
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground mt-2 flex items-start gap-1.5">
-                        <span className="text-base leading-none">💡</span>
-                        <span>The first user must be Admin to manage the system.</span>
-                      </p>
-                    </div>
-                    <Button
-                      onClick={handleCreateUser}
-                      disabled={creating || !newUserName.trim() || newUserRole !== "admin"}
-                      className="w-full shadow-sm h-11 text-base font-semibold"
-                    >
-                      {creating ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                          Creating Admin User...
-                        </>
-                      ) : (
-                        "Create Admin User"
-                      )}
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
+                return (
+                  <>
+                    <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+                    <p className="text-muted-foreground">Redirecting to login...</p>
+                  </>
+                )
+              })()}
             </div>
           ) : (
             <>
