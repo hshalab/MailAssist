@@ -26,7 +26,22 @@ export async function GET(
       );
     }
 
-    const tokens = await getValidTokens();
+
+    // Check for business session to determine which tokens to use
+    const { validateBusinessSession, getSessionUserEmail } = await import('@/lib/session');
+    const businessSession = await validateBusinessSession();
+
+    // If business session exists, use the business email (shared account)
+    // Otherwise fallback to personal session email
+    const targetEmail = businessSession
+      ? businessSession.email
+      : await getSessionUserEmail();
+
+    if (businessSession) {
+      console.log(`[Email Thread] Using business session tokens for: ${businessSession.email} (Agent: ${businessSession.name})`);
+    }
+
+    const tokens = await getValidTokens(targetEmail, businessSession?.businessId || undefined);
 
     if (!tokens || !tokens.access_token) {
       return NextResponse.json(

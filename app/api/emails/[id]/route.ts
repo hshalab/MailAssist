@@ -30,9 +30,25 @@ export async function GET(
       );
     }
 
+
     // Always fetch fresh from Gmail to get attachments
     // (Cached emails don't have attachment metadata)
-    const tokens = await getValidTokens();
+
+    // Check for business session to determine which tokens to use
+    const { validateBusinessSession, getSessionUserEmail } = await import('@/lib/session');
+    const businessSession = await validateBusinessSession();
+
+    // If business session exists, use the business email (shared account)
+    // Otherwise fallback to personal session email
+    const targetEmail = businessSession
+      ? businessSession.email
+      : await getSessionUserEmail();
+
+    if (businessSession) {
+      console.log(`[Email Detail] Using business session tokens for: ${businessSession.email} (Agent: ${businessSession.name})`);
+    }
+
+    const tokens = await getValidTokens(targetEmail, businessSession?.businessId || undefined);
 
     if (!tokens || !tokens.access_token) {
       return NextResponse.json(
@@ -43,7 +59,7 @@ export async function GET(
 
     // Fetch the specific email with full content including attachments
     const email = await getEmailById(tokens, emailId);
-    
+
     if (!email) {
       return NextResponse.json(
         { error: 'Email not found' },
@@ -69,20 +85,20 @@ export async function GET(
 
     // Return email with attachments
     const response = NextResponse.json({ email });
-    
+
     // PERFORMANCE: Aggressive caching for email details
     // Cache for 5 minutes, allow stale content for 10 minutes while revalidating
     response.headers.set(
       'Cache-Control',
       'public, s-maxage=300, stale-while-revalidate=600, max-age=60'
     );
-    
+
     return response;
   } catch (error) {
     console.error('Error fetching email:', error);
     return NextResponse.json(
-      { 
-        error: 'Failed to fetch email', 
+      {
+        error: 'Failed to fetch email',
         details: (error as Error).message,
       },
       { status: 500 }

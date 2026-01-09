@@ -10,11 +10,12 @@ import { getSessionUserEmail } from './session';
 /**
  * Refresh access token if expired
  * @param userEmail - Optional user email to filter tokens. If not provided, uses session cookie.
+ * @param businessId - Optional business ID to filter tokens for business accounts.
  */
-export async function refreshTokenIfNeeded(userEmail?: string | null): Promise<StoredTokens | null> {
+export async function refreshTokenIfNeeded(userEmail?: string | null, businessId?: string): Promise<StoredTokens | null> {
   // Get user email from parameter or session
   const targetUserEmail = userEmail || await getSessionUserEmail();
-  const tokens = await loadTokens(targetUserEmail);
+  const tokens = await loadTokens(targetUserEmail, businessId);
 
   if (!tokens || !tokens.refresh_token) {
     return null;
@@ -57,9 +58,10 @@ export async function refreshTokenIfNeeded(userEmail?: string | null): Promise<S
 /**
  * Get valid tokens, refreshing if necessary
  * @param userEmail - Optional user email to filter tokens. If not provided, uses session cookie.
+ * @param businessId - Optional business ID to filter tokens for business accounts.
  */
-export async function getValidTokens(userEmail?: string | null): Promise<StoredTokens | null> {
-  return await refreshTokenIfNeeded(userEmail);
+export async function getValidTokens(userEmail?: string | null, businessId?: string): Promise<StoredTokens | null> {
+  return await refreshTokenIfNeeded(userEmail, businessId);
 }
 
 

@@ -13,11 +13,12 @@ interface LoginFormProps {
   onSuccess: () => void
   onRegisterClick: () => void
   onPersonalRegisterClick: () => void
+  initialError?: string | null
 }
 
 type LoginStep = "email" | "password" | "google" | "personal-invite"
 
-export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegisterClick }: LoginFormProps) {
+export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegisterClick, initialError }: LoginFormProps) {
   const [step, setStep] = useState<LoginStep>("email")
   const [formData, setFormData] = useState({
     email: "",
@@ -25,7 +26,7 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
     rememberMe: false,
   })
 
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(initialError || null)
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [userType, setUserType] = useState<string | null>(null)

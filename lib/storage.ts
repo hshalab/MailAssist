@@ -581,14 +581,15 @@ export async function loadTokens(userEmail?: string | null, businessId?: string)
       .select('*')
       .order('updated_at', { ascending: false });
 
-    // Filter by user_email if we have it
-    if (targetUserEmail) {
-      query = query.eq('user_email', targetUserEmail);
-    }
-
-    // Filter by business_id if provided
+    // CRITICAL: If businessId is provided, use ONLY businessId to find tokens
+    // This is because tokens are stored under the business owner's email,
+    // but agents have their own email - we need to find tokens by business, not by agent email
     if (businessId) {
       query = query.eq('business_id', businessId);
+      // Do NOT filter by user_email when we have a businessId
+    } else if (targetUserEmail) {
+      // Only filter by user_email if we don't have a businessId (personal account flow)
+      query = query.eq('user_email', targetUserEmail);
     }
 
     const { data, error } = await query.limit(1).maybeSingle();

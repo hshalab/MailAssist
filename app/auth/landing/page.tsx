@@ -217,12 +217,14 @@ function AuthLandingContent() {
 
   // Login View
   if (currentView === "login") {
+    const errorParam = searchParams.get('error')
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 animate-in fade-in duration-300">
         <LoginForm
           onSuccess={handleLoginSuccess}
           onRegisterClick={() => setCurrentView("register")}
           onPersonalRegisterClick={() => setCurrentView("register-personal")}
+          initialError={errorParam}
         />
       </div>
     )

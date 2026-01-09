@@ -297,25 +297,55 @@ export async function ensureTicketForEmail(
   }
 
   // Update existing ticket
+  // Use current time for ticket updates, NOT the email's date
+  const nowIso = new Date().toISOString();
+
   const updates: any = {
-    updated_at: dateIso,
+    updated_at: nowIso,
   };
 
-  if (isFromAgent) {
-    updates.last_agent_reply_at = dateIso;
 
-    // Only bump to pending if ticket is not closed or on hold
-    if (ticket.status === 'open' || ticket.status === 'pending') {
-      updates.status = 'pending';
+  const incomingDate = new Date(dateIso);
+  const lastCustomerReplyDate = ticket.lastCustomerReplyAt ? new Date(ticket.lastCustomerReplyAt) : null;
+  const lastAgentReplyDate = ticket.lastAgentReplyAt ? new Date(ticket.lastAgentReplyAt) : null;
+  const ticketUpdatedAt = ticket.updatedAt ? new Date(ticket.updatedAt) : null;
+
+  if (isFromAgent) {
+    // Only update if this is a newer agent reply
+    if (!lastAgentReplyDate || incomingDate > lastAgentReplyDate) {
+      updates.last_agent_reply_at = dateIso;
+
+      // Only bump to pending if ticket is not closed or on hold
+      if (ticket.status === 'open' || ticket.status === 'pending') {
+        updates.status = 'pending';
+      }
+    } else {
+      // Old agent email - ignore completely
+      return ticket;
     }
   } else {
-    updates.last_customer_reply_at = dateIso;
-    // Always re-open if customer replies, even if closed
-    if (ticket.status === 'closed') {
-      console.log(`[Ticket] Auto-reopening closed ticket ${ticket.id} due to customer reply`);
-      updates.status = 'open';
+    // CRITICAL FIX: Check if email is newer than ticket's last update (including status changes)
+    // This prevents old emails from reopening tickets that were closed AFTER the email arrived
+    if (ticketUpdatedAt && incomingDate <= ticketUpdatedAt) {
+      // Email is older than or equal to the ticket's last update - ignore it
+      console.log(`[Ticket] Ignoring old customer email ${email.id} for ticket ${ticket.id} (email: ${dateIso}, ticket updated: ${ticket.updatedAt})`);
+      return ticket;
+    }
+
+    // Only update if this is a NEWER customer reply than what we've seen before
+    if (!lastCustomerReplyDate || incomingDate > lastCustomerReplyDate) {
+      updates.last_customer_reply_at = dateIso;
+
+      // ONLY re-open if ticket is CLOSED - do NOT touch status for open/pending tickets
+      if (ticket.status === 'closed') {
+        console.log(`[Ticket] Auto-reopening closed ticket ${ticket.id} due to NEW customer reply (email: ${dateIso}, last update: ${ticket.updatedAt})`);
+        updates.status = 'open';
+      }
+      // If ticket is already open/pending, do NOT change the status
     } else {
-      updates.status = 'open';
+      // Email is older than our last known customer reply - ignore it
+      console.log(`[Ticket] Ignoring old customer email ${email.id} for ticket ${ticket.id} (already have newer reply)`);
+      return ticket;
     }
   }
 
