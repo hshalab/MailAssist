@@ -247,7 +247,8 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
 
   const handleConnectGmail = async () => {
     try {
-      const response = await fetch('/api/auth/gmail')
+      // CRITICAL: Pass mode=connect to allow business accounts to connect Gmail
+      const response = await fetch('/api/auth/gmail?mode=connect')
       if (!response.ok) throw new Error('Failed to get auth URL')
       const { authUrl } = await response.json()
       window.location.href = authUrl
