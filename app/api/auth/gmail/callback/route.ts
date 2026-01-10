@@ -259,6 +259,26 @@ export async function GET(request: NextRequest) {
       }
 
       // 3. Create Session
+      // CRITICAL FIX: Delete ALL old sessions for this user before creating a new one
+      // This prevents old business sessions from persisting when creating a new personal account
+      console.log(`[OAuth Callback] Deleting old sessions for user: ${userId}`);
+      await supabase
+        .from('user_sessions')
+        .delete()
+        .eq('user_id', userId);
+      
+      // Also delete any sessions that might be using the old session_token cookie
+      // This ensures complete cleanup
+      const cookieStore = await import('next/headers').then(m => m.cookies());
+      const oldSessionToken = cookieStore.get('session_token')?.value;
+      if (oldSessionToken) {
+        console.log(`[OAuth Callback] Deleting old session token from database`);
+        await supabase
+          .from('user_sessions')
+          .delete()
+          .eq('session_token', oldSessionToken);
+      }
+
       const sessionToken = crypto.randomUUID();
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
 

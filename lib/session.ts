@@ -209,9 +209,29 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
 
     // CRITICAL FIX: Validate that session belongs to current user
     // This prevents old business sessions from being used when signing in with a new email
-    if (currentUserId && session.user_id !== currentUserId) {
-      console.log(`[Session] Session user_id (${session.user_id}) does not match current_user_id (${currentUserId}) - invalidating session`)
-      return null
+    // STRICT MODE: Always require current_user_id to match session user_id
+    // If current_user_id doesn't exist, the session is invalid (new account creation)
+    if (!currentUserId) {
+      console.log(`[Session] No current_user_id cookie found - invalidating session (likely new account)`);
+      return null;
+    }
+    
+    if (session.user_id !== currentUserId) {
+      console.log(`[Session] Session user_id (${session.user_id}) does not match current_user_id (${currentUserId}) - invalidating session`);
+      // Also delete the invalid session from database to prevent reuse
+      if (supabase) {
+        supabase
+          .from('user_sessions')
+          .delete()
+          .eq('session_token', sessionToken)
+          .then(() => {
+            console.log('[Session] Deleted invalid session from database');
+          })
+          .catch((err: any) => {
+            console.error('[Session] Error deleting invalid session:', err);
+          });
+      }
+      return null;
     }
 
     // Get user details
