@@ -397,6 +397,11 @@ export async function GET(request: NextRequest) {
         .eq('id', userId)
         .single();
 
+      // Create redirect URL
+      const redirectUrl = accountCreatedInThisFlow
+        ? `${frontendUrl}/?auth=success&newAccount=true`
+        : `${frontendUrl}/?auth=success`;
+
       console.log('[OAuth Callback] ============ LOGIN COMPLETE ============');
       console.log('[OAuth Callback] Email:', gmailEmail);
       console.log('[OAuth Callback] User ID:', userId);
@@ -410,7 +415,8 @@ export async function GET(request: NextRequest) {
         gmail_user_email: gmailEmail,
       });
       console.log('[OAuth Callback] ==========================================');
-      return response;
+
+      return NextResponse.redirect(redirectUrl);
     }
 
     // ============================================================
