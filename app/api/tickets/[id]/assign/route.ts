@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { assignTicket } from '@/lib/tickets';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { canReassignTickets } from '@/lib/permissions';
-import { getCurrentUserEmail } from '@/lib/storage';
+import { getUserEmailForTickets } from '@/lib/ticket-helpers';
 import { isValidUUID } from '@/lib/validation';
 
 type RouteContext =
@@ -39,7 +39,7 @@ export async function PATCH(
       );
     }
 
-    const userEmail = await getCurrentUserEmail();
+    const userEmail = await getUserEmailForTickets();
     if (!userEmail) {
       return NextResponse.json(
         { error: 'No Gmail account connected' },
@@ -98,7 +98,9 @@ export async function PATCH(
       await updateTicketPriority(ticketId, priority, userEmail);
       // Fetch updated ticket to return
       const { getTicketById } = await import('@/lib/tickets');
-      const updatedTicket = await getTicketById(ticketId, userEmail);
+      const { canViewAllTickets } = await import('@/lib/permissions');
+      const canViewAll = await canViewAllTickets(userId);
+      const updatedTicket = await getTicketById(ticketId, userId, canViewAll, userEmail);
       return NextResponse.json({ ticket: updatedTicket });
     }
 

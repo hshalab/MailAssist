@@ -5,13 +5,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { updateTicketStatus, assignTicket, updateTicketTags } from '@/lib/tickets';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
-import { getCurrentUserEmail } from '@/lib/storage';
+import { getUserEmailForTickets } from '@/lib/ticket-helpers';
 
 export async function POST(request: NextRequest) {
   try {
     const userId = getCurrentUserIdFromRequest(request);
-    const userEmail = await getCurrentUserEmail();
-
+    
     if (!userId) {
       return NextResponse.json(
         { error: 'Not authenticated' },
@@ -19,6 +18,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const userEmail = await getUserEmailForTickets();
     if (!userEmail) {
       return NextResponse.json(
         { error: 'No Gmail account connected' },

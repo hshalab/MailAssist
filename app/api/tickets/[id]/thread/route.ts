@@ -8,7 +8,7 @@ import { getThreadById } from '@/lib/gmail';
 import { getValidTokens } from '@/lib/token-refresh';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { canViewAllTickets } from '@/lib/permissions';
-import { getCurrentUserEmail } from '@/lib/storage';
+import { getUserEmailForTickets } from '@/lib/ticket-helpers';
 import { getGmailClient } from '@/lib/gmail';
 
 type RouteContext =
@@ -31,12 +31,19 @@ export async function GET(
     }
 
     const userId = getCurrentUserIdFromRequest(request);
-    const userEmail = await getCurrentUserEmail();
-
-    if (!userId || !userEmail) {
+    
+    if (!userId) {
       return NextResponse.json(
         { error: 'Not authenticated' },
         { status: 401 }
+      );
+    }
+
+    const userEmail = await getUserEmailForTickets();
+    if (!userEmail) {
+      return NextResponse.json(
+        { error: 'No Gmail account connected' },
+        { status: 400 }
       );
     }
 

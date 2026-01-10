@@ -2019,21 +2019,24 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full w-full bg-background animate-in fade-in duration-300">
-        <div className="flex flex-col items-center gap-6 w-full max-w-md px-6">
-          {/* Modern spinner with gradient - removed inner spinner */}
+        <div className="flex flex-col items-center gap-5 w-full max-w-md px-6">
+          {/* Modern, elegant spinner with smooth animation */}
           <div className="relative w-16 h-16">
-            <div className="absolute inset-0 rounded-full border-4 border-primary/10"></div>
-            <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-primary border-r-primary/60 animate-spin"></div>
+            {/* Outer static ring */}
+            <div className="absolute inset-0 rounded-full border-[3px] border-primary/10"></div>
+            {/* Animated spinner with gradient effect */}
+            <div 
+              className="absolute inset-0 rounded-full border-[3px] border-transparent border-t-primary border-r-primary/60 animate-spin"
+              style={{ 
+                animationDuration: '0.9s',
+                animationTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)'
+              }}
+            ></div>
           </div>
-          <div className="flex flex-col items-center gap-2 text-center">
+          {/* Clean, focused text */}
+          <div className="flex flex-col items-center gap-1.5 text-center">
             <p className="text-base font-semibold text-foreground">Loading tickets...</p>
             <p className="text-sm text-muted-foreground">Please wait while we fetch your tickets</p>
-          </div>
-          {/* Subtle pulse animation */}
-          <div className="flex gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-primary/40 animate-pulse" style={{ animationDelay: '0ms' }}></div>
-            <div className="w-2 h-2 rounded-full bg-primary/40 animate-pulse" style={{ animationDelay: '150ms' }}></div>
-            <div className="w-2 h-2 rounded-full bg-primary/40 animate-pulse" style={{ animationDelay: '300ms' }}></div>
           </div>
         </div>
       </div>
@@ -3015,9 +3018,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                           {loadingThread ? (
                             <div className="flex items-center justify-center py-12">
                               <div className="flex flex-col items-center gap-3 animate-in fade-in duration-300">
+                                {/* Clean, elegant spinner */}
                                 <div className="relative w-10 h-10">
-                                  <div className="absolute inset-0 rounded-full border-2 border-primary/10"></div>
-                                  <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-primary border-r-primary/50 animate-spin"></div>
+                                  <div className="absolute inset-0 rounded-full border-[2.5px] border-primary/10"></div>
+                                  <div className="absolute inset-0 rounded-full border-[2.5px] border-transparent border-t-primary border-r-primary/50 animate-spin" style={{ animationDuration: '0.8s' }}></div>
                                 </div>
                                 <p className="text-sm font-medium text-muted-foreground">Loading conversation...</p>
                               </div>

@@ -4,6 +4,7 @@ import { loadBusinessTokens, saveTokens, saveStoredEmails } from '@/lib/storage'
 import { GenericEmailProvider } from '@/lib/generic-provider';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0; // Never cache
 
 export async function GET() {
     try {

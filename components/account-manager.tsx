@@ -77,30 +77,39 @@ export function AccountManager() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: accountToDelete }),
+                cache: 'no-store'
             })
 
-            if (res.ok) {
+            const data = await res.json()
+
+            if (res.ok && data.success) {
+                // Update local state immediately
                 setAccounts(prev => prev.filter(a => a.email !== accountToDelete))
                 setAccountToDelete(null)
+                
                 // CRITICAL: Trigger refresh for ALL users in the business
                 // This ensures agents, managers, and admins all see the changes
                 window.dispatchEvent(new CustomEvent('accountsChanged'))
+                
                 // Broadcast to all tabs/windows that accounts changed
                 if (typeof window !== 'undefined' && window.localStorage) {
                     localStorage.setItem('accountsChanged', Date.now().toString())
                 }
-                // Also reload the page to ensure clean state and reflect deletions
+                
+                // Wait a bit longer to ensure database deletion completes
+                // Then reload the page to ensure clean state and reflect deletions
                 setTimeout(() => {
                     window.location.reload()
-                }, 500)
+                }, 1000) // Increased from 500ms to 1000ms to ensure deletion completes
             } else {
-                const data = await res.json()
-                alert(data.error || 'Failed to disconnect account')
+                console.error('Disconnect failed:', data.error)
+                alert(data.error || 'Failed to disconnect account. Please try again.')
+                setIsDisconnecting(null)
+                setAccountToDelete(null)
             }
         } catch (error) {
             console.error('Error disconnecting account:', error)
-            alert('Error disconnecting account')
-        } finally {
+            alert('Error disconnecting account. Please try again.')
             setIsDisconnecting(null)
             setAccountToDelete(null)
         }
@@ -290,28 +299,31 @@ export function AccountManager() {
             {/* Delete Account Confirmation Dialog */}
             <Dialog open={!!accountToDelete} onOpenChange={(open) => !open && setAccountToDelete(null)}>
                 <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                        <div className="flex items-center gap-3 mb-2">
-                            <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
-                                <AlertTriangle className="h-5 w-5 text-destructive" />
+                    <DialogHeader className="space-y-4">
+                        <div className="flex items-start gap-3">
+                            <div className="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                                <AlertTriangle className="h-6 w-6 text-destructive" />
                             </div>
-                            <DialogTitle className="text-xl">Disconnect Account</DialogTitle>
+                            <div className="flex-1 pt-1">
+                                <DialogTitle className="text-xl font-semibold mb-2">Disconnect Account</DialogTitle>
+                                <DialogDescription className="text-sm text-muted-foreground">
+                                    Are you sure you want to disconnect <span className="font-semibold text-foreground">{accountToDelete}</span>?
+                                </DialogDescription>
+                            </div>
                         </div>
-                        <DialogDescription className="text-base pt-2">
-                            Are you sure you want to disconnect <strong>{accountToDelete}</strong>?
-                        </DialogDescription>
                     </DialogHeader>
-                    <Alert className="bg-amber-500/10 border-amber-500/20">
+                    <Alert className="mt-4 bg-amber-500/10 border-amber-500/20">
                         <AlertTriangle className="h-4 w-4 text-amber-500" />
                         <AlertDescription className="text-sm text-amber-700 dark:text-amber-400 ml-2">
                             This will remove the account connection. Emails and tickets from this account will no longer be accessible.
                         </AlertDescription>
                     </Alert>
-                    <DialogFooter className="gap-2 sm:gap-0">
+                    <DialogFooter className="flex-col sm:flex-row gap-3 sm:gap-2 mt-6">
                         <Button
                             variant="outline"
                             onClick={() => setAccountToDelete(null)}
                             disabled={isDisconnecting === accountToDelete}
+                            className="w-full sm:w-auto order-2 sm:order-1"
                         >
                             Cancel
                         </Button>
@@ -319,7 +331,7 @@ export function AccountManager() {
                             variant="destructive"
                             onClick={confirmDisconnect}
                             disabled={isDisconnecting === accountToDelete}
-                            className="bg-destructive hover:bg-destructive/90"
+                            className="w-full sm:w-auto bg-destructive hover:bg-destructive/90 order-1 sm:order-2"
                         >
                             {isDisconnecting === accountToDelete ? (
                                 <>

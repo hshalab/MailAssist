@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTicketNotes, createTicketNote, updateTicketNote } from '@/lib/ticket-notes';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
-import { getCurrentUserEmail } from '@/lib/storage';
+import { getUserEmailForTickets } from '@/lib/ticket-helpers';
 import { isValidUUID, validateTextInput } from '@/lib/validation';
 
 type RouteContext =
@@ -70,7 +70,7 @@ export async function POST(
       );
     }
 
-    const userEmail = await getCurrentUserEmail();
+    const userEmail = await getUserEmailForTickets();
     if (!userEmail) {
       return NextResponse.json(
         { error: 'No Gmail account connected' },

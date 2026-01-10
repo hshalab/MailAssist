@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getTicketById } from '@/lib/tickets';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { canViewAllTickets } from '@/lib/permissions';
-import { getCurrentUserEmail } from '@/lib/storage';
+import { getUserEmailForTickets } from '@/lib/ticket-helpers';
 
 type RouteContext =
   | { params: { id: string } }
@@ -29,8 +29,7 @@ export async function GET(
     }
 
     const userId = getCurrentUserIdFromRequest(request);
-    const userEmail = await getCurrentUserEmail();
-
+    
     if (!userId) {
       return NextResponse.json(
         { error: 'Not authenticated' },
@@ -38,6 +37,7 @@ export async function GET(
       );
     }
 
+    const userEmail = await getUserEmailForTickets();
     if (!userEmail) {
       return NextResponse.json(
         { error: 'No Gmail account connected' },
@@ -87,8 +87,7 @@ export async function PATCH(
     }
 
     const userId = getCurrentUserIdFromRequest(request);
-    const userEmail = await getCurrentUserEmail();
-
+    
     if (!userId) {
       return NextResponse.json(
         { error: 'Not authenticated' },
@@ -96,6 +95,7 @@ export async function PATCH(
       );
     }
 
+    const userEmail = await getUserEmailForTickets();
     if (!userEmail) {
       return NextResponse.json(
         { error: 'No Gmail account connected' },
