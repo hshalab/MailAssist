@@ -95,7 +95,7 @@ export function clearSessionInResponse(response: NextResponse): NextResponse {
     // Get cookie options to ensure we delete with the same domain/path as when setting
     const { getCookieOptions } = require('@/lib/cookie-config');
     const cookieOptions = getCookieOptions();
-    
+
     // Delete cookies with explicit options to ensure they're deleted in production
     // Setting expires to past date and same domain/path ensures deletion works
     const deleteOptions = {
@@ -103,13 +103,13 @@ export function clearSessionInResponse(response: NextResponse): NextResponse {
       expires: new Date(0), // Past date
       maxAge: 0,
     };
-    
+
     response.cookies.set(SESSION_COOKIE_NAME, '', deleteOptions);
     response.cookies.set(CURRENT_USER_ID_COOKIE_NAME, '', deleteOptions);
     response.cookies.set('session_token', '', deleteOptions);
     response.cookies.set('gmail_user_email', '', deleteOptions);
     response.cookies.set('user_id', '', deleteOptions);
-    
+
     // Also try deleting without domain (in case cookies were set without domain)
     response.cookies.delete(SESSION_COOKIE_NAME);
     response.cookies.delete(CURRENT_USER_ID_COOKIE_NAME);
@@ -137,7 +137,7 @@ export async function cleanupExpiredSessions(): Promise<void> {
       .from('user_sessions')
       .delete()
       .lt('expires_at', now);
-    
+
     if (error) {
       console.error('[Session] Error cleaning up expired sessions:', error);
     } else {
@@ -266,31 +266,6 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
       }
       return null
     }
-    
-    // CRITICAL PRODUCTION FIX: Also check gmail_user_email cookie matches the user's email
-    // This prevents old sessions from being used when logging in with a different email
-    const gmailUserEmail = cookieStore.get('gmail_user_email')?.value;
-    if (gmailUserEmail && supabase) {
-      // Get user's email from database
-      const { data: user } = await supabase
-        .from('users')
-        .select('email')
-        .eq('id', session.user_id)
-        .single();
-      
-      if (user && user.email) {
-        const decodedGmailEmail = decodeURIComponent(gmailUserEmail);
-        if (user.email.toLowerCase() !== decodedGmailEmail.toLowerCase()) {
-          console.log(`[Session] EMAIL MISMATCH: Session user email (${user.email}) does not match gmail_user_email cookie (${decodedGmailEmail}) - DELETING SESSION`);
-          // Delete the mismatched session immediately
-          await supabase
-            .from('user_sessions')
-            .delete()
-            .eq('session_token', sessionToken);
-          return null;
-        }
-      }
-    }
 
     // CRITICAL PRODUCTION FIX: Validate that session belongs to current user
     // This prevents old business sessions from being used when signing in with a new email
@@ -314,7 +289,7 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
       }
       return null;
     }
-    
+
     if (session.user_id !== currentUserId) {
       console.log(`[Session] MISMATCH: Session user_id (${session.user_id}) does not match current_user_id (${currentUserId}) - DELETING INVALID SESSION`);
       // CRITICAL: Delete the invalid session from database immediately (blocking)
@@ -324,7 +299,7 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
           .from('user_sessions')
           .delete()
           .eq('session_token', sessionToken);
-        
+
         if (deleteError) {
           console.error('[Session] Error deleting invalid session:', deleteError);
         } else {
@@ -332,33 +307,6 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
         }
       }
       return null;
-    }
-
-    // CRITICAL PRODUCTION FIX: Check if gmail_user_email cookie matches user's email
-    // This prevents old sessions from being used when logging in with a different email
-    const gmailUserEmailCookie = cookieStore.get('gmail_user_email')?.value;
-    if (gmailUserEmailCookie) {
-      // Get user's email first to check match
-      const { data: userCheck } = await supabase
-        .from('users')
-        .select('email')
-        .eq('id', session.user_id)
-        .single();
-      
-      if (userCheck && userCheck.email) {
-        const decodedCookieEmail = decodeURIComponent(gmailUserEmailCookie).toLowerCase();
-        const userEmail = userCheck.email.toLowerCase();
-        
-        if (userEmail !== decodedCookieEmail) {
-          console.log(`[Session] EMAIL MISMATCH: User email (${userCheck.email}) does not match gmail_user_email cookie (${decodedCookieEmail}) - DELETING SESSION`);
-          // Delete the mismatched session immediately
-          await supabase
-            .from('user_sessions')
-            .delete()
-            .eq('session_token', sessionToken);
-          return null;
-        }
-      }
     }
 
     // Get user details
