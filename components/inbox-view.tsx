@@ -261,7 +261,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
             </div>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="flex-1 overflow-y-auto min-h-0" style={{ paddingTop: '0.75rem' }}>
           <EmailList
             selectedEmail={selectedEmail}
             onSelectEmail={handleSelectEmail}

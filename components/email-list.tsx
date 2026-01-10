@@ -374,19 +374,21 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   // CRITICAL FIX: Show skeleton if loading OR if skeleton flag is set (returning from OAuth)
   // PRIORITY: showSkeleton flag takes highest priority - if set, ALWAYS show skeleton
   // This ensures skeleton shows immediately when returning from OAuth, even before accounts load
-  // Also show skeleton if accounts are still loading (hasConnectedAccounts === undefined) OR we have connected accounts but no emails yet
+  // Also show skeleton if accounts are still loading (hasConnectedAccounts === undefined) OR we're actively loading
   // CRITICAL: Check URL params for OAuth return to ensure skeleton shows even if sessionStorage was cleared
+  // PRODUCTION FIX: Only show skeleton if we're actually loading - don't show if emails are loaded and loading is false
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
   const isOAuthReturn = urlParams?.get('auth') === 'success' || urlParams?.get('connected') === 'true'
-  const shouldShowSkeleton = (showSkeleton || isOAuthReturn || loading || hasConnectedAccounts === undefined || (hasConnectedAccounts !== false && emails.length === 0 && !error)) && !loadingMore;
+  // Only show skeleton if: skeleton flag is set, OAuth return, actively loading, OR accounts still loading AND no emails yet
+  const shouldShowSkeleton = (showSkeleton || isOAuthReturn || loading || (hasConnectedAccounts === undefined && emails.length === 0)) && !loadingMore;
   if (shouldShowSkeleton) {
     return (
-      <div className="p-3 space-y-2 animate-in fade-in duration-300">
+      <div className="p-3 space-y-2 animate-in fade-in duration-300" style={{ paddingTop: '0.75rem' }}>
         {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
           <div
             key={i}
             className="relative w-full rounded-xl border border-border/40 bg-gradient-to-br from-card via-card to-muted/5 overflow-hidden"
-            style={{ animationDelay: `${i * 30}ms` }}
+            style={{ animationDelay: `${i * 30}ms`, borderRadius: '0.75rem', overflow: 'hidden' }}
           >
             {/* Shimmer effect overlay */}
             <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
@@ -462,12 +464,12 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     if (hasConnectedAccounts !== false && error === null) {
       // Still might be loading - show skeleton as fallback to prevent flash
       return (
-        <div className="p-3 space-y-2 animate-in fade-in duration-300">
+        <div className="p-3 space-y-2 animate-in fade-in duration-300" style={{ paddingTop: '0.75rem' }}>
           {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
             <div
               key={i}
               className="relative w-full rounded-xl border border-border/40 bg-gradient-to-br from-card via-card to-muted/5 overflow-hidden"
-              style={{ animationDelay: `${i * 30}ms` }}
+              style={{ animationDelay: `${i * 30}ms`, borderRadius: '0.75rem', overflow: 'hidden' }}
             >
               <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
               <div className="flex gap-3 p-3 relative">
@@ -585,7 +587,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     : emails
 
   return (
-    <div className="p-3 space-y-2 overflow-x-hidden max-w-full">
+    <div className="p-3 space-y-2 overflow-x-hidden max-w-full" style={{ paddingTop: '0.75rem' }}>
       {filteredEmails.map((email, index) => (
         <button
           key={`${email.id}-${index}`}

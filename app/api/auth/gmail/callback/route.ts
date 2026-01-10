@@ -286,6 +286,12 @@ export async function GET(request: NextRequest) {
       const response = NextResponse.redirect(redirectUrl);
 
       // 4. Set Cookies
+      // CRITICAL FIX: Clear old session cookies first to prevent using old business sessions
+      // This ensures a fresh personal account doesn't see data from a previous business account
+      response.cookies.delete('session_token')
+      response.cookies.delete('current_user_id')
+      response.cookies.delete('gmail_user_email')
+      
       const { getCookieOptions } = await import('@/lib/cookie-config')
       response.cookies.set('session_token', sessionToken, getCookieOptions({
         httpOnly: true,

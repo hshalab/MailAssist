@@ -704,18 +704,19 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     // If minimized, don't sync (editor is hidden)
     if (draftMinimized) return
     
-    // Use a small timeout to ensure DOM is ready when expanding
+    // Use a timeout to ensure DOM is ready when expanding from minimized state
     const timeoutId = setTimeout(() => {
-      if (!editorRef.current) return
+      if (!editorRef.current || draftMinimized) return
       const html = draftHtml || textToHtml(draftText)
-      const current = editorRef.current.innerHTML
-      if (html && current !== html) {
+      const current = editorRef.current.innerHTML || ''
+      // Only update if content differs (to avoid breaking user's cursor position)
+      if (html && current.trim() !== html.trim()) {
         editorRef.current.innerHTML = html
       }
-      if (!html && current !== '') {
+      if (!html && current.trim() !== '') {
         editorRef.current.innerHTML = ''
       }
-    }, 10)
+    }, 50) // Delay to ensure DOM is ready when expanding
     
     return () => clearTimeout(timeoutId)
   }, [draftHtml, draftText, draftMinimized])
@@ -1047,8 +1048,8 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           </div>
         )}
         
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
-          <Card className="mx-4 md:mx-6 mt-4 mb-3 shadow-lg border-border relative overflow-hidden">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden" style={{ paddingTop: '0.75rem' }}>
+          <Card className="mx-4 md:mx-6 mt-4 mb-3 shadow-lg border-border relative overflow-hidden" style={{ borderRadius: '1rem' }}>
             {/* Shimmer overlay */}
             <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent z-10" />
             
@@ -1119,8 +1120,8 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       )}
 
       {/* Scrollable email content */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden animate-in fade-in duration-300">
-        <Card className="mx-4 md:mx-6 mt-4 mb-3 shadow-lg border-border animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden animate-in fade-in duration-300" style={{ paddingTop: '0.75rem' }}>
+        <Card className="mx-4 md:mx-6 mt-4 mb-3 shadow-lg border-border animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ borderRadius: '1rem' }}>
           <div className="px-6 py-5 border-b border-border flex-shrink-0 bg-card">
             <div className="flex items-start justify-between gap-4 mb-2">
               <h2 className="text-xl font-bold text-foreground line-clamp-2 break-words flex-1">

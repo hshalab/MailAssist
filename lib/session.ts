@@ -178,6 +178,7 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
   try {
     const cookieStore = await cookies()
     const sessionToken = cookieStore.get('session_token')?.value
+    const currentUserId = cookieStore.get('current_user_id')?.value
 
     if (!sessionToken) {
       return null
@@ -203,6 +204,13 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
     // Check if session is expired
     if (new Date(session.expires_at) < new Date()) {
       console.log('[Session] Session expired')
+      return null
+    }
+
+    // CRITICAL FIX: Validate that session belongs to current user
+    // This prevents old business sessions from being used when signing in with a new email
+    if (currentUserId && session.user_id !== currentUserId) {
+      console.log(`[Session] Session user_id (${session.user_id}) does not match current_user_id (${currentUserId}) - invalidating session`)
       return null
     }
 
