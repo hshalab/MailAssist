@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
       console.log(`[SYNC] Found ${inboxEmails.length} inbox emails (after filtering spam/trash)`);
 
       // Get the first account's email to use as the "primary" user for sync state
-      const accounts = await loadBusinessTokens(businessSession.businessId, businessSession.email);
+      // Reuse accounts variable from above (already loaded on line 46)
       if (accounts.length > 0) {
         userEmail = accounts[0].email;
       }
