@@ -1088,6 +1088,7 @@ function PageContent() {
               onSearch={(query) => {
                 setGlobalSearch(query)
               }}
+              searchValue={globalSearch}
             />
             {renderMobileTabs()}
             <main className="flex-1 overflow-auto">

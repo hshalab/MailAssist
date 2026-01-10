@@ -257,19 +257,21 @@ export async function POST(
                 const orderTotal = order.totalPriceSet?.shopMoney?.amount || order.totalPrice || '0';
                 const orderCurrency = order.totalPriceSet?.shopMoney?.currencyCode || 'USD';
                 const orderStatus = order.fulfillmentStatus || order.financialStatus || 'unknown';
-                const items = order.lineItems?.slice(0, 3).map(item => (item as any).name || (item as any).title || 'N/A').join(', ') || 'N/A';
-                const orderName = (order as any).name || (order as any).orderNumber || 'N/A';
-                return `- Order #${orderName} (${orderDate}): ${orderCurrency} ${orderTotal} - Status: ${orderStatus} - Items: ${items}`;
+                // ShopifyLineItem has 'title' property, not 'name'
+                const items = order.lineItems?.slice(0, 3).map(item => item.title || 'N/A').join(', ') || 'N/A';
+                // ShopifyOrder has 'name' property (order number like "#1001")
+                const orderName = order.name || 'N/A';
+                // Order note is on the order, not customer
+                const orderNote = order.note ? ` - Note: ${order.note}` : '';
+                return `- Order #${orderName} (${orderDate}): ${orderCurrency} ${orderTotal} - Status: ${orderStatus} - Items: ${items}${orderNote}`;
               }).join('\n');
               
-              const customerNote = (customerData.customer as any)?.note || '';
               shopifyContext = `\n\nSHOPIFY CUSTOMER INFORMATION (use this to personalize the reply):
 Customer Name: ${customerData.customer?.firstName || ''} ${customerData.customer?.lastName || ''}
 Total Spent: ${customerData.totalSpent || 0}
 Total Orders: ${customerData.orders?.length || 0}
 Recent Orders:
 ${ordersInfo || 'No recent orders'}
-${customerNote ? `Customer Notes: ${customerNote}` : ''}
 IMPORTANT: Use this information to personalize your response. Reference their order history, total spent, or specific orders when relevant. This helps build rapport and shows you understand their relationship with the business.`;
             }
           }

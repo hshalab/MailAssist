@@ -150,7 +150,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [linkInputOpen])
 
-  // Autosave draft HTML to localStorage
+  // Autosave draft HTML and state to localStorage
   useEffect(() => {
     if (!emailId || !draftHtml || !showDraft) return
 
@@ -161,7 +161,13 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     draftAutoSaveTimerRef.current = setTimeout(() => {
       try {
         setAutoSaving(true)
-        localStorage.setItem(`draft_${emailId}`, JSON.stringify({ html: draftHtml }))
+        // Save full draft state including showDraft flag and draftId
+        localStorage.setItem(`draft_${emailId}`, JSON.stringify({ 
+          html: draftHtml,
+          text: draftText,
+          draftId: draftId,
+          showDraft: true
+        }))
         setTimeout(() => setAutoSaving(false), 500)
       } catch {
         // Ignore localStorage errors
@@ -197,7 +203,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
             from: initialEmailData.from || '',
             to: initialEmailData.to || '',
             date: initialEmailData.date || '',
-            body: initialEmailData.body,
+            body: initialEmailData.body || '',
             snippet: initialEmailData.snippet,
             attachments: initialEmailData.attachments,
           })
@@ -208,7 +214,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
             from: initialEmailData.from || '',
             to: initialEmailData.to || '',
             date: initialEmailData.date || '',
-            body: initialEmailData.body,
+            body: initialEmailData.body || '',
             snippet: initialEmailData.snippet,
             attachments: initialEmailData.attachments,
           }])
@@ -274,13 +280,22 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       }
 
       // Try to load autosaved draft from localStorage
+      // Always try to restore draft, whether it's the same email or a different one
+      // This handles the case where user collapses and reopens the same email
       try {
         const saved = localStorage.getItem(`draft_${emailId}`)
         if (saved) {
           const parsed = JSON.parse(saved)
           if (parsed?.html) {
             setDraftHtml(parsed.html)
-            setDraftText(toPlainText(parsed.html))
+            setDraftText(parsed.text || toPlainText(parsed.html))
+            if (parsed.draftId) {
+              setDraftId(parsed.draftId)
+            }
+            // Restore showDraft state if draft exists
+            if (parsed.showDraft) {
+              setShowDraft(true)
+            }
           }
         }
       } catch {
@@ -394,6 +409,21 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       setDraftHtml(textToHtml(regenerated))
       setDraftId(data.draftId || null)
       setShowDraft(true)
+      
+      // Immediately save to localStorage so it persists when reopening
+      if (emailId) {
+        try {
+          localStorage.setItem(`draft_${emailId}`, JSON.stringify({ 
+            html: textToHtml(regenerated),
+            text: regenerated,
+            draftId: data.draftId || null,
+            showDraft: true
+          }))
+        } catch {
+          // Ignore localStorage errors
+        }
+      }
+      
       onDraftGenerated?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate draft')
@@ -432,6 +462,21 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       setDraftText(regenerated)
       setDraftId(data.draftId || null)
       setShowDraft(true)
+      
+      // Immediately save to localStorage so it persists when reopening
+      if (emailId) {
+        try {
+          localStorage.setItem(`draft_${emailId}`, JSON.stringify({ 
+            html: textToHtml(regenerated),
+            text: regenerated,
+            draftId: data.draftId || null,
+            showDraft: true
+          }))
+        } catch {
+          // Ignore localStorage errors
+        }
+      }
+      
       onDraftGenerated?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to regenerate draft')
@@ -653,17 +698,27 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
   }
 
   // Sync external HTML into the editor without breaking selection; only touch DOM when content actually changes
+  // Also sync when expanding from minimized state - use a small delay to ensure DOM is ready
   useEffect(() => {
     if (!editorRef.current) return
-    const html = draftHtml || textToHtml(draftText)
-    const current = editorRef.current.innerHTML
-    if (html && current !== html) {
-      editorRef.current.innerHTML = html
-    }
-    if (!html && current !== '') {
-      editorRef.current.innerHTML = ''
-    }
-  }, [draftHtml, draftText])
+    // If minimized, don't sync (editor is hidden)
+    if (draftMinimized) return
+    
+    // Use a small timeout to ensure DOM is ready when expanding
+    const timeoutId = setTimeout(() => {
+      if (!editorRef.current) return
+      const html = draftHtml || textToHtml(draftText)
+      const current = editorRef.current.innerHTML
+      if (html && current !== html) {
+        editorRef.current.innerHTML = html
+      }
+      if (!html && current !== '') {
+        editorRef.current.innerHTML = ''
+      }
+    }, 10)
+    
+    return () => clearTimeout(timeoutId)
+  }, [draftHtml, draftText, draftMinimized])
 
   const handleEditorShortcut = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); execAndSync(() => applyCommand('bold')); return }
@@ -964,7 +1019,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         )}
         <div className="text-sm font-medium text-destructive">{error}</div>
         <Button
-          onClick={fetchThread}
+          onClick={() => fetchThread()}
           variant="outline"
           size="sm"
           className="text-xs"
@@ -1446,6 +1501,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                           ref={editorRef}
                           contentEditable
                           suppressContentEditableWarning
+                          dangerouslySetInnerHTML={{ __html: draftHtml || textToHtml(draftText) }}
                           onClick={(e) => {
                             // Clear selection when clicking on empty area (not on text)
                             const target = e.target as HTMLElement

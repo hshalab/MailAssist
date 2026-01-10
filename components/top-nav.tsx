@@ -43,9 +43,10 @@ interface TopNavProps {
   onLogout?: () => void
   onSwitchUser?: (userId: string) => void
   onSearch?: (query: string) => void
+  searchValue?: string // Current search value to sync with input
 }
 
-export default function TopNav({ isConnected, userProfile, currentUser, onLogout, onSwitchUser, onSearch }: TopNavProps) {
+export default function TopNav({ isConnected, userProfile, currentUser, onLogout, onSwitchUser, onSearch, searchValue = "" }: TopNavProps) {
   const { resolvedTheme, setTheme } = useTheme()
   const router = useRouter()
   const isDark = resolvedTheme === "dark"
@@ -61,6 +62,18 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const prevUnreadIdsRef = useRef<Set<string>>(new Set())
   const { toast } = useToast()
+  
+  // Local state for search input to prevent clearing while typing
+  const [localSearchValue, setLocalSearchValue] = useState(searchValue)
+  const isTypingRef = useRef(false)
+  
+  // Sync with prop when it changes externally (but don't override user typing)
+  useEffect(() => {
+    // Only sync if we're not currently typing (prevents clearing while user types)
+    if (!isTypingRef.current && searchValue !== localSearchValue) {
+      setLocalSearchValue(searchValue)
+    }
+  }, [searchValue, localSearchValue])
 
   const fetchNotifications = async (opts?: { showToast?: boolean }) => {
     setNotificationsLoading(true)
@@ -227,57 +240,54 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
               name="global-search"
               type="text"
               placeholder="Search..."
+              value={localSearchValue}
               className="w-full h-10 px-4 pr-10 rounded-xl border-2 border-border bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all hover:border-primary/50 md:placeholder:text-[length:inherit]"
               style={{ fontSize: '14px' }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  const target = e.target as HTMLInputElement
-                  if (onSearch) {
-                    onSearch(target.value.trim())
-                  }
-                } else if (e.key === 'Escape') {
-                  const target = e.target as HTMLInputElement
-                  target.value = ''
-                  target.blur()
+                if (e.key === 'Escape') {
+                  setLocalSearchValue('')
                   if (onSearch) onSearch('')
                 }
               }}
               onChange={(e) => {
-                if (e.target.value === '' && onSearch) {
-                  onSearch('')
+                // Real-time filtering: update search as user types (don't trim while typing)
+                const value = e.target.value
+                isTypingRef.current = true // Mark that user is typing
+                setLocalSearchValue(value) // Update local state immediately
+                if (onSearch) {
+                  onSearch(value) // Update parent state
                 }
+                // Reset typing flag after a short delay
+                setTimeout(() => {
+                  isTypingRef.current = false
+                }, 100)
               }}
             />
-            {/* Clear button */}
-            <button
-              type="button"
-              onClick={(e) => {
-                const form = e.currentTarget.closest('form')
-                const input = form?.querySelector<HTMLInputElement>('input[name="global-search"]')
-                if (input) {
-                  input.value = ''
-                  input.focus()
-                  if (onSearch) onSearch('')
-                }
-              }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors opacity-0 hover:opacity-100 focus:opacity-100"
-              aria-label="Clear search"
-              style={{
-                opacity: 'var(--search-has-value, 0)',
-              }}
-              onMouseEnter={(e) => {
-                const form = e.currentTarget.closest('form')
-                const input = form?.querySelector<HTMLInputElement>('input[name="global-search"]')
-                if (input && input.value) {
-                  e.currentTarget.style.opacity = '1'
-                }
-              }}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            {/* Clear button - only show when there's a search value */}
+            {localSearchValue && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault()
+                  setLocalSearchValue('') // Clear local state immediately
+                  if (onSearch) {
+                    onSearch('') // Clear parent state
+                  }
+                  // Focus the input after clearing
+                  const form = e.currentTarget.closest('form')
+                  const input = form?.querySelector<HTMLInputElement>('input[name="global-search"]')
+                  if (input) {
+                    input.focus()
+                  }
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Clear search"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
           </form>
         )}
 

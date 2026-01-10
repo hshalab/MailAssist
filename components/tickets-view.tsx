@@ -115,9 +115,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     setActiveTab(value as typeof activeTab)
     // Only clear if we are NOT currently searching (or if we want to clear search on tab switch)
     // User requested: "when ichaneg tab in tickets page remov filter fro mtop navabr"
-    if (globalSearchTerm) {
-      onClearGlobalSearch?.()
-    }
+    // REMOVED: Don't clear search on tab change - user wants to keep search active
+    // if (globalSearchTerm) {
+    //   onClearGlobalSearch?.()
+    // }
   }
 
   // Filters
