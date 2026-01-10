@@ -26,7 +26,7 @@ const supabase = createClient(
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { email, password } = body
+    const { email, password, rememberMe = false } = body
 
     // 1. Validate input
     const validation = validateLoginInput({ email, password })
@@ -205,7 +205,10 @@ export async function POST(req: NextRequest) {
       .eq('id', targetUser.id)
 
     // 7. Create session
-    const { token: sessionToken, expiresAt } = generateSession(30) // 30 days
+    // If rememberMe is true, use 30 days; otherwise use 24 hours (session expires when browser closes)
+    // Note: Cookies will be session-only (no maxAge) if rememberMe is false, so they expire when browser closes
+    const sessionDays = rememberMe ? 30 : 1 // 1 day for session-only, 30 days for remember me
+    const { token: sessionToken, expiresAt } = generateSession(sessionDays)
 
     const { error: sessionError } = await supabase
       .from('user_sessions')
@@ -229,24 +232,28 @@ export async function POST(req: NextRequest) {
     // 8. Set session cookies
     const cookieStore = await cookies()
     const { getCookieOptions, getClientCookieOptions } = await import('@/lib/cookie-config')
-    const cookieMaxAge = 30 * 24 * 60 * 60 // 30 days
+    
+    // If rememberMe is true, use 30 days; otherwise use session-only cookies (no maxAge/expires)
+    const cookieOptions = rememberMe 
+      ? { maxAge: 30 * 24 * 60 * 60 } // 30 days
+      : {} // Session-only (expires when browser closes)
 
     // Set session token
     cookieStore.set('session_token', sessionToken, getCookieOptions({
       httpOnly: true,
-      maxAge: cookieMaxAge,
+      ...cookieOptions,
     }))
 
     // Set current_user_id (CRITICAL: Must match CURRENT_USER_ID_COOKIE_NAME in lib/session.ts)
     cookieStore.set('current_user_id', targetUser.id, getClientCookieOptions({
-      maxAge: cookieMaxAge,
+      ...cookieOptions,
     }))
 
     // Set gmail_user_email (CRITICAL: Must match SESSION_COOKIE_NAME in lib/session.ts)
     // This is required for getSessionUserEmailFromRequest to work
     cookieStore.set('gmail_user_email', targetUser.email || targetUser.user_email, getCookieOptions({
       httpOnly: true,
-      maxAge: cookieMaxAge,
+      ...cookieOptions,
     }))
 
     // 9. Return success

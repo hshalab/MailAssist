@@ -263,6 +263,13 @@ export async function POST(request: NextRequest) {
       maxAge: cookieMaxAge,
     }))
 
+    // CRITICAL: Set gmail_user_email cookie for session management (required for draft API and other endpoints)
+    // For invited users, use their email address (even if they don't have Gmail connected yet)
+    cookieStore.set('gmail_user_email', userRecord.email, getCookieOptions({
+      httpOnly: true,
+      maxAge: cookieMaxAge,
+    }))
+
     console.log(`[AcceptInvite] User ${isMigration ? 'migrated' : 'created'} and session established`)
 
     // 13. Return success

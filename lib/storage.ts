@@ -718,10 +718,10 @@ export async function saveTokens(tokens: StoredTokens, businessId?: string | nul
   let finalUserEmail: string | null = userEmail || null;
   
   if (!finalUserEmail) {
-    try {
-      const profile = await getUserProfile(tokens);
+  try {
+    const profile = await getUserProfile(tokens);
       finalUserEmail = profile?.emailAddress || null;
-    } catch (error) {
+  } catch (error) {
       console.error('Error getting user profile in saveTokens:', error);
       // Continue to throw error below if we can't get email
     }

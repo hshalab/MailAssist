@@ -5,7 +5,17 @@ import { checkPermission } from "@/lib/permissions"
 import { validateTextInput, sanitizeStringArray } from "@/lib/validation"
 
 export async function GET(request: NextRequest) {
-  const userEmail = getSessionUserEmailFromRequest(request as any)
+  // CRITICAL FIX: Use getCurrentUserEmail() to get the connected Gmail account email
+  // For business accounts, this ensures guardrails are loaded from the connected email (e.g., support@company.com)
+  // not the admin's login email (e.g., admin@company.com)
+  const { getCurrentUserEmail } = await import('@/lib/storage')
+  let userEmail = await getCurrentUserEmail()
+  
+  // Fallback to session email if getCurrentUserEmail fails (shouldn't happen if authenticated)
+  if (!userEmail) {
+    userEmail = getSessionUserEmailFromRequest(request as any)
+  }
+  
   if (!userEmail) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
   const data = await getGuardrails(userEmail)
   return NextResponse.json({ guardrails: data })
@@ -14,7 +24,17 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const userId = getCurrentUserIdFromRequest(request as any)
-    const userEmail = getSessionUserEmailFromRequest(request as any)
+    // CRITICAL FIX: Use getCurrentUserEmail() to get the connected Gmail account email
+    // For business accounts, this ensures guardrails are saved under the connected email (e.g., support@company.com)
+    // not the admin's login email (e.g., admin@company.com)
+    const { getCurrentUserEmail } = await import('@/lib/storage')
+    let userEmail = await getCurrentUserEmail()
+    
+    // Fallback to session email if getCurrentUserEmail fails (shouldn't happen if authenticated)
+    if (!userEmail) {
+      userEmail = getSessionUserEmailFromRequest(request as any)
+    }
+    
     if (!userId || !userEmail) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
 
     const adminCheck = await checkPermission(userId, "admin")

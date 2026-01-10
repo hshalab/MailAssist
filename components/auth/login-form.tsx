@@ -103,6 +103,7 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
         body: JSON.stringify({
           email: formData.email.toLowerCase().trim(),
           password: formData.password,
+          rememberMe: formData.rememberMe,
         }),
       })
 

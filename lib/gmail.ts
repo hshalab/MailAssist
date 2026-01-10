@@ -601,9 +601,28 @@ export async function sendNewEmail(
   body: string,
   userId: string
 ) {
-  const tokens = await getValidTokens();
+  // CRITICAL FIX: For invited users, get tokens from business-connected accounts
+  let tokens = await getValidTokens();
+  
   if (!tokens || !tokens.access_token) {
-    throw new Error('Not authenticated. Please connect Gmail first.');
+    // Check if this is a business account user (invited agent/manager)
+    const { validateBusinessSession } = await import('./session');
+    const businessSession = await validateBusinessSession();
+    
+    if (businessSession?.businessId) {
+      // For business accounts, try to get tokens from business-connected accounts
+      const { loadBusinessTokens } = await import('./storage');
+      const connectedAccounts = await loadBusinessTokens(businessSession.businessId, businessSession?.email || undefined);
+      if (connectedAccounts.length > 0) {
+        // Use tokens from the first connected account
+        tokens = connectedAccounts[0].tokens;
+        console.log(`[SendNewEmail] Using business account tokens for invited user`);
+      }
+    }
+  }
+  
+  if (!tokens || !tokens.access_token) {
+    throw new Error('Not authenticated. Please connect Gmail or ensure your business has connected email accounts.');
   }
 
   const gmail = getGmailClient(tokens);
@@ -726,9 +745,9 @@ export async function sendNewEmail(
     customerEmail: to,
     customerName: recipientName,
     initialStatus: 'open',
-    priority: null, // Let it be unassigned initially
+    priority: undefined, // Let it be unassigned initially
     tags: ['outbound'],
-    lastCustomerReplyAt: null,
+    lastCustomerReplyAt: undefined,
     lastAgentReplyAt: new Date().toISOString(),
   });
 

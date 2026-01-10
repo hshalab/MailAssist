@@ -9,7 +9,17 @@ type RouteContext = { params: { id: string } }
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const userId = getCurrentUserIdFromRequest(request as any)
-    const userEmail = getSessionUserEmailFromRequest(request as any)
+    // CRITICAL FIX: Use getCurrentUserEmail() to get the connected Gmail account email
+    // For business accounts, this ensures knowledge items are updated under the connected email (e.g., support@company.com)
+    // not the admin's login email (e.g., admin@company.com)
+    const { getCurrentUserEmail } = await import('@/lib/storage')
+    let userEmail = await getCurrentUserEmail()
+    
+    // Fallback to session email if getCurrentUserEmail fails (shouldn't happen if authenticated)
+    if (!userEmail) {
+      userEmail = getSessionUserEmailFromRequest(request as any)
+    }
+    
     if (!userId || !userEmail) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
 
     // Validate ID
@@ -79,7 +89,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const userId = getCurrentUserIdFromRequest(request as any)
-    const userEmail = getSessionUserEmailFromRequest(request as any)
+    // CRITICAL FIX: Use getCurrentUserEmail() to get the connected Gmail account email
+    // For business accounts, this ensures knowledge items are deleted from the connected email (e.g., support@company.com)
+    // not the admin's login email (e.g., admin@company.com)
+    const { getCurrentUserEmail } = await import('@/lib/storage')
+    let userEmail = await getCurrentUserEmail()
+    
+    // Fallback to session email if getCurrentUserEmail fails (shouldn't happen if authenticated)
+    if (!userEmail) {
+      userEmail = getSessionUserEmailFromRequest(request as any)
+    }
+    
     if (!userId || !userEmail) return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
 
     // Validate ID

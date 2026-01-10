@@ -40,12 +40,21 @@ export async function generateDraftReply(
     ticketId?: string | null;
     draftId?: string | null;
     isRegeneration?: boolean;
+    shopifyContext?: string;
   }
 ): Promise<string> {
-  // Generate embedding for the incoming email
+  // OPTIMIZATION: Generate embedding with conversation context for better similarity matching
+  // Include recent conversation context to find more relevant past emails
   let queryEmbedding: number[];
   try {
-    const queryContext = createEmailContext(incomingEmail.subject, incomingEmail.body);
+    // Include conversation context in embedding for better similarity matching
+    const conversationContext = conversationMessages && conversationMessages.length > 0
+      ? conversationMessages.slice(-3).map(m => m.body).join(' ')
+      : '';
+    const queryContext = createEmailContext(
+      incomingEmail.subject, 
+      `${incomingEmail.body} ${conversationContext}`.trim()
+    );
     queryEmbedding = await generateEmbedding(queryContext);
   } catch (error) {
     console.error('Error generating embedding for incoming email:', error);
@@ -107,7 +116,7 @@ export async function generateDraftReply(
     }
   }
 
-  // Create prompt for Groq, including optional conversation history and internal chat context
+  // Create prompt for Groq, including optional conversation history, internal chat context, and Shopify data
   const relevantKnowledge = selectKnowledge(incomingEmail, knowledgeItems);
   const prompt = createDraftPrompt(
     incomingEmail,
@@ -116,7 +125,8 @@ export async function generateDraftReply(
     relevantKnowledge,
     guardrails,
     options?.isRegeneration,
-    internalChatContext
+    internalChatContext,
+    options?.shopifyContext
   );
 
   // Call Groq API and measure response time
@@ -364,15 +374,28 @@ function createDraftPrompt(
   knowledgeItems: KnowledgeItem[] = [],
   guardrails?: Guardrails | null,
   isRegeneration?: boolean,
-  internalChatContext?: string
+  internalChatContext?: string,
+  shopifyContext?: string
 ): string {
-  const history = (conversationMessages || [])
+  // OPTIMIZATION: Use more conversation context (up to 15 messages) for better understanding
+  // Sort messages by date to ensure chronological order
+  const sortedMessages = [...(conversationMessages || [])].sort((a, b) => {
+    const dateA = new Date(a.date || '').getTime() || 0;
+    const dateB = new Date(b.date || '').getTime() || 0;
+    return dateA - dateB; // Oldest first for context
+  });
+  
+  const history = sortedMessages
     // Exclude the incoming email itself if it's in the list
     .filter((msg) => msg.id !== incomingEmail.id)
-    // Take up to the last 5 messages for context
-    .slice(-5)
+    // Take up to the last 15 messages for comprehensive context (increased from 5)
+    .slice(-15)
     .map((msg) => {
-      const direction = msg.from === incomingEmail.to ? 'Agent' : 'Customer';
+      // Determine if message is from agent (sent) or customer (received)
+      // Check if 'from' matches the connected account's email domain or if it's a reply
+      const isFromAgent = msg.from?.toLowerCase().includes(incomingEmail.to?.toLowerCase() || '') || 
+                         msg.to?.toLowerCase() === incomingEmail.to?.toLowerCase();
+      const direction = isFromAgent ? 'Agent' : 'Customer';
       return `${direction} (${msg.from} → ${msg.to} at ${msg.date || 'unknown time'}):\n${msg.body}`;
     })
     .join('\n\n---\n\n');
@@ -405,6 +428,7 @@ function createDraftPrompt(
   return `You are an AI assistant helping to draft email replies. Follow the guardrails and knowledge below.
 
 ${internalChatContext ? internalChatContext + '\n' : ''}
+${shopifyContext ? shopifyContext + '\n' : ''}
 
 TONE & STYLE:
 ${guardrailTone}
@@ -427,19 +451,27 @@ ${styleExamples || 'No past examples available. Use a professional, friendly ton
 ${knowledgeSection}
 
 INSTRUCTIONS:
-1. Analyze the incoming email and understand what it's asking or discussing.
-2. Match the tone and style of the user's past emails shown above.
-3. Generate a draft reply that:
-   - Addresses the key points in the incoming email
-   - Matches the user's writing style and tone
-   - Is professional and appropriate
-   - Asks clarifying questions if the incoming email is unclear or needs more information
-   - Is concise but complete
-4. Output ONLY the draft email body text (no subject line, no metadata, just the reply text).
-5. Do not include placeholders like [Your Name] - write as if the user is writing directly.
-6. If the incoming email requires action or has questions, address them directly.
-7. Respect all guardrails and avoid banned words/phrases.
-8. Apply topic-specific rules when relevant to the email content or tags.${isRegeneration ? '\n9. IMPORTANT: This is a REGENERATION request. Create a DIFFERENT variation from any previous draft while maintaining the same core message and tone. Use different wording, sentence structure, or approach to convey the same information.' : ''}
+1. CRITICAL: Read and understand the FULL CONVERSATION HISTORY above. This shows the complete context of all emails exchanged in this ticket/thread.
+2. Analyze the incoming email and understand what it's asking or discussing, considering the full conversation context.
+3. Match the tone and style of the user's past emails shown above - pay close attention to:
+   - Writing style (formal vs casual, length, structure)
+   - Tone (friendly, professional, empathetic, etc.)
+   - Common phrases and expressions used
+   - How questions are asked and answered
+4. Generate a draft reply that:
+   - Addresses ALL key points from the incoming email AND references relevant points from the conversation history
+   - Matches the user's writing style and tone EXACTLY (use similar sentence structure, vocabulary, and phrasing)
+   - Is professional and appropriate for the context
+   - References previous messages in the conversation when relevant (e.g., "As mentioned earlier...", "Following up on...")
+   - ${shopifyContext ? 'PERSONALIZES the response using Shopify customer information when available (order history, total spent, recent orders) - this builds rapport and shows understanding of their relationship with the business. ' : ''}Asks clarifying questions if the incoming email is unclear or needs more information
+   - Is concise but complete - don't repeat information already covered in the conversation
+   - Maintains continuity with the conversation flow
+5. Output ONLY the draft email body text (no subject line, no metadata, just the reply text).
+6. Do not include placeholders like [Your Name] - write as if the user is writing directly.
+7. If the incoming email requires action or has questions, address them directly and reference any previous discussion about them.
+8. Respect all guardrails and avoid banned words/phrases.
+9. Apply topic-specific rules when relevant to the email content or tags.
+10. IMPORTANT: Use the conversation history to understand the full context - don't just reply to the last email, consider the entire thread.${isRegeneration ? '\n11. IMPORTANT: This is a REGENERATION request. Create a DIFFERENT variation from any previous draft while maintaining the same core message and tone. Use different wording, sentence structure, or approach to convey the same information.' : ''}
 
 Generate the draft reply now:`;
 }

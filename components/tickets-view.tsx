@@ -202,6 +202,13 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [draftId, setDraftId] = useState<string | null>(null)
   const [showDraft, setShowDraft] = useState(false)
   const [generatingDraft, setGeneratingDraft] = useState(false)
+
+  // Clear draft when switching tickets
+  useEffect(() => {
+    setShowDraft(false)
+    setDraftText("")
+    setDraftId(null)
+  }, [selectedTicket?.id])
   const [sendingReply, setSendingReply] = useState(false)
   const [sendingAction, setSendingAction] = useState<'send' | 'send-close' | null>(null)
   const [newNote, setNewNote] = useState("")
@@ -244,7 +251,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
   // Quick replies state
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
-  const [showQuickReplies, setShowQuickReplies] = useState(false)
   const [showQuickRepliesSidebar, setShowQuickRepliesSidebar] = useState(false)
   const initialSelectHandledRef = useRef(false)
 
@@ -549,8 +555,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       // CRITICAL: Send user ID in header from sessionStorage (per-tab) to prevent cookie sharing issues
       // This ensures each tab uses its own user ID even when cookies are shared
       const headers: Record<string, string> = {
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
-        'Pragma': 'no-cache',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
       };
       
       if (currentUserId) {
@@ -1598,7 +1604,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
   const insertQuickReply = (content: string) => {
     setReplyText(content)
-    setShowQuickReplies(false)
   }
 
   const handleQuickReplySelect = (content: string) => {
@@ -3402,53 +3407,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                               </Badge>
                             )}
                           </Button>
-                          <Popover open={showQuickReplies} onOpenChange={setShowQuickReplies}>
-                            <PopoverTrigger asChild>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs"
-                              >
-                                Quick Menu
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-80 p-2" align="end">
-                              {quickReplies.length === 0 ? (
-                                <div className="p-4 text-center text-sm text-muted-foreground">
-                                  <p>No quick replies available</p>
-                                  <p className="text-xs mt-1">Admins can add quick replies in settings</p>
-                                </div>
-                              ) : (
-                                <div className="space-y-1 max-h-96 overflow-y-auto">
-                                  {Object.entries(
-                                    quickReplies.reduce((acc, qr) => {
-                                      const cat = qr.category || "General"
-                                      if (!acc[cat]) acc[cat] = []
-                                      acc[cat].push(qr)
-                                      return acc
-                                    }, {} as Record<string, QuickReply[]>)
-                                  ).map(([category, replies]) => (
-                                    <div key={category} className="mb-2">
-                                      <div className="text-xs font-semibold text-muted-foreground mb-1 px-2 sticky top-0 bg-background py-1">
-                                        {category} ({replies.length})
-                                      </div>
-                                      {replies.map((qr) => (
-                                        <Button
-                                          key={qr.id}
-                                          variant="ghost"
-                                          size="sm"
-                                          className="w-full justify-start h-8 text-xs text-left"
-                                          onClick={() => insertQuickReply(qr.content)}
-                                        >
-                                          {qr.title}
-                                        </Button>
-                                      ))}
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </PopoverContent>
-                          </Popover>
                           <Button
                             size="sm"
                             variant="secondary"

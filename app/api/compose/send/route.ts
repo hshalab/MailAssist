@@ -17,10 +17,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // CRITICAL FIX: getCurrentUserEmail() already handles business accounts correctly
+    // It returns the connected Gmail account email (e.g., support@company.com) for business accounts
+    // and the user's Gmail email for personal accounts
     const userEmail = await getCurrentUserEmail();
     if (!userEmail) {
       return NextResponse.json(
-        { error: 'No Gmail account connected' },
+        { error: 'No Gmail account connected. Please connect Gmail or ensure your business has connected email accounts.' },
         { status: 400 }
       );
     }

@@ -11,7 +11,7 @@ import { getCurrentUserIdFromRequest, getSessionUserEmailFromRequest } from '@/l
 
 function stripHtml(html: string) {
   if (!html) return ''
-  return html.replace(/<style[^>]*>.*?<\/style>/gis, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  return html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
 type RouteContext =
@@ -80,8 +80,23 @@ export async function POST(
     });
 
     // Get user info for logging
-    const userEmail = getSessionUserEmailFromRequest(request as any);
+    let userEmail = getSessionUserEmailFromRequest(request as any);
     const userId = getCurrentUserIdFromRequest(request as any);
+    
+    // CRITICAL FIX: For invited users, get the connected Gmail account email
+    if (!userEmail) {
+      const { validateBusinessSession } = await import('@/lib/session');
+      const businessSession = await validateBusinessSession();
+      
+      if (businessSession?.businessId) {
+        const { loadBusinessTokens } = await import('@/lib/storage');
+        const connectedAccounts = await loadBusinessTokens(businessSession.businessId, businessSession?.email || undefined);
+        if (connectedAccounts.length > 0) {
+          userEmail = connectedAccounts[0].email;
+          console.log(`[Reply API] Invited user, using business account email: ${userEmail}`);
+        }
+      }
+    }
     
     // Find the original draft to compare if it was edited
     let originalDraftText = '';
@@ -102,10 +117,29 @@ export async function POST(
       }
     }
 
-    const tokens = await getValidTokens();
+    // CRITICAL FIX: For invited users, get tokens from business-connected accounts
+    let tokens = await getValidTokens();
+    
+    if (!tokens || !tokens.access_token) {
+      // Check if this is a business account user (invited agent/manager)
+      const { validateBusinessSession } = await import('@/lib/session');
+      const businessSession = await validateBusinessSession();
+      
+      if (businessSession?.businessId) {
+        // For business accounts, try to get tokens from business-connected accounts
+        const { loadBusinessTokens } = await import('@/lib/storage');
+        const connectedAccounts = await loadBusinessTokens(businessSession.businessId, businessSession?.email || undefined);
+        if (connectedAccounts.length > 0) {
+          // Use tokens from the first connected account
+          tokens = connectedAccounts[0].tokens;
+          console.log(`[Reply API] Using business account tokens for invited user`);
+        }
+      }
+    }
+    
     if (!tokens || !tokens.access_token) {
       return NextResponse.json(
-        { error: 'Not authenticated. Please connect Gmail first.' },
+        { error: 'Not authenticated. Please connect Gmail or ensure your business has connected email accounts.' },
         { status: 401 }
       );
     }
@@ -146,13 +180,27 @@ export async function POST(
       ? baseSubject
       : `Re: ${baseSubject}`;
 
+    // CRITICAL FIX: Ensure fromAddress is the connected Gmail account, not the invited user's email
+    // For business accounts, use the connected Gmail account email (e.g., support@company.com)
+    // For personal accounts, use the user's Gmail email
     let fromAddress: string | undefined;
     try {
-      const profile = await getUserProfile(tokens);
-      fromAddress = profile?.emailAddress || undefined;
+      // First try to get from userEmail (which is already set to connected Gmail account for business accounts)
+      if (userEmail) {
+        fromAddress = userEmail;
+      } else {
+        // Fallback: get from profile
+        const profile = await getUserProfile(tokens);
+        fromAddress = profile?.emailAddress || undefined;
+      }
     } catch {
       // best-effort, fallback handled below
+      if (userEmail) {
+        fromAddress = userEmail;
+      }
     }
+    
+    console.log(`[Reply API] Sending email FROM: ${fromAddress} (userEmail: ${userEmail})`);
 
     const sentMessage = await sendReplyMessage(tokens, {
       to: replyRecipient,
