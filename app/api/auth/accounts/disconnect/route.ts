@@ -36,121 +36,134 @@ export async function POST(request: NextRequest) {
         console.log(`[Disconnect] Starting disconnect for email: ${email}, businessId: ${businessSession?.businessId || 'personal'}`);
         
         // 1. Delete emails where owner_email or user_email matches
-        const { error: emailsError1, count: emailsCount1 } = await supabase
+        const { error: emailsError1 } = await supabase
             .from('emails')
             .delete()
-            .eq('owner_email', email)
-            .select('*', { count: 'exact', head: true });
+            .eq('owner_email', email);
         
-        const { error: emailsError2, count: emailsCount2 } = await supabase
+        const { error: emailsError2 } = await supabase
             .from('emails')
             .delete()
-            .eq('user_email', email)
-            .select('*', { count: 'exact', head: true });
+            .eq('user_email', email);
 
         if (emailsError1 || emailsError2) {
             console.error('Error deleting emails:', emailsError1 || emailsError2);
         } else {
-            console.log(`[Disconnect] Deleted emails for account: ${email} (owner_email: ${emailsCount1 || 0}, user_email: ${emailsCount2 || 0})`);
+            console.log(`[Disconnect] Deleted emails for account: ${email}`);
         }
 
         // 2. Delete tickets where owner_email or user_email matches
-        const { error: ticketsError1, count: ticketsCount1 } = await supabase
+        const { error: ticketsError1 } = await supabase
             .from('tickets')
             .delete()
-            .eq('owner_email', email)
-            .select('*', { count: 'exact', head: true });
+            .eq('owner_email', email);
         
-        const { error: ticketsError2, count: ticketsCount2 } = await supabase
+        const { error: ticketsError2 } = await supabase
             .from('tickets')
             .delete()
-            .eq('user_email', email)
-            .select('*', { count: 'exact', head: true });
+            .eq('user_email', email);
 
         if (ticketsError1 || ticketsError2) {
             console.error('Error deleting tickets:', ticketsError1 || ticketsError2);
         } else {
-            console.log(`[Disconnect] Deleted tickets for account: ${email} (owner_email: ${ticketsCount1 || 0}, user_email: ${ticketsCount2 || 0})`);
+            console.log(`[Disconnect] Deleted tickets for account: ${email}`);
         }
 
         // 3. Delete drafts where user_email matches
-        const { error: draftsError, count: draftsCount } = await supabase
+        const { error: draftsError } = await supabase
             .from('drafts')
             .delete()
-            .eq('user_email', email)
-            .select('*', { count: 'exact', head: true });
+            .eq('user_email', email);
 
         if (draftsError) {
             console.error('Error deleting drafts:', draftsError);
         } else {
-            console.log(`[Disconnect] Deleted drafts for account: ${email} (count: ${draftsCount || 0})`);
+            console.log(`[Disconnect] Deleted drafts for account: ${email}`);
         }
 
         // 4. Delete sync_state where user_email matches
-        const { error: syncStateError, count: syncStateCount } = await supabase
+        const { error: syncStateError } = await supabase
             .from('sync_state')
             .delete()
-            .eq('user_email', email)
-            .select('*', { count: 'exact', head: true });
+            .eq('user_email', email);
 
         if (syncStateError) {
             console.error('Error deleting sync_state:', syncStateError);
         } else {
-            console.log(`[Disconnect] Deleted sync_state for account: ${email} (count: ${syncStateCount || 0})`);
+            console.log(`[Disconnect] Deleted sync_state for account: ${email}`);
         }
 
         // 5. CRITICAL: Delete tokens - handle both business and personal accounts
-        let tokensQuery = supabase
-            .from('tokens')
-            .delete()
-            .eq('user_email', email);
-
-        // For business accounts, only delete tokens for this business
-        // For personal accounts, delete all tokens (business_id IS NULL)
-        if (businessSession?.businessId) {
-            tokensQuery = tokensQuery.eq('business_id', businessSession.businessId);
-            console.log(`[Disconnect] Deleting tokens for business: ${businessSession.businessId}, email: ${email}`);
-        } else {
-            tokensQuery = tokensQuery.is('business_id', null);
-            console.log(`[Disconnect] Deleting personal tokens for email: ${email}`);
-        }
-
-        const { error: tokensError, count: tokensCount } = await tokensQuery
-            .select('*', { count: 'exact', head: true });
-
-        if (tokensError) {
-            console.error('Error deleting tokens:', tokensError);
-            return NextResponse.json(
-                { error: 'Failed to disconnect account' },
-                { status: 500 }
-            );
-        }
-
-        console.log(`[Disconnect] Successfully deleted ${tokensCount || 0} token(s) for account: ${email}`);
-
-        // 6. Verify deletion - check if any tokens still exist
-        let verifyQuery = supabase
+        // First, find ALL tokens for this email to ensure we delete everything
+        const { data: allTokensForEmail } = await supabase
             .from('tokens')
             .select('id, business_id, user_email')
             .eq('user_email', email);
 
-        if (businessSession?.businessId) {
-            verifyQuery = verifyQuery.eq('business_id', businessSession.businessId);
-        } else {
-            verifyQuery = verifyQuery.is('business_id', null);
-        }
+        console.log(`[Disconnect] Found ${allTokensForEmail?.length || 0} token(s) for email: ${email}`);
 
-        const { data: remainingTokens } = await verifyQuery;
-
-        if (remainingTokens && remainingTokens.length > 0) {
-            console.error(`[Disconnect] WARNING: ${remainingTokens.length} token(s) still exist after deletion:`, remainingTokens);
-            // Try to delete again with a more aggressive approach
-            for (const token of remainingTokens) {
-                await supabase.from('tokens').delete().eq('id', token.id);
+        if (allTokensForEmail && allTokensForEmail.length > 0) {
+            // For business accounts, delete tokens matching this business_id
+            // For personal accounts, delete tokens where business_id IS NULL
+            let tokensToDelete = allTokensForEmail;
+            
+            if (businessSession?.businessId) {
+                tokensToDelete = allTokensForEmail.filter(t => t.business_id === businessSession.businessId);
+                console.log(`[Disconnect] Filtering to ${tokensToDelete.length} token(s) for business: ${businessSession.businessId}`);
+            } else {
+                tokensToDelete = allTokensForEmail.filter(t => t.business_id === null);
+                console.log(`[Disconnect] Filtering to ${tokensToDelete.length} personal token(s)`);
             }
-            console.log(`[Disconnect] Force-deleted remaining tokens`);
+
+            // Delete each token individually to ensure deletion
+            let deletedCount = 0;
+            for (const token of tokensToDelete) {
+                const { error: deleteError } = await supabase
+                    .from('tokens')
+                    .delete()
+                    .eq('id', token.id);
+                
+                if (deleteError) {
+                    console.error(`[Disconnect] Error deleting token ${token.id}:`, deleteError);
+                } else {
+                    deletedCount++;
+                }
+            }
+
+            console.log(`[Disconnect] Successfully deleted ${deletedCount} of ${tokensToDelete.length} token(s)`);
+
+            // 6. Verify deletion - check if any tokens still exist
+            let verifyQuery = supabase
+                .from('tokens')
+                .select('id, business_id, user_email')
+                .eq('user_email', email);
+
+            if (businessSession?.businessId) {
+                verifyQuery = verifyQuery.eq('business_id', businessSession.businessId);
+            } else {
+                verifyQuery = verifyQuery.is('business_id', null);
+            }
+
+            const { data: remainingTokens } = await verifyQuery;
+
+            if (remainingTokens && remainingTokens.length > 0) {
+                console.error(`[Disconnect] WARNING: ${remainingTokens.length} token(s) still exist after deletion:`, remainingTokens);
+                // Try to delete again with a more aggressive approach - delete ALL tokens for this email
+                const { error: forceDeleteError } = await supabase
+                    .from('tokens')
+                    .delete()
+                    .eq('user_email', email);
+                
+                if (forceDeleteError) {
+                    console.error(`[Disconnect] Force delete failed:`, forceDeleteError);
+                } else {
+                    console.log(`[Disconnect] Force-deleted all remaining tokens for email: ${email}`);
+                }
+            } else {
+                console.log(`[Disconnect] Verified: No tokens remain for email: ${email}`);
+            }
         } else {
-            console.log(`[Disconnect] Verified: No tokens remain for email: ${email}`);
+            console.log(`[Disconnect] No tokens found for email: ${email}`);
         }
 
         console.log(`[Disconnect] Successfully disconnected account: ${email} and deleted all associated data`);

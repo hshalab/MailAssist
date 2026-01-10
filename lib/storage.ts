@@ -648,14 +648,14 @@ export async function loadBusinessTokens(businessId: string | null, userEmail?: 
       .from('tokens')
       .select('*');
 
-    if (businessId && userEmail) {
-      // If both are provided, fetch tokens for business OR this specific user
-      query = query.or(`business_id.eq.${businessId},user_email.eq.${userEmail}`);
-    } else if (businessId) {
-      // Only business ID provided
+    // CRITICAL FIX: For business accounts, always fetch ALL tokens for the business
+    // Ignore userEmail when businessId is provided - invited users (agents) need to see all business tokens
+    if (businessId) {
+      // Business account - fetch ALL tokens for this business (ignoring userEmail)
       query = query.eq('business_id', businessId);
+      console.log(`[Storage] loadBusinessTokens: Loading ALL tokens for business ${businessId} (ignoring userEmail: ${userEmail})`);
     } else if (userEmail) {
-      // Only user email provided (personal account case)
+      // Personal account - only user email provided
       query = query.eq('user_email', userEmail).is('business_id', null);
     } else {
       return [];

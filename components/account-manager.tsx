@@ -72,11 +72,13 @@ export function AccountManager() {
         if (!accountToDelete) return
 
         setIsDisconnecting(accountToDelete)
+        const emailToDelete = accountToDelete // Store before clearing state
+        
         try {
             const res = await fetch('/api/auth/accounts/disconnect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: accountToDelete }),
+                body: JSON.stringify({ email: emailToDelete }),
                 cache: 'no-store'
             })
 
@@ -84,7 +86,7 @@ export function AccountManager() {
 
             if (res.ok && data.success) {
                 // Update local state immediately
-                setAccounts(prev => prev.filter(a => a.email !== accountToDelete))
+                setAccounts(prev => prev.filter(a => a.email !== emailToDelete))
                 setAccountToDelete(null)
                 
                 // CRITICAL: Trigger refresh for ALL users in the business
@@ -94,13 +96,19 @@ export function AccountManager() {
                 // Broadcast to all tabs/windows that accounts changed
                 if (typeof window !== 'undefined' && window.localStorage) {
                     localStorage.setItem('accountsChanged', Date.now().toString())
+                    // Also set a flag to prevent OAuth from recreating tokens
+                    localStorage.setItem(`disconnected_${emailToDelete}`, Date.now().toString())
                 }
                 
-                // Wait a bit longer to ensure database deletion completes
+                // Wait longer to ensure database deletion completes and prevent race conditions
                 // Then reload the page to ensure clean state and reflect deletions
                 setTimeout(() => {
+                    // Clear the disconnected flag before reload
+                    if (typeof window !== 'undefined' && window.localStorage) {
+                        localStorage.removeItem(`disconnected_${emailToDelete}`)
+                    }
                     window.location.reload()
-                }, 1000) // Increased from 500ms to 1000ms to ensure deletion completes
+                }, 1500) // Increased to 1500ms to ensure deletion completes
             } else {
                 console.error('Disconnect failed:', data.error)
                 alert(data.error || 'Failed to disconnect account. Please try again.')
@@ -318,12 +326,12 @@ export function AccountManager() {
                             This will remove the account connection. Emails and tickets from this account will no longer be accessible.
                         </AlertDescription>
                     </Alert>
-                    <DialogFooter className="flex-col sm:flex-row gap-3 sm:gap-2 mt-6">
+                    <DialogFooter className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end sm:gap-2">
                         <Button
                             variant="outline"
                             onClick={() => setAccountToDelete(null)}
                             disabled={isDisconnecting === accountToDelete}
-                            className="w-full sm:w-auto order-2 sm:order-1"
+                            className="w-full sm:w-auto"
                         >
                             Cancel
                         </Button>
@@ -331,7 +339,7 @@ export function AccountManager() {
                             variant="destructive"
                             onClick={confirmDisconnect}
                             disabled={isDisconnecting === accountToDelete}
-                            className="w-full sm:w-auto bg-destructive hover:bg-destructive/90 order-1 sm:order-2"
+                            className="w-full sm:w-auto bg-destructive hover:bg-destructive/90"
                         >
                             {isDisconnecting === accountToDelete ? (
                                 <>

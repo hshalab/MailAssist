@@ -365,8 +365,8 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   // CRITICAL FIX: Show skeleton if loading OR if skeleton flag is set (returning from OAuth)
   // PRIORITY: showSkeleton flag takes highest priority - if set, ALWAYS show skeleton
   // This ensures skeleton shows immediately when returning from OAuth, even before accounts load
-  // Also show skeleton if we have connected accounts but no emails yet (might still be loading)
-  const shouldShowSkeleton = (showSkeleton || loading || (hasConnectedAccounts !== false && emails.length === 0 && !error)) && !loadingMore;
+  // Also show skeleton if accounts are still loading (hasConnectedAccounts === undefined) OR we have connected accounts but no emails yet
+  const shouldShowSkeleton = (showSkeleton || loading || hasConnectedAccounts === undefined || (hasConnectedAccounts !== false && emails.length === 0 && !error)) && !loadingMore;
   if (shouldShowSkeleton) {
     return (
       <div className="p-3 space-y-2 animate-in fade-in duration-300">
@@ -442,10 +442,10 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   // If we have connected accounts but emails are empty, we might still be loading (show skeleton)
   // Only show empty state if we're completely done loading AND don't have skeleton flag
   // AND either we have no connected accounts OR we've confirmed emails are actually empty (not just loading)
-  // CRITICAL: Never show empty state if skeleton flag is set (returning from OAuth)
+  // CRITICAL: Never show empty state if skeleton flag is set (returning from OAuth) OR accounts are still loading
   // This prevents the "Connect Gmail" button from flashing before skeleton appears
-  if (emails.length === 0 && !loadingMore && !showSkeleton && !loading) {
-    // If hasConnectedAccounts is true/undefined and no error, we might still be loading - skeleton handles this above
+  if (emails.length === 0 && !loadingMore && !showSkeleton && !loading && hasConnectedAccounts !== undefined) {
+    // If hasConnectedAccounts is true and no error, we might still be loading - skeleton handles this above
     // Only show empty state if we explicitly know there are no connected accounts OR we have an error
     if (hasConnectedAccounts !== false && error === null) {
       // Still might be loading - show skeleton as fallback to prevent flash

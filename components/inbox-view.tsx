@@ -270,7 +270,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
             onRefreshReady={handleRefreshReady}
             selectedAccount={selectedAccount === 'all' ? undefined : selectedAccount}
             searchQuery={searchQuery}
-            hasConnectedAccounts={accountsLoading ? undefined : connectedAccounts.length > 0}
+            hasConnectedAccounts={accountsLoading ? undefined : (connectedAccounts.length > 0 ? true : false)}
           />
         </div>
       </div>
