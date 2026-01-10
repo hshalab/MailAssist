@@ -125,6 +125,15 @@ export async function GET(request: NextRequest) {
         return NextResponse.redirect(`${frontendUrl}/auth/landing?view=login&error=${errorMsg}`);
       }
 
+      // CRITICAL PRODUCTION FIX: Get old session info BEFORE account creation
+      // This ensures we can delete old business sessions even when creating new personal account
+      const { cookies: getCookies } = await import('next/headers');
+      const cookieStore = await getCookies();
+      const oldSessionToken = cookieStore.get('session_token')?.value;
+      const oldUserId = cookieStore.get('current_user_id')?.value;
+      
+      console.log(`[OAuth Callback] Old session detected - token: ${oldSessionToken ? oldSessionToken.substring(0, 20) + '...' : 'none'}, userId: ${oldUserId || 'none'}`);
+
       const accountInfo = await getAccountInfo(gmailEmail);
       let userId: string | undefined;
       let userName: string | undefined;
@@ -259,25 +268,51 @@ export async function GET(request: NextRequest) {
       }
 
       // 3. Create Session
-      // CRITICAL FIX: Delete ALL old sessions for this user before creating a new one
-      // This prevents old business sessions from persisting when creating a new personal account
-      console.log(`[OAuth Callback] Deleting old sessions for user: ${userId}`);
-      await supabase
-        .from('user_sessions')
-        .delete()
-        .eq('user_id', userId);
+      // CRITICAL PRODUCTION FIX: Delete OLD session BEFORE creating new account
+      // Must delete by old session token (not new userId) because new account might not exist yet
+      // This prevents old business sessions from being used when creating new personal account
       
-      // Also delete any sessions that might be using the old session_token cookie
-      // This ensures complete cleanup
-      const { cookies: getCookies } = await import('next/headers');
-      const cookieStore = await getCookies();
-      const oldSessionToken = cookieStore.get('session_token')?.value;
-      if (oldSessionToken) {
-        console.log(`[OAuth Callback] Deleting old session token from database`);
-        await supabase
+      // Delete old session from database FIRST (before creating new one)
+      // This prevents the old business session from being used
+      if (oldSessionToken && supabase) {
+        console.log(`[OAuth Callback] Deleting old session token from database: ${oldSessionToken.substring(0, 20)}...`);
+        const { error: deleteError } = await supabase
           .from('user_sessions')
           .delete()
           .eq('session_token', oldSessionToken);
+        
+        if (deleteError) {
+          console.error('[OAuth Callback] Error deleting old session:', deleteError);
+        } else {
+          console.log('[OAuth Callback] Old session deleted successfully');
+        }
+      }
+      
+      // Also delete all sessions for old user (if different from new user)
+      // This handles the case where old user has multiple sessions
+      if (oldUserId && oldUserId !== userId && supabase) {
+        console.log(`[OAuth Callback] Deleting all sessions for old user: ${oldUserId}`);
+        const { error: deleteOldUserError } = await supabase
+          .from('user_sessions')
+          .delete()
+          .eq('user_id', oldUserId);
+        
+        if (deleteOldUserError) {
+          console.error('[OAuth Callback] Error deleting old user sessions:', deleteOldUserError);
+        }
+      }
+      
+      // Delete all sessions for new user (in case of re-login to same account)
+      if (userId && supabase) {
+        console.log(`[OAuth Callback] Deleting existing sessions for new user: ${userId}`);
+        const { error: deleteNewUserError } = await supabase
+          .from('user_sessions')
+          .delete()
+          .eq('user_id', userId);
+        
+        if (deleteNewUserError) {
+          console.error('[OAuth Callback] Error deleting new user sessions:', deleteNewUserError);
+        }
       }
 
       const sessionToken = crypto.randomUUID();
@@ -309,15 +344,29 @@ export async function GET(request: NextRequest) {
       // 4. Set Cookies
       // CRITICAL FIX: Clear old session cookies first to prevent using old business sessions
       // This ensures a fresh personal account doesn't see data from a previous business account
-      response.cookies.delete('session_token')
-      response.cookies.delete('current_user_id')
-      response.cookies.delete('gmail_user_email')
-      
+      // PRODUCTION FIX: Must delete with same domain/path as when setting, otherwise deletion fails
       const { getCookieOptions } = await import('@/lib/cookie-config')
-      response.cookies.set('session_token', sessionToken, getCookieOptions({
-        httpOnly: true,
-        expires: expiresAt,
-      }));
+      const cookieOptions = getCookieOptions({ httpOnly: true, expires: expiresAt });
+      const deleteOptions = {
+        ...cookieOptions,
+        expires: new Date(0), // Past date to ensure deletion
+        maxAge: 0,
+      };
+      
+      // Delete old cookies with explicit options (production requires same domain)
+      response.cookies.set('session_token', '', deleteOptions);
+      response.cookies.set('current_user_id', '', deleteOptions);
+      response.cookies.set('gmail_user_email', '', deleteOptions);
+      response.cookies.set('user_id', '', deleteOptions);
+      
+      // Also try deleting without options (fallback)
+      response.cookies.delete('session_token');
+      response.cookies.delete('current_user_id');
+      response.cookies.delete('gmail_user_email');
+      response.cookies.delete('user_id');
+      
+      // Set new cookies
+      response.cookies.set('session_token', sessionToken, cookieOptions);
 
       // Use helper to set current_user_id with proper flags
       setCurrentUserIdInResponse(response, userId!);

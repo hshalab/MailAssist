@@ -88,9 +88,29 @@ export async function clearSession(): Promise<void> {
 
 /**
  * Clear the session cookie from a NextResponse (for use in API routes)
+ * CRITICAL: Must use same domain/path as when setting cookies for deletion to work in production
  */
 export function clearSessionInResponse(response: NextResponse): NextResponse {
   try {
+    // Get cookie options to ensure we delete with the same domain/path as when setting
+    const { getCookieOptions } = require('@/lib/cookie-config');
+    const cookieOptions = getCookieOptions();
+    
+    // Delete cookies with explicit options to ensure they're deleted in production
+    // Setting expires to past date and same domain/path ensures deletion works
+    const deleteOptions = {
+      ...cookieOptions,
+      expires: new Date(0), // Past date
+      maxAge: 0,
+    };
+    
+    response.cookies.set(SESSION_COOKIE_NAME, '', deleteOptions);
+    response.cookies.set(CURRENT_USER_ID_COOKIE_NAME, '', deleteOptions);
+    response.cookies.set('session_token', '', deleteOptions);
+    response.cookies.set('gmail_user_email', '', deleteOptions);
+    response.cookies.set('user_id', '', deleteOptions);
+    
+    // Also try deleting without domain (in case cookies were set without domain)
     response.cookies.delete(SESSION_COOKIE_NAME);
     response.cookies.delete(CURRENT_USER_ID_COOKIE_NAME);
     response.cookies.delete('session_token');
