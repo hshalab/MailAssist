@@ -371,6 +371,11 @@ export async function GET(request: NextRequest) {
 
       // Set new cookies
       console.log(`[OAuth Callback] Setting new cookies - sessionToken: ${sessionToken.substring(0, 20)}..., userId: ${userId}, email: ${gmailEmail}`);
+      console.log('[OAuth Callback] Cookie options:', {
+        domain: cookieOptionsWithMaxAge.domain,
+        secure: cookieOptionsWithMaxAge.secure,
+        sameSite: cookieOptionsWithMaxAge.sameSite
+      });
 
       cookieStoreOAuth.set('session_token', sessionToken, cookieOptionsWithMaxAge);
       cookieStoreOAuth.set('current_user_id', userId!, getCookieOptions({

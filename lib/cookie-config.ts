@@ -62,12 +62,15 @@ export function getCookieOptions(options?: {
   // Note: If you need cross-subdomain cookies, set COOKIE_DOMAIN=".yourdomain.com"
   // If not set, cookies will work for the exact domain only (recommended for security)
 
-  // Secure flag: true in production (HTTPS), false in dev (HTTP)
-  const secure = isProduction;
 
-  // SameSite: 'none' for OAuth compatibility in production (requires secure=true)
-  // 'lax' for development
-  const sameSite = options?.sameSite || (isProduction ? 'none' : 'lax');
+  // Secure flag: true in production (HTTPS), false in dev (HTTP)
+  const secure: boolean = isProduction;
+
+  // SameSite: MUST be 'none' for OAuth redirects from Google
+  // OAuth redirects from accounts.google.com to your domain are cross-site requests
+  // 'none' requires secure=true (HTTPS only)
+  // In development, use 'lax' since OAuth typically uses localhost
+  const sameSite: 'strict' | 'lax' | 'none' = options?.sameSite || (isProduction ? 'none' : 'lax');
 
   const cookieOptions: {
     httpOnly: boolean;
@@ -79,8 +82,8 @@ export function getCookieOptions(options?: {
     domain?: string;
   } = {
     httpOnly: options?.httpOnly ?? true,
-    secure,
-    sameSite,
+    secure: secure,
+    sameSite: sameSite,
     path: '/',
   };
 
@@ -94,6 +97,18 @@ export function getCookieOptions(options?: {
 
   if (options?.expires !== undefined) {
     cookieOptions.expires = options.expires;
+  }
+
+  // Debug logging for troubleshooting
+  if (isProduction) {
+    console.log('[Cookie Config] Production cookie options:', {
+      domain: cookieOptions.domain,
+      secure: cookieOptions.secure,
+      sameSite: cookieOptions.sameSite,
+      httpOnly: cookieOptions.httpOnly,
+      maxAge: cookieOptions.maxAge,
+      path: cookieOptions.path
+    });
   }
 
   return cookieOptions;

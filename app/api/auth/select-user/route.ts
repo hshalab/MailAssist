@@ -166,6 +166,17 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    // DEBUG: Log all received cookies
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const allCookies = cookieStore.getAll();
+    console.log('[SelectUser GET] ===== COOKIE DEBUG =====');
+    console.log('[SelectUser GET] All cookies received:', allCookies.map(c => ({ name: c.name, value: c.value?.substring(0, 20) + '...' })));
+    console.log('[SelectUser GET] session_token:', cookieStore.get('session_token')?.value?.substring(0, 20) + '...' || 'MISSING');
+    console.log('[SelectUser GET] current_user_id:', cookieStore.get('current_user_id')?.value || 'MISSING');
+    console.log('[SelectUser GET] gmail_user_email:', cookieStore.get('gmail_user_email')?.value || 'MISSING');
+    console.log('[SelectUser GET] ========================');
+
     // Support BOTH business and personal accounts
     const { validateBusinessSession, getSessionUserEmail } = await import('@/lib/session');
     const businessSession = await validateBusinessSession();
