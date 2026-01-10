@@ -397,6 +397,39 @@ export async function GET(request: NextRequest) {
         .eq('id', userId)
         .single();
 
+      // Create redirect URL (declared early so it's available for logging)
+      let redirectUrl: string;
+      if (accountCreatedInThisFlow) {
+        redirectUrl = `${frontendUrl}/?auth=success&newAccount=true`;
+      } else {
+        redirectUrl = `${frontendUrl}/?auth=success`;
+      }
+
+      // Create redirect response with cookies
+      const oauthRedirectResponse = NextResponse.redirect(redirectUrl);
+
+      // Set cookies on redirect response
+      oauthRedirectResponse.cookies.set('session_token', sessionToken, getCookieOptions({
+        httpOnly: true,
+        expires: expiresAt,
+        maxAge: 30 * 24 * 60 * 60
+      }));
+      oauthRedirectResponse.cookies.set('current_user_id', userId!, getCookieOptions({
+        httpOnly: false,
+        expires: expiresAt,
+        maxAge: 30 * 24 * 60 * 60
+      }));
+      oauthRedirectResponse.cookies.set('gmail_user_email', gmailEmail, getCookieOptions({
+        httpOnly: true,
+        expires: expiresAt,
+        maxAge: 30 * 24 * 60 * 60
+      }));
+      oauthRedirectResponse.cookies.set('user_id', userId!, getCookieOptions({
+        httpOnly: false,
+        expires: expiresAt,
+        maxAge: 30 * 24 * 60 * 60
+      }));
+
 
 
       console.log('[OAuth Callback] ============ LOGIN COMPLETE ============');
