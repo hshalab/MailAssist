@@ -42,6 +42,12 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   const [showImapForm, setShowImapForm] = useState(false)
   const listContainerRef = useRef<HTMLDivElement>(null)
 
+  // PRODUCTION FIX: Use state instead of recalculating from sessionStorage to fix race condition
+  const [showSkeleton, setShowSkeleton] = useState(() => {
+    return typeof window !== 'undefined' &&
+      sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
+  })
+
   // Client-side cache for email details to make clicking instant
   const emailCacheRef = useRef<Map<string, any>>(new Map())
   const prefetchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -173,10 +179,6 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
 
   // Initial fetch on mount and when viewType or selectedAccount changes
   useEffect(() => {
-    // Check if we should show skeleton (returning from Gmail OAuth)
-    const shouldShowSkeleton = typeof window !== 'undefined' && 
-      sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
-    
     // Ensure loading state is explicitly set to true before any async operations
     // This is critical for production builds where hydration timing differs
     setLoading(true)
@@ -185,28 +187,29 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     setError(null)
     setLimit(150)
     setHasMore(true)
-    
+
     // Use requestAnimationFrame + setTimeout to ensure React has fully rendered
     // the skeleton before fetch starts. This is especially important in production.
     // If returning from OAuth, add a longer delay to ensure skeleton is visible
     // In production, we need even more time for the skeleton to render
     let rafId: number
     let timeoutId: NodeJS.Timeout
-    
+
     rafId = requestAnimationFrame(() => {
       // Double RAF for production to ensure skeleton renders
       requestAnimationFrame(() => {
         timeoutId = setTimeout(() => {
           fetchEmails(150).finally(() => {
-            // Clear the skeleton flag once emails are loaded
-            if (shouldShowSkeleton && typeof window !== 'undefined') {
+            // PRODUCTION FIX: Clear both state and sessionStorage
+            setShowSkeleton(false)
+            if (typeof window !== 'undefined') {
               sessionStorage.removeItem('show_inbox_skeleton_on_return')
             }
           })
-        }, shouldShowSkeleton ? 200 : 10) // Longer delay if returning from OAuth (200ms for production)
+        }, showSkeleton ? 200 : 10) // Longer delay if returning from OAuth (200ms for production)
       })
     })
-    
+
     return () => {
       if (rafId) cancelAnimationFrame(rafId)
       if (timeoutId) clearTimeout(timeoutId)
@@ -268,12 +271,9 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     }
   }
 
-  // Check if we should show skeleton (returning from Gmail OAuth)
-  const shouldShowSkeleton = typeof window !== 'undefined' && 
-    sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
-  
-  // Always show skeleton if loading OR if we have the skeleton flag (for production OAuth returns)
-  if ((loading || shouldShowSkeleton) && !loadingMore) {
+  // PRODUCTION FIX: Use state variable instead of recalculating from sessionStorage
+  // This ensures skeleton persists across renders in production builds
+  if ((loading || showSkeleton) && !loadingMore) {
     return (
       <div className="p-3 space-y-2 animate-in fade-in duration-300">
         {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
@@ -344,7 +344,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   }
 
   // Don't show "No emails found" if we're still loading or have skeleton flag
-  if (emails.length === 0 && !loadingMore && !shouldShowSkeleton && !loading) {
+  if (emails.length === 0 && !loadingMore && !showSkeleton && !loading) {
     // Check if we are filtering by a specific account
     const isFiltering = !!selectedAccount;
 
