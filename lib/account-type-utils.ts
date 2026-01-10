@@ -126,9 +126,26 @@ export async function getAccountInfo(email: string): Promise<AccountInfo> {
         }
 
         const accountType: AccountType = userToUse.business_id !== null ? 'business' : 'personal';
-        const hasPassword = userToUse.password_hash !== null &&
+
+        // CRITICAL FIX: Check password in BOTH user record AND business record
+        let hasPassword = userToUse.password_hash !== null &&
             userToUse.password_hash !== '' &&
-            userToUse.password_hash !== 'GOOGLE_OAUTH';
+            userToUse.password_hash !== 'GOOGLE_OAUTH' &&
+            userToUse.password_hash !== 'CONNECTED_ACCOUNT';
+
+        // If user doesn't have password but belongs to a business, check business password
+        if (!hasPassword && userToUse.business_id) {
+            const { data: businessPassword } = await supabase
+                .from('businesses')
+                .select('password_hash')
+                .eq('id', userToUse.business_id)
+                .single();
+
+            if (businessPassword?.password_hash) {
+                hasPassword = true;
+                console.log('[getAccountInfo] User password not found, but business has password');
+            }
+        }
 
         return {
             exists: true,

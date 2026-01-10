@@ -101,6 +101,16 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       const data = await response.json()
       setEmails(data.emails || [])
       setLimit(newLimit)
+
+      // PRODUCTION FIX: Clear skeleton AFTER emails are successfully loaded
+      // This prevents the empty state from flashing before emails appear
+      if (showSkeleton) {
+        setShowSkeleton(false)
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('show_inbox_skeleton_on_return')
+        }
+      }
+
       // If we received at least as many as we asked for, assume there might be more
       setHasMore(Array.isArray(data.emails) && data.emails.length >= newLimit)
 
@@ -199,13 +209,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       // Double RAF for production to ensure skeleton renders
       requestAnimationFrame(() => {
         timeoutId = setTimeout(() => {
-          fetchEmails(150).finally(() => {
-            // PRODUCTION FIX: Clear both state and sessionStorage
-            setShowSkeleton(false)
-            if (typeof window !== 'undefined') {
-              sessionStorage.removeItem('show_inbox_skeleton_on_return')
-            }
-          })
+          fetchEmails(150) // Skeleton clearing now happens inside fetchEmails after setEmails()
         }, showSkeleton ? 200 : 10) // Longer delay if returning from OAuth (200ms for production)
       })
     })
