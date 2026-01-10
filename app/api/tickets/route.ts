@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
       userId = businessSession.id;
     }
 
-    const userEmail = await getCurrentUserEmail();
+    let userEmail = await getCurrentUserEmail();
     const businessId = businessSession?.businessId || null;
 
     if (!userId) {
@@ -49,6 +49,21 @@ export async function GET(request: NextRequest) {
           { error: 'Unauthorized: User does not belong to this business' },
           { status: 403 }
         );
+      }
+    }
+
+    // CRITICAL FIX: For business accounts, allow access even if user doesn't have Gmail connected
+    // Invited users (agents) should be able to see tickets from business's connected accounts
+    if (!userEmail && businessId) {
+      // For business accounts, use business session email or any connected account email
+      // This allows agents to see tickets even if they haven't connected their own Gmail
+      const { loadBusinessTokens } = await import('@/lib/storage');
+      const connectedAccounts = await loadBusinessTokens(businessId, businessSession?.email || undefined);
+      if (connectedAccounts.length > 0) {
+        // Use the first connected account's email for ticket filtering
+        // The actual filtering will use all connected accounts
+        userEmail = connectedAccounts[0].email;
+        console.log(`[Tickets API] User ${userId} has no Gmail, using business account email: ${userEmail}`);
       }
     }
 

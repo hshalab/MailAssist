@@ -23,13 +23,14 @@ export async function GET(request: NextRequest) {
     const accountFilter = searchParams.get('account'); // NEW: Filter by specific account email
 
     // Safely parse maxResults to avoid NaN/invalid values (e.g., "[object Object]")
+    // CRITICAL: Reduce initial limit for faster loading - start with 50 instead of 150
     const maxResultsRaw = searchParams.get('maxResults');
-    const parsedMax = maxResultsRaw ? Number(maxResultsRaw) : 150;
+    const parsedMax = maxResultsRaw ? Number(maxResultsRaw) : 50; // Reduced from 150 to 50 for faster initial load
     const maxResults = Number.isFinite(parsedMax)
-      ? Math.min(Math.max(parsedMax, 1), 300) // clamp between 1 and 300 for faster initial load
-      : 150;
+      ? Math.min(Math.max(parsedMax, 1), 300) // clamp between 1 and 300
+      : 50; // Default to 50 for faster initial load
 
-    let emails;
+    let emails: any[] = [];
 
     // Check for business session first
     const businessSession = await validateBusinessSession();

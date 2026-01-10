@@ -35,28 +35,42 @@ interface EmailListProps {
 
 export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChange, viewType = "inbox", onRefreshReady, selectedAccount, searchQuery = "", hasConnectedAccounts = false }: EmailListProps) {
   const [emails, setEmails] = useState<Email[]>([])
-  const [loading, setLoading] = useState(true)
+  // loading state is now initialized above with showSkeleton check
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [limit, setLimit] = useState(150) // Start with 150 emails for better coverage and faster initial load
+  const [limit, setLimit] = useState(50) // Start with 50 emails for faster initial load
   const [hasMore, setHasMore] = useState(true)
   const [showImapForm, setShowImapForm] = useState(false)
   const listContainerRef = useRef<HTMLDivElement>(null)
 
   // PRODUCTION FIX: Use state instead of recalculating from sessionStorage to fix race condition
   // CRITICAL: Check sessionStorage immediately on mount to catch OAuth return
+  // Also check URL params for OAuth return indicators
+  // Set initial loading state to true to prevent empty state flash
   const [showSkeleton, setShowSkeleton] = useState(() => {
     if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
+      // Check sessionStorage flag
+      const skeletonFlag = sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
+      // Also check URL params for OAuth return
+      const urlParams = new URLSearchParams(window.location.search)
+      const isOAuthReturn = urlParams.get('auth') === 'success' || urlParams.get('connected') === 'true'
+      return skeletonFlag || isOAuthReturn
     }
     return false
   })
   
-  // Check sessionStorage flag on mount to ensure it's set before any rendering
+  // CRITICAL: Set initial loading state to prevent empty state flash
+  // Always start with loading=true to prevent empty state from flashing
+  const [loading, setLoading] = useState<boolean>(true)
+  
+  // Check sessionStorage flag and URL params on mount to ensure skeleton shows immediately
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const skeletonFlag = sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
-      if (skeletonFlag && !showSkeleton) {
+      const urlParams = new URLSearchParams(window.location.search)
+      const isOAuthReturn = urlParams.get('auth') === 'success' || urlParams.get('connected') === 'true'
+      
+      if (skeletonFlag || isOAuthReturn) {
         setShowSkeleton(true)
         setLoading(true) // Also ensure loading is true
         onLoadingChange?.(true)
@@ -223,7 +237,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     onLoadingChange?.(true)
     setEmails([])
     setError(null)
-    setLimit(150)
+    setLimit(50) // Reduced from 150 to 50 for faster initial load
     setHasMore(true)
 
     // Use requestAnimationFrame + setTimeout to ensure React has fully rendered
@@ -236,9 +250,11 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     rafId = requestAnimationFrame(() => {
       // Double RAF for production to ensure skeleton renders
       requestAnimationFrame(() => {
+        // CRITICAL: Start fetching immediately - no delay needed since skeleton is already showing
+        // The skeleton state is set synchronously, so it will render before fetch starts
         timeoutId = setTimeout(() => {
-          fetchEmails(150) // Skeleton clearing now happens inside fetchEmails after setEmails()
-        }, hasSkeletonFlag ? 200 : 10) // Longer delay if returning from OAuth (200ms for production)
+          fetchEmails(50) // Reduced from 150 to 50 for faster initial load - skeleton clearing now happens inside fetchEmails after setEmails()
+        }, 0) // No delay - fetch immediately since skeleton is already showing
       })
     })
 
@@ -347,9 +363,10 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   }
 
   // CRITICAL FIX: Show skeleton if loading OR if skeleton flag is set (returning from OAuth)
-  // Also show skeleton if we have connected accounts but no emails yet (might still be loading)
+  // PRIORITY: showSkeleton flag takes highest priority - if set, ALWAYS show skeleton
   // This ensures skeleton shows immediately when returning from OAuth, even before accounts load
-  const shouldShowSkeleton = (loading || showSkeleton || (hasConnectedAccounts !== false && emails.length === 0 && !error)) && !loadingMore;
+  // Also show skeleton if we have connected accounts but no emails yet (might still be loading)
+  const shouldShowSkeleton = (showSkeleton || loading || (hasConnectedAccounts !== false && emails.length === 0 && !error)) && !loadingMore;
   if (shouldShowSkeleton) {
     return (
       <div className="p-3 space-y-2 animate-in fade-in duration-300">
@@ -425,12 +442,13 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   // If we have connected accounts but emails are empty, we might still be loading (show skeleton)
   // Only show empty state if we're completely done loading AND don't have skeleton flag
   // AND either we have no connected accounts OR we've confirmed emails are actually empty (not just loading)
+  // CRITICAL: Never show empty state if skeleton flag is set (returning from OAuth)
+  // This prevents the "Connect Gmail" button from flashing before skeleton appears
   if (emails.length === 0 && !loadingMore && !showSkeleton && !loading) {
     // If hasConnectedAccounts is true/undefined and no error, we might still be loading - skeleton handles this above
     // Only show empty state if we explicitly know there are no connected accounts OR we have an error
     if (hasConnectedAccounts !== false && error === null) {
-      // Still might be loading - the skeleton condition above should handle this
-      // But if we get here, it means skeleton didn't show, so show it as fallback
+      // Still might be loading - show skeleton as fallback to prevent flash
       return (
         <div className="p-3 space-y-2 animate-in fade-in duration-300">
           {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (

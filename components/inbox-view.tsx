@@ -46,6 +46,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
   const [refreshing, setRefreshing] = useState(false)
   const [emailListRefresh, setEmailListRefresh] = useState<(() => void) | null>(null)
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([])
+  const [accountsLoading, setAccountsLoading] = useState(true) // Track if accounts are still loading
   // Always start with 'all' - no localStorage persistence to avoid stale data issues
   const [selectedAccount, setSelectedAccount] = useState<string>(propSelectedAccount || 'all')
   const [searchQuery, setSearchQuery] = useState<string>('')
@@ -63,6 +64,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
   useEffect(() => {
     const fetchAccounts = async () => {
       try {
+        setAccountsLoading(true)
         // Add cache-busting and no-cache to prevent stale data after login/logout
         const res = await fetch(`/api/auth/accounts?_=${Date.now()}`, {
           cache: 'no-store',
@@ -77,6 +79,8 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         }
       } catch (error) {
         console.error('Failed to fetch accounts:', error)
+      } finally {
+        setAccountsLoading(false)
       }
     }
     fetchAccounts()
@@ -266,7 +270,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
             onRefreshReady={handleRefreshReady}
             selectedAccount={selectedAccount === 'all' ? undefined : selectedAccount}
             searchQuery={searchQuery}
-            hasConnectedAccounts={connectedAccounts.length > 0}
+            hasConnectedAccounts={accountsLoading ? undefined : connectedAccounts.length > 0}
           />
         </div>
       </div>
