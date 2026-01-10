@@ -48,11 +48,11 @@ export async function GET(request: NextRequest) {
     }
 
     const user = await getUserById(userId);
-    if (!user) {
-      // User was deleted - return 404 with a specific message
-      console.log('[Current User] User not found - data may have been deleted:', userId);
+    if (!user || !user.isActive) {
+      // User was deleted or deactivated - return 404 with a specific message
+      console.log('[Current User] User not found or inactive:', userId, 'isActive:', user?.isActive);
       const response = NextResponse.json(
-        { error: 'User not found. Your account data may have been removed.' },
+        { error: user ? 'Your account has been deactivated.' : 'User not found. Your account data may have been removed.' },
         { status: 404 }
       );
       // Clear the invalid user ID cookie

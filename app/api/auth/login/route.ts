@@ -108,8 +108,9 @@ export async function POST(req: NextRequest) {
 
       targetBusiness = business
 
-      // Find or create user record for this business owner
-      // (Logic continues below...)
+      // CRITICAL FIX: If we found a business but no user with password,
+      // we need to find/create the user and sync the password
+      // This handles the case where user was created via OAuth but business has password
     }
 
     // 5. Find admin user for this business (if we are in legacy flow)
@@ -162,6 +163,22 @@ export async function POST(req: NextRequest) {
 
         targetUser = newUser
         console.log('[Login] Created admin user:', targetUser.id)
+      }
+
+      // CRITICAL FIX: If user exists but has no password, sync from business
+      if (targetUser && targetBusiness.password_hash && (!targetUser.password_hash || targetUser.password_hash === 'GOOGLE_OAUTH' || targetUser.password_hash === 'CONNECTED_ACCOUNT')) {
+        console.log('[Login] Syncing password from business to user:', targetUser.id);
+        const { error: syncError } = await supabase
+          .from('users')
+          .update({ password_hash: targetBusiness.password_hash })
+          .eq('id', targetUser.id);
+
+        if (!syncError) {
+          targetUser.password_hash = targetBusiness.password_hash;
+          console.log('[Login] Password synced successfully');
+        } else {
+          console.error('[Login] Failed to sync password:', syncError);
+        }
       }
     }
 

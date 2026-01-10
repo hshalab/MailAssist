@@ -92,7 +92,7 @@ export async function getAccountInfo(email: string): Promise<AccountInfo> {
         // 3. Personal accounts
         // Also check if any user's email matches the business owner email
         let userToUse = users[0];
-        
+
         // First, try to find a user whose email matches the business owner email
         for (const user of users) {
             if (user.business_id) {
@@ -101,7 +101,7 @@ export async function getAccountInfo(email: string): Promise<AccountInfo> {
                     .select('business_email')
                     .eq('id', user.business_id)
                     .single();
-                
+
                 if (business && business.business_email?.toLowerCase() === normalizedEmail) {
                     userToUse = user;
                     console.log('[getAccountInfo] Found business owner user:', user.id, 'role:', user.role);
@@ -109,7 +109,7 @@ export async function getAccountInfo(email: string): Promise<AccountInfo> {
                 }
             }
         }
-        
+
         // If no business owner found, prioritize admin users
         if (!userToUse || userToUse.role !== 'admin') {
             const adminUser = users.find(u => u.role === 'admin' && u.business_id !== null);
@@ -197,21 +197,9 @@ export async function canLoginWithGoogle(email: string): Promise<{
         return { canLogin: true, accountInfo };
     }
 
-    // If account exists as personal, allow Google login
-    if (accountInfo.accountType === 'personal') {
-        return { canLogin: true, accountInfo };
-    }
-
-    // If account exists as business with password, don't allow Google login
-    if (accountInfo.accountType === 'business' && accountInfo.hasPassword) {
-        return {
-            canLogin: false,
-            reason: 'This email is registered as a business account. Please use password login.',
-            accountInfo,
-        };
-    }
-
-    // Business account without password (edge case)
+    // UPDATED: Allow Google OAuth for ALL accounts (business and personal)
+    // Users should be able to use both Google OAuth and password login
+    // This provides maximum flexibility for users
     return { canLogin: true, accountInfo };
 }
 
