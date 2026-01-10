@@ -1501,7 +1501,6 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                           ref={editorRef}
                           contentEditable
                           suppressContentEditableWarning
-                          dangerouslySetInnerHTML={{ __html: draftHtml || textToHtml(draftText) }}
                           onClick={(e) => {
                             // Clear selection when clicking on empty area (not on text)
                             const target = e.target as HTMLElement
