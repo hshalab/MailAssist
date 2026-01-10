@@ -90,9 +90,13 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
 
   // State to hold fresh user data from API
   const [freshUserData, setFreshUserData] = useState<{ businessId?: string | null; role?: string } | null>(null)
-  const [checkingAccountType, setCheckingAccountType] = useState(true) // Prevent flash of wrong UI
 
-  // Fetch fresh user data to ensure businessId is up-to-date
+  // Use prop data immediately, then update with fresh data when available
+  // This prevents content from appearing with delay
+  const effectiveBusinessId = freshUserData?.businessId ?? currentUser?.businessId ?? currentUser?.business_id
+  const effectiveRole = freshUserData?.role ?? currentUser?.role
+
+  // Fetch fresh user data in background (non-blocking)
   useEffect(() => {
     const fetchCurrentUser = async () => {
       try {
@@ -113,17 +117,11 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
         }
       } catch (error) {
         console.error('[TeamManagement] Error fetching current user:', error)
-      } finally {
-        setCheckingAccountType(false) // Done checking, safe to show UI
       }
     }
     
     fetchCurrentUser()
   }, []) // Run once on mount
-
-  // Use fresh user data if available, otherwise fall back to prop
-  const effectiveBusinessId = freshUserData?.businessId ?? currentUser?.businessId ?? currentUser?.business_id
-  const effectiveRole = freshUserData?.role ?? currentUser?.role
 
   const canManage = effectiveRole === 'admin' || effectiveRole === 'manager'
   const isBusinessAccount = effectiveBusinessId !== null && effectiveBusinessId !== undefined && effectiveBusinessId !== ''
@@ -426,7 +424,7 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
           </p>
         </div>
 
-        {checkingAccountType ? null : canInvite ? (
+        {canInvite ? (
           <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
             <DialogTrigger asChild>
               <Button size="lg" className="h-12 px-8 bg-primary hover:bg-primary/90 text-white shadow-2xl shadow-primary/20 transition-all hover:scale-[1.03] active:scale-95 font-bold rounded-2xl group border-0">
@@ -575,7 +573,7 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
               </form>
             </DialogContent>
           </Dialog>
-        ) : checkingAccountType ? null : (
+        ) : (
           <div className="px-6 py-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl max-w-md">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 bg-blue-500/20 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5">

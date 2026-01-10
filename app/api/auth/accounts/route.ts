@@ -147,7 +147,7 @@ export async function POST(request: NextRequest) {
             imap_config: imapConfig,
             smtp_config: smtpConfig,
             user_email: profile.email,
-        }, businessSession.businessId);
+        }, businessSession.businessId, profile.email);
 
         // Trigger initial fetch
         try {

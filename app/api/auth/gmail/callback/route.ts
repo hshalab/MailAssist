@@ -299,7 +299,7 @@ export async function GET(request: NextRequest) {
       setSessionUserEmailInResponse(response, gmailEmail);
 
       // 5. Save Tokens (Linked to this user's business if they have one)
-      await saveTokens(tokens, businessId || undefined);
+      await saveTokens(tokens, businessId || undefined, gmailEmail);
 
       // Get final user role after potential promotion
       const { data: finalUser } = await supabase
@@ -392,8 +392,9 @@ export async function GET(request: NextRequest) {
 
       // Store tokens
       // If business session exists, link to business. Otherwise link to personal (via user_email scoping in saveTokens)
+      // CRITICAL: Pass gmailEmail directly to saveTokens to avoid redundant getUserProfile call
       console.log(`[OAuth Connect] Saving tokens for ${gmailEmail}, businessId: ${businessSession?.businessId || 'personal'}`);
-      const savedEmail = await saveTokens(tokens, businessSession?.businessId || undefined);
+      const savedEmail = await saveTokens(tokens, businessSession?.businessId || undefined, gmailEmail);
       if (!savedEmail) {
         console.error(`[OAuth Connect] Failed to save tokens for ${gmailEmail}`);
         throw new Error('Failed to save tokens');

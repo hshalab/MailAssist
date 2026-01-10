@@ -698,9 +698,12 @@ export async function loadBusinessTokens(businessId: string | null, userEmail?: 
 /**
  * Save OAuth tokens for a specific user
  * CRITICAL: Only deletes tokens for this user, not all users (prevents cross-user data access)
+ * @param tokens - The OAuth tokens to save
+ * @param businessId - Optional business ID to associate tokens with
+ * @param userEmail - Optional user email (if provided, skips getUserProfile call)
  * @returns The user email if successful, null if failed
  */
-export async function saveTokens(tokens: StoredTokens, businessId?: string | null): Promise<string | null> {
+export async function saveTokens(tokens: StoredTokens, businessId?: string | null, userEmail?: string | null): Promise<string | null> {
   if (!supabase) {
     console.error('Cannot save tokens: Supabase client not initialized');
     return null;
@@ -711,17 +714,20 @@ export async function saveTokens(tokens: StoredTokens, businessId?: string | nul
     return null;
   }
 
-  // Try to get user email from Gmail profile (non-blocking - if it fails, continue without it)
-  let userEmail: string | null = null;
-  try {
-    const profile = await getUserProfile(tokens);
-    userEmail = profile?.emailAddress || null;
-  } catch (error) {
-    // Silently continue - user_email is optional for backward compatibility
-    // We'll get it later when needed
+  // Use provided email or try to get user email from Gmail profile
+  let finalUserEmail: string | null = userEmail || null;
+  
+  if (!finalUserEmail) {
+    try {
+      const profile = await getUserProfile(tokens);
+      finalUserEmail = profile?.emailAddress || null;
+    } catch (error) {
+      console.error('Error getting user profile in saveTokens:', error);
+      // Continue to throw error below if we can't get email
+    }
   }
 
-  if (!userEmail) {
+  if (!finalUserEmail) {
     console.error('Cannot save tokens: unable to determine user email');
     throw new Error('User email is required to save tokens securely');
   }
@@ -730,7 +736,7 @@ export async function saveTokens(tokens: StoredTokens, businessId?: string | nul
   // This prevents one user's login from affecting another user's session
   // and separates Personal (business_id=null) from Business (business_id=xyz) contexts
   try {
-    let deleteQuery = supabase.from('tokens').delete().eq('user_email', userEmail);
+    let deleteQuery = supabase.from('tokens').delete().eq('user_email', finalUserEmail);
 
     if (businessId) {
       deleteQuery = deleteQuery.eq('business_id', businessId);
@@ -751,7 +757,7 @@ export async function saveTokens(tokens: StoredTokens, businessId?: string | nul
     expiry_date: tokens.expiry_date ?? null,
     token_type: tokens.token_type ?? null,
     scope: tokens.scope ?? null,
-    user_email: userEmail, // Always include user_email for proper scoping
+    user_email: finalUserEmail, // Always include user_email for proper scoping
     provider: tokens.provider || 'gmail',
     imap_config: tokens.imap_config,
     smtp_config: tokens.smtp_config,
@@ -775,7 +781,7 @@ export async function saveTokens(tokens: StoredTokens, businessId?: string | nul
         expiry_date: tokens.expiry_date ?? null,
         token_type: tokens.token_type ?? null,
         scope: tokens.scope ?? null,
-        user_email: userEmail,
+        user_email: finalUserEmail,
         business_id: businessId
       };
 
@@ -784,7 +790,7 @@ export async function saveTokens(tokens: StoredTokens, businessId?: string | nul
         console.error('CRITICAL: Failed to save tokens even with legacy schema:', retryError);
         throw retryError;
       }
-      return userEmail;
+      return finalUserEmail;
     }
 
     // If error is about user_email column not existing (very old schema), try without it
@@ -802,7 +808,7 @@ export async function saveTokens(tokens: StoredTokens, businessId?: string | nul
     }
   }
 
-  return userEmail; // Return user email so caller can set session cookie
+  return finalUserEmail; // Return user email so caller can set session cookie
 }
 
 /**
