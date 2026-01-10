@@ -358,45 +358,47 @@ export async function GET(request: NextRequest) {
       console.log('[OAuth Callback] Redirect URL:', redirectUrl, 'accountCreatedInThisFlow:', accountCreatedInThisFlow, 'accountInfo.exists:', accountInfo.exists);
       const response = NextResponse.redirect(redirectUrl);
 
-      // 4. Set Cookies
+      //4. Set Cookies
       // CRITICAL FIX: Clear old session cookies first to prevent using old business sessions
       // This ensures a fresh personal account doesn't see data from a previous business account
       // PRODUCTION FIX: Must delete with same domain/path as when setting, otherwise deletion fails
       const { getCookieOptions } = await import('@/lib/cookie-config')
       const cookieOptions = getCookieOptions({ httpOnly: true, expires: expiresAt });
-      const deleteOptions = {
-        ...cookieOptions,
-        expires: new Date(0), // Past date to ensure deletion
-        maxAge: 0,
-      };
 
-      // Delete old cookies with explicit options (production requires same domain)
-      response.cookies.set('session_token', '', deleteOptions);
-      response.cookies.set('current_user_id', '', deleteOptions);
-      response.cookies.set('gmail_user_email', '', deleteOptions);
-      response.cookies.set('user_id', '', deleteOptions);
-
-      // Also try deleting without domain (in case cookies were set without domain)
-      const deleteOptionsNoDomain = {
-        ...deleteOptions,
-        domain: undefined,
-      };
-      response.cookies.set('session_token', '', deleteOptionsNoDomain);
-      response.cookies.set('current_user_id', '', deleteOptionsNoDomain);
-      response.cookies.set('gmail_user_email', '', deleteOptionsNoDomain);
-      response.cookies.set('user_id', '', deleteOptionsNoDomain);
-
-      // Also use delete() method as fallback
+      // PRODUCTION FIX: Use delete() method FIRST for most reliable deletion
+      console.log('[OAuth Callback] Deleting old cookies with delete() method');
       response.cookies.delete('session_token');
       response.cookies.delete('current_user_id');
       response.cookies.delete('gmail_user_email');
       response.cookies.delete('user_id');
 
+      // Also delete with explicit domain for cross-domain cleanup
+      const deleteOptions = {
+        path: '/',
+        domain: '.amanii.io', // Explicit domain for production
+        expires: new Date(0),
+        maxAge: 0,
+      };
+
+      console.log('[OAuth Callback] Deleting old cookies with explicit domain options');
+      response.cookies.set('session_token', '', deleteOptions);
+      response.cookies.set('current_user_id', '', deleteOptions);
+      response.cookies.set('gmail_user_email', '', deleteOptions);
+      response.cookies.set('user_id', '', deleteOptions);
+
       // CRITICAL: Set new cookies AFTER old ones are cleared
       // Log what we're setting for debugging
       console.log(`[OAuth Callback] Setting new cookies - sessionToken: ${sessionToken.substring(0, 20)}..., userId: ${userId}, email: ${gmailEmail}`);
+      // PRODUCTION FIX: Set cookies with both expires AND maxAge for better browser compatibility
+      // Some browsers don't respect expires in redirect responses
+      const cookieMaxAge = 30 * 24 * 60 * 60; // 30 days in seconds
+      const cookieOptionsWithMaxAge = getCookieOptions({
+        httpOnly: true,
+        expires: expiresAt,
+        maxAge: cookieMaxAge
+      });
 
-      response.cookies.set('session_token', sessionToken, cookieOptions);
+      response.cookies.set('session_token', sessionToken, cookieOptionsWithMaxAge);
 
       // Use helper to set current_user_id with proper flags
       setCurrentUserIdInResponse(response, userId!);
@@ -405,7 +407,11 @@ export async function GET(request: NextRequest) {
       setSessionUserEmailInResponse(response, gmailEmail);
 
       // CRITICAL: Also set user_id cookie explicitly (some code might check this)
-      response.cookies.set('user_id', userId!, getCookieOptions({ httpOnly: false, expires: expiresAt }));
+      response.cookies.set('user_id', userId!, getCookieOptions({
+        httpOnly: false,
+        expires: expiresAt,
+        maxAge: cookieMaxAge
+      }));
 
       console.log(`[OAuth Callback] New cookies set successfully`);
 
