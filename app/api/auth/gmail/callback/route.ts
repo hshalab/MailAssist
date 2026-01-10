@@ -353,7 +353,7 @@ export async function GET(request: NextRequest) {
       // Must set cookies via cookies() API BEFORE redirect
       const { getCookieOptions } = await import('@/lib/cookie-config');
       const { cookies: setCookies } = await import('next/headers');
-      const cookieStore = await setCookies();
+      const cookieStoreOAuth = await setCookies();
 
       const cookieMaxAge = 30 * 24 * 60 * 60; // 30 days in seconds
       const cookieOptionsWithMaxAge = getCookieOptions({
@@ -364,22 +364,22 @@ export async function GET(request: NextRequest) {
 
       // Delete old cookies first
       console.log('[OAuth Callback] Deleting old cookies');
-      cookieStore.delete('session_token');
-      cookieStore.delete('current_user_id');
-      cookieStore.delete('gmail_user_email');
-      cookieStore.delete('user_id');
+      cookieStoreOAuth.delete('session_token');
+      cookieStoreOAuth.delete('current_user_id');
+      cookieStoreOAuth.delete('gmail_user_email');
+      cookieStoreOAuth.delete('user_id');
 
       // Set new cookies
       console.log(`[OAuth Callback] Setting new cookies - sessionToken: ${sessionToken.substring(0, 20)}..., userId: ${userId}, email: ${gmailEmail}`);
 
-      cookieStore.set('session_token', sessionToken, cookieOptionsWithMaxAge);
-      cookieStore.set('current_user_id', userId!, getCookieOptions({
+      cookieStoreOAuth.set('session_token', sessionToken, cookieOptionsWithMaxAge);
+      cookieStoreOAuth.set('current_user_id', userId!, getCookieOptions({
         httpOnly: false,
         expires: expiresAt,
         maxAge: cookieMaxAge
       }));
-      cookieStore.set('gmail_user_email', gmailEmail, cookieOptionsWithMaxAge);
-      cookieStore.set('user_id', userId!, getCookieOptions({
+      cookieStoreOAuth.set('gmail_user_email', gmailEmail, cookieOptionsWithMaxAge);
+      cookieStoreOAuth.set('user_id', userId!, getCookieOptions({
         httpOnly: false,
         expires: expiresAt,
         maxAge: cookieMaxAge
