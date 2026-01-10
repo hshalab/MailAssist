@@ -416,33 +416,6 @@ export async function GET(request: NextRequest) {
         redirectUrl = `${frontendUrl}/`;
       }
 
-      // Create redirect response with cookies
-      const oauthRedirectResponse = NextResponse.redirect(redirectUrl);
-
-      // Set cookies on redirect response
-      oauthRedirectResponse.cookies.set('session_token', sessionToken, getCookieOptions({
-        httpOnly: true,
-        expires: expiresAt,
-        maxAge: 30 * 24 * 60 * 60
-      }));
-      oauthRedirectResponse.cookies.set('current_user_id', userId!, getCookieOptions({
-        httpOnly: false,
-        expires: expiresAt,
-        maxAge: 30 * 24 * 60 * 60
-      }));
-      oauthRedirectResponse.cookies.set('gmail_user_email', gmailEmail, getCookieOptions({
-        httpOnly: true,
-        expires: expiresAt,
-        maxAge: 30 * 24 * 60 * 60
-      }));
-      oauthRedirectResponse.cookies.set('user_id', userId!, getCookieOptions({
-        httpOnly: false,
-        expires: expiresAt,
-        maxAge: 30 * 24 * 60 * 60
-      }));
-
-
-
       console.log('[OAuth Callback] ============ LOGIN COMPLETE ============');
       console.log('[OAuth Callback] Email:', gmailEmail);
       console.log('[OAuth Callback] User ID:', userId);
@@ -457,7 +430,67 @@ export async function GET(request: NextRequest) {
       });
       console.log('[OAuth Callback] ==========================================');
 
-      return oauthRedirectResponse;
+      // CRITICAL FIX: Use client-side redirect instead of server-side redirect
+      // This ensures cookies are set in the browser BEFORE navigation happens
+      // Server-side redirects with sameSite=none cookies don't work reliably in production
+      const htmlResponse = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Redirecting...</title>
+            <style>
+              body {
+                margin: 0;
+                padding: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 100vh;
+                background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+              }
+              .loader {
+                text-align: center;
+                color: white;
+              }
+              .spinner {
+                border: 3px solid rgba(255, 255, 255, 0.1);
+                border-radius: 50%;
+                border-top: 3px solid white;
+                width: 40px;
+                height: 40px;
+                animation: spin 1s linear infinite;
+                margin: 0 auto 20px;
+              }
+              @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="loader">
+              <div class="spinner"></div>
+              <p>Completing sign in...</p>
+            </div>
+            <script>
+              // Wait a moment to ensure cookies are set, then redirect
+              setTimeout(() => {
+                window.location.href = '${redirectUrl}';
+              }, 100);
+            </script>
+          </body>
+        </html>
+      `;
+
+      return new NextResponse(htmlResponse, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/html',
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+        },
+      });
+
     }
 
     // ============================================================
