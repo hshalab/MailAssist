@@ -80,6 +80,7 @@ export async function clearSession(): Promise<void> {
   try {
     const cookieStore = await cookies();
     cookieStore.delete(SESSION_COOKIE_NAME);
+    cookieStore.delete('session_token');
   } catch (error) {
     console.error('Error clearing session cookie:', error);
   }
@@ -92,6 +93,7 @@ export function clearSessionInResponse(response: NextResponse): NextResponse {
   try {
     response.cookies.delete(SESSION_COOKIE_NAME);
     response.cookies.delete(CURRENT_USER_ID_COOKIE_NAME);
+    response.cookies.delete('session_token');
   } catch (error) {
     console.error('Error clearing session cookie in response:', error);
   }
@@ -231,15 +233,15 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
     const business = Array.isArray(user.businesses) ? user.businesses[0] : user.businesses
     let userRole = user.role as 'admin' | 'manager' | 'agent'
     // Case-insensitive email comparison for business owner promotion
-    if (business && business.business_email && 
-        business.business_email.toLowerCase() === user.email?.toLowerCase() && 
-        userRole !== 'admin') {
+    if (business && business.business_email &&
+      business.business_email.toLowerCase() === user.email?.toLowerCase() &&
+      userRole !== 'admin') {
       console.log('[Session] Business owner detected, promoting to admin:', user.id, 'email:', user.email, 'business_email:', business.business_email)
       const { error: updateError } = await supabase
         .from('users')
         .update({ role: 'admin' })
         .eq('id', user.id)
-      
+
       if (updateError) {
         console.error('[Session] Error promoting user to admin:', updateError)
       } else {

@@ -82,12 +82,12 @@ function PageContent() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
-    const isOAuthReturn = params.get("auth") === "success" || 
-                          params.get("businessAuth") === "true" || 
-                          params.get("connected") === "true"
-    
+    const isOAuthReturn = params.get("auth") === "success" ||
+      params.get("businessAuth") === "true" ||
+      params.get("connected") === "true"
+
     let timeoutId: NodeJS.Timeout | null = null
-    
+
     // If this is an OAuth return, skip initial checks and handle it specially
     if (!isOAuthReturn) {
       checkAuthStatus()
@@ -134,7 +134,7 @@ function PageContent() {
         setCheckingUser(false)
         setCheckingAuth(false)
       })
-      
+
       // Safety timeout to ensure loading state is cleared even if API calls hang
       timeoutId = setTimeout(() => {
         setCheckingUser(false)
@@ -150,7 +150,7 @@ function PageContent() {
         setCheckingUser(false)
         setCheckingAuth(false)
       })
-      
+
       // Safety timeout
       timeoutId = setTimeout(() => {
         setCheckingUser(false)
@@ -177,14 +177,14 @@ function PageContent() {
         setCheckingUser(false)
         setCheckingAuth(false)
       })
-      
+
       // Safety timeout
       timeoutId = setTimeout(() => {
         setCheckingUser(false)
         setCheckingAuth(false)
       }, 5000)
     }
-    
+
     return () => {
       if (timeoutId) {
         clearTimeout(timeoutId)
@@ -303,7 +303,7 @@ function PageContent() {
       }
 
       // Fallback: Check API (cookie-based, shared across tabs)
-      const response = await fetch("/api/auth/current-user")
+      const response = await fetch("/api/auth/current-user", { cache: "no-store" })
       if (response.ok) {
         const data = await response.json()
         console.log('[DEBUG] Current user API response:', data) // DEBUG
@@ -343,7 +343,7 @@ function PageContent() {
         if (wasLoggedIn && response.status === 404) {
           // User data was deleted - clear everything and redirect silently
           console.log('[Auth] User data was deleted, clearing session and redirecting...')
-          
+
           // Clear all session data
           if (typeof window !== "undefined") {
             sessionStorage.clear()
@@ -351,21 +351,21 @@ function PageContent() {
             localStorage.removeItem("inbox_selected_account")
             localStorage.removeItem("activeView")
           }
-          
+
           // Clear cookies by calling logout
           try {
             await fetch("/api/auth/logout", { method: "POST" })
           } catch (err) {
             console.error("Error during logout:", err)
           }
-          
+
           // Automatically redirect to welcome screen
           if (typeof window !== "undefined") {
             window.location.href = "/welcome"
           }
           return
         }
-        
+
         // Normal case: clear sessionStorage
         if (typeof window !== "undefined") {
           sessionStorage.removeItem("current_user_id")
@@ -498,7 +498,7 @@ function PageContent() {
   const startSync = useCallback(
     async (maxResults = 300, silent = false) => {
       if (!isConnected) throw new Error("Connect Gmail first to sync emails.")
-      
+
       // Only update UI state if not silent mode
       if (!silent) {
         setSyncError(null)
@@ -928,7 +928,7 @@ function PageContent() {
     const shouldTriggerOnConnect = sessionStorage.getItem('trigger_backfill_on_connect')
     if (shouldTriggerOnConnect === 'true') {
       sessionStorage.removeItem('trigger_backfill_on_connect')
-      
+
       // Wait a bit for initial sync to create some tickets, then classify
       console.log('[Auto-Classify] Gmail connected, scheduling initial auto-classification...')
       const timeoutId = setTimeout(async () => {
@@ -939,11 +939,11 @@ function PageContent() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ limit: 50 }) // Larger batch for initial connection
           })
-          
+
           if (response.ok) {
             const data = await response.json()
             console.log('[Auto-Classify] Initial classification result:', data)
-            
+
             // Refresh tickets view if we're on that screen
             if (activeView === 'tickets') {
               setTicketsVersion(v => v + 1)
@@ -975,11 +975,11 @@ function PageContent() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ limit: 30 }) // Smaller batch for periodic runs
         })
-        
+
         if (response.ok) {
           const data = await response.json()
           console.log('[Auto-Classify] Result:', data)
-          
+
           // Refresh tickets view if we're on that screen
           if (activeView === 'tickets') {
             setTicketsVersion(v => v + 1)
@@ -994,7 +994,7 @@ function PageContent() {
 
     // Start interval
     intervalId = setInterval(runAutoClassify, AUTO_CLASSIFY_INTERVAL_MS)
-    
+
     // Run once after a delay (to avoid running on initial load, but after initial connection classification)
     const initialTimeout = setTimeout(() => {
       runAutoClassify()

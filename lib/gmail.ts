@@ -2,13 +2,13 @@
  * Gmail API utilities for fetching emails and managing OAuth tokens
  */
 
-import { google } from 'googleapis';
+import { google, Auth } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { getValidTokens } from './token-refresh';
 import { storeSentEmail, getCurrentUserEmail } from './storage';
 
 // Initialize OAuth2 client
-export function getOAuth2Client(): OAuth2Client {
+export function getOAuth2Client(): Auth.OAuth2Client {
   const clientId = process.env.GMAIL_CLIENT_ID;
   const clientSecret = process.env.GMAIL_CLIENT_SECRET;
   const redirectUri = process.env.GMAIL_REDIRECT_URI;
@@ -17,7 +17,7 @@ export function getOAuth2Client(): OAuth2Client {
     throw new Error('Missing Gmail OAuth2 credentials in environment variables');
   }
 
-  return new google.auth.OAuth2(clientId, clientSecret, redirectUri) as any;
+  return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
 /**
@@ -446,13 +446,13 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
       const partHeaders = part.headers || [];
       const getPartHeader = (name: string) =>
         partHeaders.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || '';
-      
+
       // Check for Content-Disposition: attachment or inline with filename
       const contentDisposition = getPartHeader('content-disposition');
       const contentId = getPartHeader('content-id')?.replace(/^<|>$/g, '');
-      const isAttachment = contentDisposition.includes('attachment') || 
-                          (part.filename && part.filename.length > 0) ||
-                          (part.body?.attachmentId);
+      const isAttachment = contentDisposition.includes('attachment') ||
+        (part.filename && part.filename.length > 0) ||
+        (part.body?.attachmentId);
 
       // Debug logging for each part
       if (depth === 0) {
@@ -463,9 +463,9 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
       if (isAttachment && (part.body?.attachmentId || part.filename)) {
         const attachmentId = part.body?.attachmentId || contentId || `inline-${attachments.length}`;
         const filename = part.filename || `attachment-${attachments.length}`;
-        
+
         console.log('[Gmail] Found attachment at depth', depth, '- id:', attachmentId, 'filename:', filename, 'contentDisposition:', contentDisposition);
-        
+
         // Avoid duplicates
         if (!attachments.find(a => a.id === attachmentId)) {
           attachments.push({
@@ -489,7 +489,7 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
 
     // Extract attachments first (full tree traversal)
     extractAttachments(message.payload);
-    
+
     // Debug: Log found attachments
     console.log('[Gmail] parseEmailMessage - Message', message.id, 'Payload structure:', {
       hasPayload: !!message.payload,
