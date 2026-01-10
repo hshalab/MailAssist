@@ -267,9 +267,13 @@ function PageContent() {
       // Check for admin existence first
       await checkAdminExists()
 
-      // First check sessionStorage (per-tab)
+      // Check if coming from OAuth redirect - if so, skip sessionStorage check
+      const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+      const isOAuthRedirect = urlParams?.get('auth') === 'success'
+
+      // First check sessionStorage (per-tab) - skip if OAuth redirect
       // But verify with API to ensure user belongs to current Gmail account
-      if (typeof window !== "undefined") {
+      if (!isOAuthRedirect && typeof window !== "undefined") {
         const storedUserId = sessionStorage.getItem("current_user_id")
         const storedUserName = sessionStorage.getItem("current_user_name")
         const storedUserRole = sessionStorage.getItem("current_user_role")
@@ -277,7 +281,7 @@ function PageContent() {
 
         if (storedUserId && storedUserName && storedUserRole) {
           // Verify user still belongs to current account
-          const verifyResponse = await fetch("/api/auth/current-user")
+          const verifyResponse = await fetch("/api/auth/current-user", { cache: "no-store" })
           if (verifyResponse.ok) {
             const verifyData = await verifyResponse.json()
             if (verifyData.user && verifyData.user.id === storedUserId) {
