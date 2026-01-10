@@ -274,13 +274,29 @@ export async function GET(request: NextRequest) {
       // Must delete by old session token (not new userId) because new account might not exist yet
       // This prevents old business sessions from being used when creating new personal account
       
+      // CRITICAL: ALWAYS delete old session token first, regardless of email match
+      // This ensures old sessions are cleared before new ones are created
+      if (oldSessionToken && supabase) {
+        console.log(`[OAuth Callback] DELETING OLD SESSION TOKEN: ${oldSessionToken.substring(0, 20)}...`);
+        const { error: deleteTokenError } = await supabase
+          .from('user_sessions')
+          .delete()
+          .eq('session_token', oldSessionToken);
+        
+        if (deleteTokenError) {
+          console.error('[OAuth Callback] Error deleting old session token:', deleteTokenError);
+        } else {
+          console.log(`[OAuth Callback] Old session token deleted successfully`);
+        }
+      }
+      
       // CRITICAL: If logging in with a DIFFERENT email, we MUST delete all old sessions
       // This prevents cross-account contamination
       const isDifferentEmail = oldGmailEmail && oldGmailEmail.toLowerCase() !== gmailEmail.toLowerCase();
       
       if (isDifferentEmail) {
-        console.log(`[OAuth Callback] DIFFERENT EMAIL DETECTED - Old: ${oldGmailEmail}, New: ${gmailEmail}`);
-        console.log(`[OAuth Callback] DELETING ALL SESSIONS FOR OLD EMAIL TO PREVENT CROSS-ACCOUNT ACCESS`);
+        console.log(`[OAuth Callback] ⚠️ DIFFERENT EMAIL DETECTED - Old: ${oldGmailEmail}, New: ${gmailEmail}`);
+        console.log(`[OAuth Callback] DELETING ALL SESSIONS FOR OLD USER TO PREVENT CROSS-ACCOUNT ACCESS`);
         
         // Delete ALL sessions for the old email's user
         if (oldUserId && supabase) {
@@ -293,47 +309,23 @@ export async function GET(request: NextRequest) {
           if (deleteOldUserError) {
             console.error('[OAuth Callback] Error deleting old user sessions:', deleteOldUserError);
           } else {
-            console.log('[OAuth Callback] All old user sessions deleted successfully');
+            console.log(`[OAuth Callback] All old user sessions deleted successfully`);
           }
         }
+      }
+      
+      // Delete all sessions for new user (in case of re-login to same account)
+      if (userId && supabase) {
+        console.log(`[OAuth Callback] Deleting existing sessions for new user: ${userId}`);
+        const { error: deleteNewUserError } = await supabase
+          .from('user_sessions')
+          .delete()
+          .eq('user_id', userId);
         
-        // Also delete by old session token (extra safety)
-        if (oldSessionToken && supabase) {
-          console.log(`[OAuth Callback] Deleting old session token: ${oldSessionToken.substring(0, 20)}...`);
-          const { error: deleteError } = await supabase
-            .from('user_sessions')
-            .delete()
-            .eq('session_token', oldSessionToken);
-          
-          if (deleteError) {
-            console.error('[OAuth Callback] Error deleting old session:', deleteError);
-          }
-        }
-      } else {
-        // Same email - just delete old session token and all sessions for this user
-        if (oldSessionToken && supabase) {
-          console.log(`[OAuth Callback] Same email - deleting old session token: ${oldSessionToken.substring(0, 20)}...`);
-          const { error: deleteError } = await supabase
-            .from('user_sessions')
-            .delete()
-            .eq('session_token', oldSessionToken);
-          
-          if (deleteError) {
-            console.error('[OAuth Callback] Error deleting old session:', deleteError);
-          }
-        }
-        
-        // Delete all sessions for this user (re-login)
-        if (userId && supabase) {
-          console.log(`[OAuth Callback] Deleting existing sessions for user: ${userId}`);
-          const { error: deleteNewUserError } = await supabase
-            .from('user_sessions')
-            .delete()
-            .eq('user_id', userId);
-          
-          if (deleteNewUserError) {
-            console.error('[OAuth Callback] Error deleting user sessions:', deleteNewUserError);
-          }
+        if (deleteNewUserError) {
+          console.error('[OAuth Callback] Error deleting new user sessions:', deleteNewUserError);
+        } else {
+          console.log(`[OAuth Callback] New user sessions deleted successfully`);
         }
       }
 
@@ -397,7 +389,10 @@ export async function GET(request: NextRequest) {
       response.cookies.delete('gmail_user_email');
       response.cookies.delete('user_id');
       
-      // Set new cookies
+      // CRITICAL: Set new cookies AFTER old ones are cleared
+      // Log what we're setting for debugging
+      console.log(`[OAuth Callback] Setting new cookies - sessionToken: ${sessionToken.substring(0, 20)}..., userId: ${userId}, email: ${gmailEmail}`);
+      
       response.cookies.set('session_token', sessionToken, cookieOptions);
 
       // Use helper to set current_user_id with proper flags
@@ -405,6 +400,11 @@ export async function GET(request: NextRequest) {
 
       // Set gmail_user_email cookie for session management
       setSessionUserEmailInResponse(response, gmailEmail);
+      
+      // CRITICAL: Also set user_id cookie explicitly (some code might check this)
+      response.cookies.set('user_id', userId!, getCookieOptions({ httpOnly: false, expires: expiresAt }));
+      
+      console.log(`[OAuth Callback] New cookies set successfully`);
 
       // 5. Save Tokens (Linked to this user's business if they have one)
       await saveTokens(tokens, businessId || undefined, gmailEmail);
