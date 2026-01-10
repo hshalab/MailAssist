@@ -348,49 +348,13 @@ export async function GET(request: NextRequest) {
         throw new Error(`Failed to create session: ${sessionError.message}`);
       }
 
-      // Create redirect response
-      // CONSISTENCY FIX: Only show welcome dialog for accounts created in THIS flow
-      // Not for existing accounts that are logging in again
-      const redirectUrl = accountCreatedInThisFlow
-        ? `${frontendUrl}/?auth=success&newAccount=true`
-        : `${frontendUrl}/?auth=success`;
+      // 4. Set Cookies BEFORE creating redirect response
+      // CRITICAL FIX: Setting cookies on redirect response doesn't work reliably in production
+      // Must set cookies via cookies() API BEFORE redirect
+      const { getCookieOptions } = await import('@/lib/cookie-config');
+      const { cookies: setCookies } = await import('next/headers');
+      const cookieStore = await setCookies();
 
-      console.log('[OAuth Callback] Redirect URL:', redirectUrl, 'accountCreatedInThisFlow:', accountCreatedInThisFlow, 'accountInfo.exists:', accountInfo.exists);
-      const response = NextResponse.redirect(redirectUrl);
-
-      //4. Set Cookies
-      // CRITICAL FIX: Clear old session cookies first to prevent using old business sessions
-      // This ensures a fresh personal account doesn't see data from a previous business account
-      // PRODUCTION FIX: Must delete with same domain/path as when setting, otherwise deletion fails
-      const { getCookieOptions } = await import('@/lib/cookie-config')
-      const cookieOptions = getCookieOptions({ httpOnly: true, expires: expiresAt });
-
-      // PRODUCTION FIX: Use delete() method FIRST for most reliable deletion
-      console.log('[OAuth Callback] Deleting old cookies with delete() method');
-      response.cookies.delete('session_token');
-      response.cookies.delete('current_user_id');
-      response.cookies.delete('gmail_user_email');
-      response.cookies.delete('user_id');
-
-      // Also delete with explicit domain for cross-domain cleanup
-      const deleteOptions = {
-        path: '/',
-        domain: '.amanii.io', // Explicit domain for production
-        expires: new Date(0),
-        maxAge: 0,
-      };
-
-      console.log('[OAuth Callback] Deleting old cookies with explicit domain options');
-      response.cookies.set('session_token', '', deleteOptions);
-      response.cookies.set('current_user_id', '', deleteOptions);
-      response.cookies.set('gmail_user_email', '', deleteOptions);
-      response.cookies.set('user_id', '', deleteOptions);
-
-      // CRITICAL: Set new cookies AFTER old ones are cleared
-      // Log what we're setting for debugging
-      console.log(`[OAuth Callback] Setting new cookies - sessionToken: ${sessionToken.substring(0, 20)}..., userId: ${userId}, email: ${gmailEmail}`);
-      // PRODUCTION FIX: Set cookies with both expires AND maxAge for better browser compatibility
-      // Some browsers don't respect expires in redirect responses
       const cookieMaxAge = 30 * 24 * 60 * 60; // 30 days in seconds
       const cookieOptionsWithMaxAge = getCookieOptions({
         httpOnly: true,
@@ -398,22 +362,30 @@ export async function GET(request: NextRequest) {
         maxAge: cookieMaxAge
       });
 
-      response.cookies.set('session_token', sessionToken, cookieOptionsWithMaxAge);
+      // Delete old cookies first
+      console.log('[OAuth Callback] Deleting old cookies');
+      cookieStore.delete('session_token');
+      cookieStore.delete('current_user_id');
+      cookieStore.delete('gmail_user_email');
+      cookieStore.delete('user_id');
 
-      // Use helper to set current_user_id with proper flags
-      setCurrentUserIdInResponse(response, userId!);
+      // Set new cookies
+      console.log(`[OAuth Callback] Setting new cookies - sessionToken: ${sessionToken.substring(0, 20)}..., userId: ${userId}, email: ${gmailEmail}`);
 
-      // Set gmail_user_email cookie for session management
-      setSessionUserEmailInResponse(response, gmailEmail);
-
-      // CRITICAL: Also set user_id cookie explicitly (some code might check this)
-      response.cookies.set('user_id', userId!, getCookieOptions({
+      cookieStore.set('session_token', sessionToken, cookieOptionsWithMaxAge);
+      cookieStore.set('current_user_id', userId!, getCookieOptions({
+        httpOnly: false,
+        expires: expiresAt,
+        maxAge: cookieMaxAge
+      }));
+      cookieStore.set('gmail_user_email', gmailEmail, cookieOptionsWithMaxAge);
+      cookieStore.set('user_id', userId!, getCookieOptions({
         httpOnly: false,
         expires: expiresAt,
         maxAge: cookieMaxAge
       }));
 
-      console.log(`[OAuth Callback] New cookies set successfully`);
+      console.log(`[OAuth Callback] Cookies set via cookies() API`);
 
       // 5. Save Tokens (Linked to this user's business if they have one)
       await saveTokens(tokens, businessId || undefined, gmailEmail);
