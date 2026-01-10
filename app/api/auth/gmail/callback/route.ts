@@ -129,11 +129,24 @@ export async function GET(request: NextRequest) {
       let userId: string | undefined;
       let userName: string | undefined;
       let businessId: string | null = null;
+      let accountCreatedInThisFlow = false; // Track if we create account in this OAuth flow
 
       // If account exists, use it
       if (accountInfo.exists && accountInfo.userId) {
         userId = accountInfo.userId;
         businessId = accountInfo.businessId || null;
+
+        // SECURITY CHECK: Verify no duplicate users exist for this email
+        const { data: allMatchingUsers, count: duplicateCount } = await supabase
+          .from('users')
+          .select('id, email, role, business_id, is_active')
+          .eq('email', gmailEmail)
+          .eq('is_active', true);
+
+        if (duplicateCount && duplicateCount > 1) {
+          console.warn(`[Gmail Callback] WARNING: Multiple active users found for ${gmailEmail}:`, allMatchingUsers);
+          console.warn(`[Gmail Callback] Using user from getAccountInfo (prioritizes business owner): ${userId}`);
+        }
 
         // Get user details
         const { data: existingUser } = await supabase
@@ -201,6 +214,7 @@ export async function GET(request: NextRequest) {
       } else {
         // Create new personal account
         console.log('Creating new personal user for:', gmailEmail);
+        accountCreatedInThisFlow = true; // Mark that we're creating account now
 
         // SECURITY FIX: Check if this is the first user (first user = admin, rest = agent)
         const { data: existingPersonalUsers, count: userCount } = await supabase
@@ -262,14 +276,13 @@ export async function GET(request: NextRequest) {
       }
 
       // Create redirect response
-      // CONSISTENCY FIX: Only show welcome dialog for truly new accounts (just created)
+      // CONSISTENCY FIX: Only show welcome dialog for accounts created in THIS flow
       // Not for existing accounts that are logging in again
-      const isNewAccount = !accountInfo.exists; // Account was just created in this OAuth flow
-      const redirectUrl = isNewAccount
+      const redirectUrl = accountCreatedInThisFlow
         ? `${frontendUrl}/?auth=success&newAccount=true`
         : `${frontendUrl}/?auth=success`;
 
-      console.log('[OAuth Callback] Redirect URL:', redirectUrl, 'isNewAccount:', isNewAccount);
+      console.log('[OAuth Callback] Redirect URL:', redirectUrl, 'accountCreatedInThisFlow:', accountCreatedInThisFlow, 'accountInfo.exists:', accountInfo.exists);
       const response = NextResponse.redirect(redirectUrl);
 
       // 4. Set Cookies
@@ -295,16 +308,19 @@ export async function GET(request: NextRequest) {
         .eq('id', userId)
         .single();
 
-      console.log('[OAuth Callback] Login successful for:', gmailEmail, 'businessId:', businessId);
-      console.log('[OAuth Callback] User ID being set:', userId, 'Role:', finalUser?.role, 'Name:', finalUser?.name);
-      console.log('[OAuth Callback] Cookies set:', {
+      console.log('[OAuth Callback] ============ LOGIN COMPLETE ============');
+      console.log('[OAuth Callback] Email:', gmailEmail);
+      console.log('[OAuth Callback] User ID:', userId);
+      console.log('[OAuth Callback] Business ID:', businessId);
+      console.log('[OAuth Callback] Final Role:', finalUser?.role);
+      console.log('[OAuth Callback] Account Created in This Flow:', accountCreatedInThisFlow);
+      console.log('[OAuth Callback] Redirect:', redirectUrl);
+      console.log('[OAuth Callback] Cookies Set:', {
         session_token: !!sessionToken,
         current_user_id: userId,
         gmail_user_email: gmailEmail,
-        user_role: finalUser?.role,
-        env: process.env.NODE_ENV,
-        isVercel: process.env.VERCEL === '1'
       });
+      console.log('[OAuth Callback] ==========================================');
       return response;
     }
 

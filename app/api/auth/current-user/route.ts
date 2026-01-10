@@ -12,9 +12,16 @@ import { validateBusinessSession } from '@/lib/session';
 
 export async function GET(request: NextRequest) {
   try {
+    console.log('[Current User API] ========== Request Received ==========');
+
     // 1. Check for valid business session (new auth flow)
     const businessSession = await validateBusinessSession();
     if (businessSession) {
+      console.log('[Current User API] Using business session');
+      console.log('[Current User API] User ID:', businessSession.id);
+      console.log('[Current User API] Role:', businessSession.role);
+      console.log('[Current User API] Business ID:', businessSession.businessId);
+      console.log('[Current User API] =====================================');
       return NextResponse.json({
         user: {
           id: businessSession.id,
@@ -94,6 +101,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Return user with businessId and businessName explicitly set
+    console.log('[Current User API] Using legacy cookie-based auth');
+    console.log('[Current User API] User ID:', user.id);
+    console.log('[Current User API] Role:', user.role);
+    console.log('[Current User API] Business ID:', user.businessId);
+    console.log('[Current User API] Session Gmail:', sessionGmailEmail);
+    console.log('[Current User API] =====================================');
     return NextResponse.json({
       user: {
         id: user.id,
