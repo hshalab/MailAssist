@@ -269,7 +269,8 @@ export async function GET(request: NextRequest) {
       
       // Also delete any sessions that might be using the old session_token cookie
       // This ensures complete cleanup
-      const cookieStore = await import('next/headers').then(m => m.cookies());
+      const { cookies: getCookies } = await import('next/headers');
+      const cookieStore = await getCookies();
       const oldSessionToken = cookieStore.get('session_token')?.value;
       if (oldSessionToken) {
         console.log(`[OAuth Callback] Deleting old session token from database`);

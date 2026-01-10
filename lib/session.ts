@@ -94,10 +94,38 @@ export function clearSessionInResponse(response: NextResponse): NextResponse {
     response.cookies.delete(SESSION_COOKIE_NAME);
     response.cookies.delete(CURRENT_USER_ID_COOKIE_NAME);
     response.cookies.delete('session_token');
+    response.cookies.delete('gmail_user_email');
+    response.cookies.delete('user_id');
   } catch (error) {
     console.error('Error clearing session cookie in response:', error);
   }
   return response;
+}
+
+/**
+ * Delete expired sessions from database (cleanup function)
+ * Should be called periodically or on app startup
+ */
+export async function cleanupExpiredSessions(): Promise<void> {
+  if (!supabase) {
+    return;
+  }
+
+  try {
+    const now = new Date().toISOString();
+    const { error } = await supabase
+      .from('user_sessions')
+      .delete()
+      .lt('expires_at', now);
+    
+    if (error) {
+      console.error('[Session] Error cleaning up expired sessions:', error);
+    } else {
+      console.log('[Session] Cleaned up expired sessions');
+    }
+  } catch (error) {
+    console.error('[Session] Error in cleanupExpiredSessions:', error);
+  }
 }
 
 /**

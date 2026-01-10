@@ -190,8 +190,8 @@ export async function POST(
         fromAddress = userEmail;
       } else {
         // Fallback: get from profile
-        const profile = await getUserProfile(tokens);
-        fromAddress = profile?.emailAddress || undefined;
+      const profile = await getUserProfile(tokens);
+      fromAddress = profile?.emailAddress || undefined;
       }
     } catch {
       // best-effort, fallback handled below

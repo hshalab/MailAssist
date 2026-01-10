@@ -265,28 +265,28 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
             />
             {/* Clear button - only show when there's a search value */}
             {localSearchValue && (
-              <button
-                type="button"
-                onClick={(e) => {
+            <button
+              type="button"
+              onClick={(e) => {
                   e.preventDefault()
                   setLocalSearchValue('') // Clear local state immediately
                   if (onSearch) {
                     onSearch('') // Clear parent state
                   }
                   // Focus the input after clearing
-                  const form = e.currentTarget.closest('form')
-                  const input = form?.querySelector<HTMLInputElement>('input[name="global-search"]')
-                  if (input) {
-                    input.focus()
-                  }
-                }}
+                const form = e.currentTarget.closest('form')
+                const input = form?.querySelector<HTMLInputElement>('input[name="global-search"]')
+                if (input) {
+                  input.focus()
+                }
+              }}
                 className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-                aria-label="Clear search"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              aria-label="Clear search"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
             )}
           </form>
         )}
