@@ -403,11 +403,17 @@ export async function GET(request: NextRequest) {
         .single();
 
       // Create redirect URL (declared early so it's available for logging)
+      // CRITICAL FIX: For existing personal accounts, redirect to / without auth=success
+      // This prevents the frontend from calling /api/auth/select-user before cookies are recognized
+      // The /api/auth/current-user endpoint will properly detect the session instead
       let redirectUrl: string;
       if (accountCreatedInThisFlow) {
+        // New accounts: keep auth=success&newAccount=true to show welcome dialog
         redirectUrl = `${frontendUrl}/?auth=success&newAccount=true`;
       } else {
-        redirectUrl = `${frontendUrl}/?auth=success`;
+        // Existing accounts: redirect directly to / without query params
+        // Frontend will use /api/auth/current-user fallback which waits for cookies
+        redirectUrl = `${frontendUrl}/`;
       }
 
       // Create redirect response with cookies
