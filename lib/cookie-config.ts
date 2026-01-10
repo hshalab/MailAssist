@@ -65,8 +65,9 @@ export function getCookieOptions(options?: {
   // Secure flag: true in production (HTTPS), false in dev (HTTP)
   const secure = isProduction;
 
-  // SameSite: 'lax' for cross-site compatibility, 'none' if needed for cross-domain
-  const sameSite = options?.sameSite || 'lax';
+  // SameSite: 'none' for OAuth compatibility in production (requires secure=true)
+  // 'lax' for development
+  const sameSite = options?.sameSite || (isProduction ? 'none' : 'lax');
 
   const cookieOptions: {
     httpOnly: boolean;
