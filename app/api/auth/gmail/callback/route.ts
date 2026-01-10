@@ -397,10 +397,7 @@ export async function GET(request: NextRequest) {
         .eq('id', userId)
         .single();
 
-      // Create redirect URL
-      const redirectUrl = accountCreatedInThisFlow
-        ? `${frontendUrl}/?auth=success&newAccount=true`
-        : `${frontendUrl}/?auth=success`;
+
 
       console.log('[OAuth Callback] ============ LOGIN COMPLETE ============');
       console.log('[OAuth Callback] Email:', gmailEmail);
@@ -416,7 +413,7 @@ export async function GET(request: NextRequest) {
       });
       console.log('[OAuth Callback] ==========================================');
 
-      return NextResponse.redirect(redirectUrl);
+      return oauthRedirectResponse;
     }
 
     // ============================================================
