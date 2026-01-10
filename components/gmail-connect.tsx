@@ -18,9 +18,11 @@ export default function GmailConnect({ onConnect }: GmailConnectProps) {
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('show_inbox_skeleton_on_return', 'true')
       }
-      
-      const response = await fetch('/api/auth/gmail')
-      
+
+      // CRITICAL: Pass mode=connect to allow business accounts to connect Gmail
+      // This bypasses the Google OAuth login restriction which only blocks LOGIN mode
+      const response = await fetch('/api/auth/gmail?mode=connect')
+
       if (!response.ok) {
         throw new Error('Failed to get auth URL')
       }
