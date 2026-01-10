@@ -337,9 +337,9 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
     // CRITICAL PRODUCTION FIX: Check if gmail_user_email cookie matches user's email
     // This prevents old sessions from being used when logging in with a different email
     const gmailUserEmailCookie = cookieStore.get('gmail_user_email')?.value;
-    if (gmailUserEmailCookie) {
+    if (gmailUserEmailCookie && supabase) {
       // Get user's email first to check match
-      const { data: userCheck } = await supabase
+      const { data: userCheck, error: userCheckError } = await supabase
         .from('users')
         .select('email')
         .eq('id', session.user_id)
@@ -350,15 +350,33 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
         const userEmail = userCheck.email.toLowerCase();
         
         if (userEmail !== decodedCookieEmail) {
-          console.log(`[Session] EMAIL MISMATCH: User email (${userCheck.email}) does not match gmail_user_email cookie (${decodedCookieEmail}) - DELETING SESSION`);
+          console.log(`[Session] 🔴 EMAIL MISMATCH DETECTED!`);
+          console.log(`[Session] User email in DB: ${userCheck.email}`);
+          console.log(`[Session] gmail_user_email cookie: ${decodedCookieEmail}`);
+          console.log(`[Session] Session token: ${sessionToken.substring(0, 20)}...`);
+          console.log(`[Session] DELETING MISMATCHED SESSION FROM DATABASE`);
+          
           // Delete the mismatched session immediately
-          await supabase
+          const { error: deleteError } = await supabase
             .from('user_sessions')
             .delete()
             .eq('session_token', sessionToken);
+          
+          if (deleteError) {
+            console.error('[Session] Error deleting mismatched session:', deleteError);
+          } else {
+            console.log('[Session] ✅ Mismatched session deleted successfully');
+          }
+          
           return null;
+        } else {
+          console.log(`[Session] ✅ Email match verified: ${userEmail}`);
         }
+      } else if (userCheckError) {
+        console.error('[Session] Error checking user email:', userCheckError);
       }
+    } else if (!gmailUserEmailCookie) {
+      console.log(`[Session] ⚠️ No gmail_user_email cookie found - this might be an old session`);
     }
 
     // Get user details
