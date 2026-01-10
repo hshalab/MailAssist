@@ -153,8 +153,8 @@ export async function GET(request: NextRequest) {
           userName = existingUser.name;
           console.log('Found existing user:', gmailEmail, 'accountType:', accountInfo.accountType, 'businessId:', businessId, 'role:', existingUser.role);
 
-          // CRITICAL FIX: If this is a business account and the email matches the business owner email,
-          // ensure the user is admin (they might have been created as agent)
+          // SECURITY FIX: Only promote to admin if this is the business owner email
+          // AND no other active admin exists for this business
           if (businessId && existingUser.role !== 'admin') {
             const { data: business } = await supabase
               .from('businesses')
@@ -162,47 +162,63 @@ export async function GET(request: NextRequest) {
               .eq('id', businessId)
               .single();
 
-            // Case-insensitive email comparison
-            if (business && business.business_email?.toLowerCase() === gmailEmail.toLowerCase()) {
-              console.log('[Gmail Callback] Business owner email detected, promoting user to admin:', userId, 'email:', gmailEmail, 'business_email:', business.business_email);
-              const { error: updateError } = await supabase
-                .from('users')
-                .update({ role: 'admin' })
-                .eq('id', userId);
+            // Check if this email matches the business owner email
+            const isBusinessOwner = business && business.business_email?.toLowerCase() === gmailEmail.toLowerCase();
 
-              if (updateError) {
-                console.error('[Gmail Callback] Error promoting user to admin:', updateError);
-              } else {
-                console.log('[Gmail Callback] User promoted to admin successfully');
-                // Refresh user data to ensure role is updated
-                const { data: updatedUser } = await supabase
+            if (isBusinessOwner) {
+              // Check if any other admin exists for this business
+              const { data: existingAdmins, count: adminCount } = await supabase
+                .from('users')
+                .select('id', { count: 'exact' })
+                .eq('business_id', businessId)
+                .eq('role', 'admin')
+                .eq('is_active', true)
+                .neq('id', userId); // Exclude current user
+
+              const shouldPromote = !adminCount || adminCount === 0;
+
+              if (shouldPromote) {
+                console.log('[Gmail Callback] Business owner email detected, promoting user to admin:', userId);
+                const { error: updateError } = await supabase
                   .from('users')
-                  .select('*')
-                  .eq('id', userId)
-                  .single();
-                if (updatedUser) {
+                  .update({ role: 'admin' })
+                  .eq('id', userId);
+
+                if (updateError) {
+                  console.error('[Gmail Callback] Error promoting user to admin:', updateError);
+                } else {
+                  console.log('[Gmail Callback] User promoted to admin successfully');
                   existingUser.role = 'admin';
-                  console.log('[Gmail Callback] User role confirmed as admin:', updatedUser.role);
                 }
+              } else {
+                console.log('[Gmail Callback] Business owner detected but admin already exists, keeping current role:', existingUser.role);
               }
             } else {
-              console.log('[Gmail Callback] Email does not match business owner:', {
-                gmailEmail,
-                businessEmail: business?.business_email,
-                matches: business?.business_email?.toLowerCase() === gmailEmail.toLowerCase()
-              });
+              console.log('[Gmail Callback] Email does not match business owner, keeping role:', existingUser.role);
             }
           }
         }
       } else {
         // Create new personal account
         console.log('Creating new personal user for:', gmailEmail);
+
+        // SECURITY FIX: Check if this is the first user (first user = admin, rest = agent)
+        const { data: existingPersonalUsers, count: userCount } = await supabase
+          .from('users')
+          .select('id', { count: 'exact' })
+          .is('business_id', null);
+
+        const isFirstUser = !userCount || userCount === 0;
+        const defaultRole = isFirstUser ? 'admin' : 'agent';
+
+        console.log(`[OAuth Login] Creating new personal user with role: ${defaultRole} (first user: ${isFirstUser})`);
+
         const { data: newUser, error: createError } = await supabase
           .from('users')
           .insert({
             name: gmailEmail.split('@')[0], // Default name from email
             email: gmailEmail,
-            role: 'admin', // Default role is now admin
+            role: defaultRole, // FIXED: First user is admin, rest are agents
             business_id: null, // Personal account - EXPLICITLY NULL
             is_email_verified: true,
             user_email: gmailEmail, // Critical for user selection!
@@ -246,7 +262,14 @@ export async function GET(request: NextRequest) {
       }
 
       // Create redirect response
-      const redirectUrl = accountInfo.exists ? `${frontendUrl}/?auth=success` : `${frontendUrl}/?auth=success&newAccount=true`;
+      // CONSISTENCY FIX: Only show welcome dialog for truly new accounts (just created)
+      // Not for existing accounts that are logging in again
+      const isNewAccount = !accountInfo.exists; // Account was just created in this OAuth flow
+      const redirectUrl = isNewAccount
+        ? `${frontendUrl}/?auth=success&newAccount=true`
+        : `${frontendUrl}/?auth=success`;
+
+      console.log('[OAuth Callback] Redirect URL:', redirectUrl, 'isNewAccount:', isNewAccount);
       const response = NextResponse.redirect(redirectUrl);
 
       // 4. Set Cookies
@@ -354,45 +377,18 @@ export async function GET(request: NextRequest) {
       await saveTokens(tokens, businessSession?.businessId || undefined);
 
       // ============================================================
-      // NEW: Automatic User Creation for connected Gmail account
+      // SECURITY FIX: Removed automatic user creation
+      // Users should be created via Team Management invitations only
+      // Connecting Gmail should ONLY save tokens, not create user accounts
+      // This prevents:
+      // 1. Agent emails from appearing in inbox unexpectedly
+      // 2. Automatic admin role assignment
+      // 3. Duplicate user accounts
       // ============================================================
-      if (businessSession?.businessId) {
-        console.log(`[OAuth Connect] Checking for user associated with ${gmailEmail} in business ${businessSession.businessId}`);
+      console.log(`[OAuth Connect] Gmail connected successfully for ${gmailEmail}. Tokens saved.`);
 
-        // Check if user already exists for this email in this business
-        const { data: existingUser } = await supabase
-          .from('users')
-          .select('id')
-          .eq('business_id', businessSession.businessId)
-          .eq('email', gmailEmail)
-          .maybeSingle();
-
-        if (!existingUser) {
-          console.log(`[OAuth Connect] Creating new admin user identity for ${gmailEmail}`);
-          const { error: createError } = await supabase
-            .from('users')
-            .insert({
-              name: gmailEmail.split('@')[0],
-              email: gmailEmail,
-              role: 'admin', // Owner-connected accounts are always admin
-              business_id: businessSession.businessId,
-              shared_gmail_email: gmailEmail,
-              user_email: gmailEmail,
-              is_active: true,
-              is_email_verified: true,
-              password_hash: 'CONNECTED_ACCOUNT', // Placeholder
-            });
-
-          if (createError) {
-            console.error('[OAuth Connect] Error creating user identity:', createError);
-          } else {
-            console.log(`[OAuth Connect] Successfully created admin user identity for ${gmailEmail}`);
-          }
-        } else {
-          console.log(`[OAuth Connect] User already exists for ${gmailEmail}, skipping creation.`);
-        }
-      } else if (businessSession?.id && businessSession?.accountType === 'personal') {
-        // For personal accounts, update the user identity with the connected Gmail
+      // For personal accounts, update the shared_gmail_email field if user exists
+      if (businessSession?.id && businessSession?.accountType === 'personal') {
         console.log(`[OAuth Connect] Updating personal user identity for ${gmailEmail} (User: ${businessSession.id})`);
         const { error: updateError } = await supabase
           .from('users')

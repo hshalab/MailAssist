@@ -114,8 +114,17 @@ function PageContent() {
         setActiveView("inbox")
       }
 
+      // CONSISTENCY FIX: Only show welcome dialog for truly new accounts
+      // Don't show if user already has a session (returning user)
       if (params.get("newAccount") === "true") {
-        setShowPersonalAccountDialog(true)
+        // Check if this is truly a new user (no existing session)
+        const hasExistingSession = typeof window !== 'undefined' &&
+          sessionStorage.getItem('current_user_id') !== null;
+
+        if (!hasExistingSession) {
+          setShowPersonalAccountDialog(true)
+        }
+
         // Trigger sync and auto-classification for new accounts
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('trigger_sync_after_connect', 'true')
