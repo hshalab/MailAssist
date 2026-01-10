@@ -102,60 +102,9 @@ function PageContent() {
         // Ignore localStorage errors (e.g. in private mode)
       }
 
-      // CRITICAL PRODUCTION FIX: Validate session on OAuth return
-      // Check if current session matches expected email, if not clear everything
+      // CRITICAL: Always set skeleton flag when returning from OAuth
+      // This ensures loading skeleton shows immediately, even if sessionStorage was cleared
       if (typeof window !== 'undefined') {
-        // Get expected email from URL or check current user API
-        const checkSession = async () => {
-          try {
-            const currentUserResponse = await fetch('/api/auth/current-user', { 
-              credentials: 'include',
-              cache: 'no-store' 
-            });
-            
-            if (currentUserResponse.ok) {
-              const data = await currentUserResponse.json();
-              const userEmail = data.user?.email;
-              
-              // Get gmail_user_email cookie
-              const gmailCookie = document.cookie
-                .split('; ')
-                .find(row => row.startsWith('gmail_user_email='))
-                ?.split('=')[1];
-              
-              if (gmailCookie && userEmail) {
-                const decodedCookie = decodeURIComponent(gmailCookie);
-                if (userEmail.toLowerCase() !== decodedCookie.toLowerCase()) {
-                  console.error('[OAuth Return] 🔴 EMAIL MISMATCH DETECTED!');
-                  console.error('[OAuth Return] User email:', userEmail);
-                  console.error('[OAuth Return] Cookie email:', decodedCookie);
-                  console.error('[OAuth Return] Clearing all cookies and reloading...');
-                  
-                  // Clear all cookies by setting them to expire in the past
-                  const cookies = ['session_token', 'current_user_id', 'gmail_user_email', 'user_id'];
-                  cookies.forEach(name => {
-                    document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=.amanii.io;`;
-                    document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
-                  });
-                  
-                  // Clear sessionStorage and localStorage
-                  sessionStorage.clear();
-                  localStorage.removeItem(LOCAL_STORAGE_KEY);
-                  
-                  // Reload page to get fresh session
-                  window.location.href = '/?auth=success';
-                  return;
-                }
-              }
-            }
-          } catch (error) {
-            console.error('[OAuth Return] Error checking session:', error);
-          }
-        };
-        
-        // Run session check
-        checkSession();
-        
         // Set skeleton flag from URL param or sessionStorage, or set it fresh
         const urlSkeletonFlag = params.get("showSkeleton") === "true"
         const hasSkeletonFlag = sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'

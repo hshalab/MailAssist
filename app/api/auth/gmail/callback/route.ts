@@ -276,22 +276,18 @@ export async function GET(request: NextRequest) {
       
       // CRITICAL: ALWAYS delete old session token first, regardless of email match
       // This ensures old sessions are cleared before new ones are created
-      // MUST be done BEFORE creating new session to prevent race conditions
       if (oldSessionToken && supabase) {
-        console.log(`[OAuth Callback] 🔴 DELETING OLD SESSION TOKEN FROM DATABASE: ${oldSessionToken.substring(0, 20)}...`);
-        const { error: deleteTokenError, data: deletedData } = await supabase
+        console.log(`[OAuth Callback] DELETING OLD SESSION TOKEN: ${oldSessionToken.substring(0, 20)}...`);
+        const { error: deleteTokenError } = await supabase
           .from('user_sessions')
           .delete()
-          .eq('session_token', oldSessionToken)
-          .select();
+          .eq('session_token', oldSessionToken);
         
         if (deleteTokenError) {
-          console.error('[OAuth Callback] ❌ Error deleting old session token:', deleteTokenError);
+          console.error('[OAuth Callback] Error deleting old session token:', deleteTokenError);
         } else {
-          console.log(`[OAuth Callback] ✅ Old session token deleted successfully from database`, deletedData);
+          console.log(`[OAuth Callback] Old session token deleted successfully`);
         }
-      } else if (oldSessionToken && !supabase) {
-        console.error('[OAuth Callback] ❌ Cannot delete old session - Supabase not initialized');
       }
       
       // CRITICAL: If logging in with a DIFFERENT email, we MUST delete all old sessions
@@ -360,61 +356,38 @@ export async function GET(request: NextRequest) {
       const response = NextResponse.redirect(redirectUrl);
 
       // 4. Set Cookies
-      // CRITICAL PRODUCTION FIX: Clear old session cookies FIRST before setting new ones
-      // The browser will keep old cookies if deletion doesn't match exact domain/path/secure/sameSite
-      // We need to try ALL possible combinations to ensure deletion works
+      // CRITICAL FIX: Clear old session cookies first to prevent using old business sessions
+      // This ensures a fresh personal account doesn't see data from a previous business account
+      // PRODUCTION FIX: Must delete with same domain/path as when setting, otherwise deletion fails
       const { getCookieOptions } = await import('@/lib/cookie-config')
       const cookieOptions = getCookieOptions({ httpOnly: true, expires: expiresAt });
-      
-      console.log(`[OAuth Callback] 🔴 DELETING OLD COOKIES - Old email: ${oldGmailEmail || 'none'}, New email: ${gmailEmail}`);
-      
-      // Method 1: Delete with current domain (production: .amanii.io)
-      const deleteOptionsWithDomain = {
+      const deleteOptions = {
         ...cookieOptions,
-        expires: new Date(0),
+        expires: new Date(0), // Past date to ensure deletion
         maxAge: 0,
-        value: '',
       };
-      response.cookies.set('session_token', '', deleteOptionsWithDomain);
-      response.cookies.set('current_user_id', '', deleteOptionsWithDomain);
-      response.cookies.set('gmail_user_email', '', deleteOptionsWithDomain);
-      response.cookies.set('user_id', '', deleteOptionsWithDomain);
       
-      // Method 2: Delete without domain (in case cookies were set without domain)
+      // Delete old cookies with explicit options (production requires same domain)
+      response.cookies.set('session_token', '', deleteOptions);
+      response.cookies.set('current_user_id', '', deleteOptions);
+      response.cookies.set('gmail_user_email', '', deleteOptions);
+      response.cookies.set('user_id', '', deleteOptions);
+      
+      // Also try deleting without domain (in case cookies were set without domain)
       const deleteOptionsNoDomain = {
-        ...cookieOptions,
+        ...deleteOptions,
         domain: undefined,
-        expires: new Date(0),
-        maxAge: 0,
-        value: '',
       };
       response.cookies.set('session_token', '', deleteOptionsNoDomain);
       response.cookies.set('current_user_id', '', deleteOptionsNoDomain);
       response.cookies.set('gmail_user_email', '', deleteOptionsNoDomain);
       response.cookies.set('user_id', '', deleteOptionsNoDomain);
       
-      // Method 3: Delete with explicit domain from env (if set)
-      if (process.env.COOKIE_DOMAIN) {
-        const deleteOptionsEnvDomain = {
-          ...cookieOptions,
-          domain: process.env.COOKIE_DOMAIN,
-          expires: new Date(0),
-          maxAge: 0,
-          value: '',
-        };
-        response.cookies.set('session_token', '', deleteOptionsEnvDomain);
-        response.cookies.set('current_user_id', '', deleteOptionsEnvDomain);
-        response.cookies.set('gmail_user_email', '', deleteOptionsEnvDomain);
-        response.cookies.set('user_id', '', deleteOptionsEnvDomain);
-      }
-      
-      // Method 4: Use delete() method (Next.js built-in)
+      // Also use delete() method as fallback
       response.cookies.delete('session_token');
       response.cookies.delete('current_user_id');
       response.cookies.delete('gmail_user_email');
       response.cookies.delete('user_id');
-      
-      console.log(`[OAuth Callback] ✅ Old cookies deletion attempted with multiple methods`);
       
       // CRITICAL: Set new cookies AFTER old ones are cleared
       // Log what we're setting for debugging
