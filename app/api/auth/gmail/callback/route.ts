@@ -483,13 +483,39 @@ export async function GET(request: NextRequest) {
         </html>
       `;
 
-      return new NextResponse(htmlResponse, {
+      const response = new NextResponse(htmlResponse, {
         status: 200,
         headers: {
           'Content-Type': 'text/html',
           'Cache-Control': 'no-store, no-cache, must-revalidate',
         },
       });
+
+      // CRITICAL: Set cookies on the HTML response
+      // The cookies() API sets them in the request context, but we need them in the response headers
+      response.cookies.set('session_token', sessionToken, getCookieOptions({
+        httpOnly: true,
+        expires: expiresAt,
+        maxAge: 30 * 24 * 60 * 60
+      }));
+      response.cookies.set('current_user_id', userId!, getCookieOptions({
+        httpOnly: false,
+        expires: expiresAt,
+        maxAge: 30 * 24 * 60 * 60
+      }));
+      response.cookies.set('gmail_user_email', gmailEmail, getCookieOptions({
+        httpOnly: true,
+        expires: expiresAt,
+        maxAge: 30 * 24 * 60 * 60
+      }));
+      response.cookies.set('user_id', userId!, getCookieOptions({
+        httpOnly: false,
+        expires: expiresAt,
+        maxAge: 30 * 24 * 60 * 60
+      }));
+
+      return response;
+
 
     }
 
