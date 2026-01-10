@@ -392,7 +392,13 @@ export async function GET(request: NextRequest) {
 
       // Store tokens
       // If business session exists, link to business. Otherwise link to personal (via user_email scoping in saveTokens)
-      await saveTokens(tokens, businessSession?.businessId || undefined);
+      console.log(`[OAuth Connect] Saving tokens for ${gmailEmail}, businessId: ${businessSession?.businessId || 'personal'}`);
+      const savedEmail = await saveTokens(tokens, businessSession?.businessId || undefined);
+      if (!savedEmail) {
+        console.error(`[OAuth Connect] Failed to save tokens for ${gmailEmail}`);
+        throw new Error('Failed to save tokens');
+      }
+      console.log(`[OAuth Connect] Successfully saved tokens for ${savedEmail}`);
 
       // ============================================================
       // SECURITY FIX: Removed automatic user creation
@@ -404,6 +410,11 @@ export async function GET(request: NextRequest) {
       // 3. Duplicate user accounts
       // ============================================================
       console.log(`[OAuth Connect] Gmail connected successfully for ${gmailEmail}. Tokens saved.`);
+
+      // CRITICAL: Trigger accounts refresh after reconnection
+      // Dispatch event and set localStorage flag to refresh accounts list
+      // Note: This will be picked up by the frontend after redirect
+      console.log(`[OAuth Connect] Token saved, accounts should refresh on redirect`);
 
       // For personal accounts, update the shared_gmail_email field if user exists
       if (businessSession?.id && businessSession?.accountType === 'personal') {

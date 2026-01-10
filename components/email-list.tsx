@@ -61,7 +61,16 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   
   // CRITICAL: Set initial loading state to prevent empty state flash
   // Always start with loading=true to prevent empty state from flashing
-  const [loading, setLoading] = useState<boolean>(true)
+  // Also check URL params immediately to catch OAuth return
+  const [loading, setLoading] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search)
+      const isOAuthReturn = urlParams.get('auth') === 'success' || urlParams.get('connected') === 'true'
+      const skeletonFlag = sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
+      return isOAuthReturn || skeletonFlag || true // Always start with true
+    }
+    return true
+  })
   
   // Check sessionStorage flag and URL params on mount to ensure skeleton shows immediately
   useEffect(() => {
@@ -366,7 +375,10 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   // PRIORITY: showSkeleton flag takes highest priority - if set, ALWAYS show skeleton
   // This ensures skeleton shows immediately when returning from OAuth, even before accounts load
   // Also show skeleton if accounts are still loading (hasConnectedAccounts === undefined) OR we have connected accounts but no emails yet
-  const shouldShowSkeleton = (showSkeleton || loading || hasConnectedAccounts === undefined || (hasConnectedAccounts !== false && emails.length === 0 && !error)) && !loadingMore;
+  // CRITICAL: Check URL params for OAuth return to ensure skeleton shows even if sessionStorage was cleared
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+  const isOAuthReturn = urlParams?.get('auth') === 'success' || urlParams?.get('connected') === 'true'
+  const shouldShowSkeleton = (showSkeleton || isOAuthReturn || loading || hasConnectedAccounts === undefined || (hasConnectedAccounts !== false && emails.length === 0 && !error)) && !loadingMore;
   if (shouldShowSkeleton) {
     return (
       <div className="p-3 space-y-2 animate-in fade-in duration-300">

@@ -27,10 +27,20 @@ export function AccountManager() {
 
     const fetchAccounts = async () => {
         try {
-            const res = await fetch('/api/auth/accounts')
+            // Add cache-busting to ensure fresh data after reconnection
+            const res = await fetch(`/api/auth/accounts?_=${Date.now()}`, {
+                cache: 'no-store',
+                headers: {
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache'
+                }
+            })
             if (res.ok) {
                 const data = await res.json()
+                console.log('[AccountManager] Fetched accounts:', data.accounts?.length || 0)
                 setAccounts(data.accounts || [])
+            } else {
+                console.error('[AccountManager] Failed to fetch accounts:', res.status, res.statusText)
             }
         } catch (error) {
             console.error('Failed to fetch accounts:', error)
@@ -62,6 +72,49 @@ export function AccountManager() {
             }
         }
         checkPlan()
+
+        // Listen for account changes (e.g., after reconnecting)
+        const handleAccountsChanged = () => {
+            console.log('[AccountManager] Accounts changed event received, refreshing accounts list')
+            fetchAccounts()
+        }
+        
+        // Also listen for storage events (cross-tab communication)
+        const handleStorageChange = (e: StorageEvent) => {
+            if (e.key === 'accountsChanged') {
+                console.log('[AccountManager] Accounts changed detected via storage event, refreshing')
+                fetchAccounts()
+            }
+        }
+        
+        window.addEventListener('accountsChanged', handleAccountsChanged)
+        window.addEventListener('storage', handleStorageChange)
+        
+        // Check on mount if accounts changed (e.g., after OAuth return)
+        const checkAccountsChanged = () => {
+            const accountsChanged = localStorage.getItem('accountsChanged')
+            if (accountsChanged) {
+                fetchAccounts()
+                localStorage.removeItem('accountsChanged')
+            }
+        }
+        checkAccountsChanged()
+        
+        // Also check URL params for OAuth return
+        if (typeof window !== 'undefined') {
+            const urlParams = new URLSearchParams(window.location.search)
+            if (urlParams.get('auth') === 'success' || urlParams.get('connected') === 'true') {
+                // Refresh accounts after a short delay to ensure tokens are saved
+                setTimeout(() => {
+                    fetchAccounts()
+                }, 1000)
+            }
+        }
+        
+        return () => {
+            window.removeEventListener('accountsChanged', handleAccountsChanged)
+            window.removeEventListener('storage', handleStorageChange)
+        }
     }, [])
 
     const handleDisconnect = async (email: string) => {
