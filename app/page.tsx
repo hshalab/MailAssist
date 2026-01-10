@@ -102,13 +102,17 @@ function PageContent() {
         // Ignore localStorage errors (e.g. in private mode)
       }
 
-      // Ensure skeleton flag is set if it exists (user clicked connect button)
-      // This is critical for production where timing differs
+      // CRITICAL: Always set skeleton flag when returning from OAuth
+      // This ensures loading skeleton shows immediately, even if sessionStorage was cleared
       if (typeof window !== 'undefined') {
+        // Set skeleton flag from URL param or sessionStorage, or set it fresh
+        const urlSkeletonFlag = params.get("showSkeleton") === "true"
         const hasSkeletonFlag = sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
-        if (!hasSkeletonFlag) {
-          // Set it if user just connected (they likely clicked connect button)
+        
+        if (urlSkeletonFlag || !hasSkeletonFlag) {
+          // Always set it when returning from OAuth to ensure skeleton shows
           sessionStorage.setItem('show_inbox_skeleton_on_return', 'true')
+          console.log('[OAuth Return] Set skeleton flag - skeleton will show')
         }
         // Ensure we're on inbox view to show skeleton
         setActiveView("inbox")

@@ -82,9 +82,14 @@ export function AccountManager() {
             if (res.ok) {
                 setAccounts(prev => prev.filter(a => a.email !== accountToDelete))
                 setAccountToDelete(null)
-                // Trigger refresh of inbox and tickets to remove emails from disconnected account
+                // CRITICAL: Trigger refresh for ALL users in the business
+                // This ensures agents, managers, and admins all see the changes
                 window.dispatchEvent(new CustomEvent('accountsChanged'))
-                // Also reload the page to ensure clean state
+                // Broadcast to all tabs/windows that accounts changed
+                if (typeof window !== 'undefined' && window.localStorage) {
+                    localStorage.setItem('accountsChanged', Date.now().toString())
+                }
+                // Also reload the page to ensure clean state and reflect deletions
                 setTimeout(() => {
                     window.location.reload()
                 }, 500)

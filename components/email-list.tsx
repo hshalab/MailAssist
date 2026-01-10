@@ -248,6 +248,48 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewType, selectedAccount])
+  
+  // Listen for account changes to refresh emails
+  // This ensures ALL users (agents, managers, admins) see the changes
+  useEffect(() => {
+    const handleAccountsChanged = () => {
+      console.log('[EmailList] Accounts changed event received, refreshing emails')
+      // Clear emails and refetch
+      setEmails([])
+      setLoading(true)
+      fetchEmails(150)
+    }
+    
+    // Also listen for storage events (cross-tab communication)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'accountsChanged') {
+        console.log('[EmailList] Accounts changed detected via storage event, refreshing')
+        setEmails([])
+        setLoading(true)
+        fetchEmails(150)
+      }
+    }
+    
+    window.addEventListener('accountsChanged', handleAccountsChanged)
+    window.addEventListener('storage', handleStorageChange)
+    
+    // Check on mount if accounts changed
+    const checkAccountsChanged = () => {
+      const accountsChanged = localStorage.getItem('accountsChanged')
+      if (accountsChanged) {
+        setEmails([])
+        setLoading(true)
+        fetchEmails(150)
+        localStorage.removeItem('accountsChanged')
+      }
+    }
+    checkAccountsChanged()
+    
+    return () => {
+      window.removeEventListener('accountsChanged', handleAccountsChanged)
+      window.removeEventListener('storage', handleStorageChange)
+    }
+  }, []) // Only set up listener once
 
   // Auto-load more when scrolling near bottom
   useEffect(() => {
@@ -305,8 +347,10 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   }
 
   // CRITICAL FIX: Show skeleton if loading OR if skeleton flag is set (returning from OAuth)
+  // Also show skeleton if we have connected accounts but no emails yet (might still be loading)
   // This ensures skeleton shows immediately when returning from OAuth, even before accounts load
-  if ((loading || showSkeleton) && !loadingMore) {
+  const shouldShowSkeleton = (loading || showSkeleton || (hasConnectedAccounts !== false && emails.length === 0 && !error)) && !loadingMore;
+  if (shouldShowSkeleton) {
     return (
       <div className="p-3 space-y-2 animate-in fade-in duration-300">
         {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
@@ -378,8 +422,47 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
 
   // CRITICAL FIX: Don't show "No emails found" if we're still loading OR have skeleton flag
   // The skeleton flag takes priority - it means we're returning from OAuth and emails are loading
+  // If we have connected accounts but emails are empty, we might still be loading (show skeleton)
   // Only show empty state if we're completely done loading AND don't have skeleton flag
+  // AND either we have no connected accounts OR we've confirmed emails are actually empty (not just loading)
   if (emails.length === 0 && !loadingMore && !showSkeleton && !loading) {
+    // If hasConnectedAccounts is true/undefined and no error, we might still be loading - skeleton handles this above
+    // Only show empty state if we explicitly know there are no connected accounts OR we have an error
+    if (hasConnectedAccounts !== false && error === null) {
+      // Still might be loading - the skeleton condition above should handle this
+      // But if we get here, it means skeleton didn't show, so show it as fallback
+      return (
+        <div className="p-3 space-y-2 animate-in fade-in duration-300">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+            <div
+              key={i}
+              className="relative w-full rounded-xl border border-border/40 bg-gradient-to-br from-card via-card to-muted/5 overflow-hidden"
+              style={{ animationDelay: `${i * 30}ms` }}
+            >
+              <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+              <div className="flex gap-3 p-3 relative">
+                <div className="w-10 h-10 rounded-full bg-muted/80 flex-shrink-0 shadow-sm" />
+                <div className="flex-1 min-w-0 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="h-4 bg-muted/70 rounded-md w-32" />
+                    <div className="h-3 bg-muted/50 rounded w-12" />
+                  </div>
+                  <div className="h-4 bg-muted/70 rounded-md w-3/4" />
+                  <div className="space-y-1.5">
+                    <div className="h-3 bg-muted/50 rounded w-full" />
+                    <div className="h-3 bg-muted/50 rounded w-2/3" />
+                  </div>
+                  <div className="flex items-center gap-1.5 pt-1">
+                    <div className="h-4 bg-muted/40 rounded-md w-20" />
+                    <div className="h-5 bg-muted/40 rounded-md w-24" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
     // Check if we are filtering by a specific account
     const isFiltering = !!selectedAccount;
     

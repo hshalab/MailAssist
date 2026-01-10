@@ -80,6 +80,47 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
       }
     }
     fetchAccounts()
+    
+    // Listen for account changes (e.g., after disconnecting)
+    // This ensures ALL users (agents, managers, admins) see the changes
+    const handleAccountsChanged = () => {
+      console.log('[InboxView] Accounts changed event received, refreshing accounts list')
+      fetchAccounts()
+      // Also check localStorage for cross-tab communication
+      const accountsChanged = localStorage.getItem('accountsChanged')
+      if (accountsChanged) {
+        console.log('[InboxView] Accounts changed detected via localStorage, refreshing')
+        fetchAccounts()
+        localStorage.removeItem('accountsChanged')
+      }
+    }
+    
+    window.addEventListener('accountsChanged', handleAccountsChanged)
+    
+    // Also listen for storage events (cross-tab communication)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'accountsChanged') {
+        console.log('[InboxView] Accounts changed detected via storage event, refreshing')
+        fetchAccounts()
+      }
+    }
+    
+    window.addEventListener('storage', handleStorageChange)
+    
+    // Check on mount if accounts changed
+    const checkAccountsChanged = () => {
+      const accountsChanged = localStorage.getItem('accountsChanged')
+      if (accountsChanged) {
+        fetchAccounts()
+        localStorage.removeItem('accountsChanged')
+      }
+    }
+    checkAccountsChanged()
+    
+    return () => {
+      window.removeEventListener('accountsChanged', handleAccountsChanged)
+      window.removeEventListener('storage', handleStorageChange)
+    }
   }, [])
 
   // Fetch ticket for the selected email

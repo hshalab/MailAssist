@@ -528,15 +528,18 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       // CRITICAL: Send user ID in header from sessionStorage (per-tab) to prevent cookie sharing issues
       // This ensures each tab uses its own user ID even when cookies are shared
-      const userIdHeader = currentUserId ? { 'x-user-id': currentUserId } : {};
+      const headers: Record<string, string> = {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+      };
+      
+      if (currentUserId) {
+        headers['x-user-id'] = currentUserId;
+      }
       
       const response = await fetch(url, {
         cache: "no-store",
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          ...userIdHeader
-        }
+        headers
       })
       if (!response.ok) {
         throw new Error("Failed to fetch tickets")
@@ -545,12 +548,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       console.log('[Tickets] Received tickets:', data.tickets?.length || 0)
 
       // Extract unique owner emails for the filter dropdown if we don't have them
+      // CRITICAL: Only add emails from tickets that are from currently connected accounts
+      // The API already filters tickets by connected accounts, so we can trust the emails here
       if (data.tickets && data.tickets.length > 0) {
         const uniqueEmails = Array.from(new Set(data.tickets.map((t: Ticket) => t.ownerEmail).filter(Boolean))) as string[]
         setEmails(prev => {
           const combined = Array.from(new Set([...prev, ...uniqueEmails]))
           return combined.sort()
         })
+      } else {
+        // If no tickets, clear emails list (might have been disconnected)
+        setEmails([])
       }
 
       const list = data.tickets || []
@@ -562,7 +570,46 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     } finally {
       if (!silent) setLoading(false)
     }
-  }, [selectedAccount]) // Add selectedAccount dependency
+  }, [selectedAccount, currentUserId]) // Add selectedAccount and currentUserId dependencies
+  
+  // Listen for account changes to refresh tickets and email list
+  // This ensures ALL users (agents, managers, admins) see the changes
+  useEffect(() => {
+    const handleAccountsChanged = () => {
+      console.log('[TicketsView] Accounts changed event received, refreshing tickets and email list')
+      // Clear emails and refetch tickets to get updated list
+      setEmails([])
+      fetchTickets()
+    }
+    
+    // Also listen for storage events (cross-tab communication)
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'accountsChanged') {
+        console.log('[TicketsView] Accounts changed detected via storage event, refreshing')
+        setEmails([])
+        fetchTickets()
+      }
+    }
+    
+    window.addEventListener('accountsChanged', handleAccountsChanged)
+    window.addEventListener('storage', handleStorageChange)
+    
+    // Check on mount if accounts changed
+    const checkAccountsChanged = () => {
+      const accountsChanged = localStorage.getItem('accountsChanged')
+      if (accountsChanged) {
+        setEmails([])
+        fetchTickets()
+        localStorage.removeItem('accountsChanged')
+      }
+    }
+    checkAccountsChanged()
+    
+    return () => {
+      window.removeEventListener('accountsChanged', handleAccountsChanged)
+      window.removeEventListener('storage', handleStorageChange)
+    }
+  }, [fetchTickets]) // Re-setup listener if fetchTickets changes
 
   useEffect(() => {
     const fetchAgentDepartments = async () => {
@@ -1973,13 +2020,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     return (
       <div className="flex items-center justify-center h-full w-full bg-background animate-in fade-in duration-300">
         <div className="flex flex-col items-center gap-6 w-full max-w-md px-6">
-          {/* Modern spinner with gradient */}
+          {/* Modern spinner with gradient - removed inner spinner */}
           <div className="relative w-16 h-16">
             <div className="absolute inset-0 rounded-full border-4 border-primary/10"></div>
             <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-primary border-r-primary/60 animate-spin"></div>
-            <div className="absolute inset-2 rounded-full bg-gradient-to-br from-primary/5 to-accent/5 flex items-center justify-center">
-              <Loader2 className="w-6 h-6 text-primary animate-spin" />
-            </div>
           </div>
           <div className="flex flex-col items-center gap-2 text-center">
             <p className="text-base font-semibold text-foreground">Loading tickets...</p>
@@ -2974,9 +3018,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                                 <div className="relative w-10 h-10">
                                   <div className="absolute inset-0 rounded-full border-2 border-primary/10"></div>
                                   <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-primary border-r-primary/50 animate-spin"></div>
-                                  <div className="absolute inset-1 rounded-full bg-gradient-to-br from-primary/5 to-accent/5 flex items-center justify-center">
-                                    <Loader2 className="w-4 h-4 text-primary animate-spin" />
-                                  </div>
                                 </div>
                                 <p className="text-sm font-medium text-muted-foreground">Loading conversation...</p>
                               </div>

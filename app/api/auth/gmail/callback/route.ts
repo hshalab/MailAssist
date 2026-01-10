@@ -328,8 +328,10 @@ export async function GET(request: NextRequest) {
     // MODE: CONNECT (Link Gmail to existing account)
     // ============================================================
     else {
-      // Redirect back to inbox with success flag to trigger sync
-      const response = NextResponse.redirect(`${frontendUrl}/?auth=success&connected=true`);
+      // CRITICAL: Redirect back to inbox with success flag AND skeleton flag
+      // This ensures the loading skeleton shows when user returns from OAuth
+      // The skeleton flag will be checked by the frontend to show loading state
+      const response = NextResponse.redirect(`${frontendUrl}/?auth=success&connected=true&showSkeleton=true`);
 
       // Check for active business session
       const { validateBusinessSession } = await import('@/lib/session');
