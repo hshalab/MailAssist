@@ -23,9 +23,10 @@ async function setSyncState(state: SyncState) {
 export async function POST(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    // Cap maxResults at 500 to prevent processing too many emails
+    // Cap maxResults at 600 to prevent processing too many emails
+    // For business accounts, we distribute this across all connected accounts
     const requestedMax = parseInt(searchParams.get('maxResults') || '100');
-    const maxResults = Math.min(requestedMax, 500);
+    const maxResults = Math.min(requestedMax, 600);
 
     // Check for business session first
     const { validateBusinessSession } = await import('@/lib/session');
@@ -40,12 +41,23 @@ export async function POST(request: NextRequest) {
       const { fetchAllSentEmails, fetchAllInboxEmails } = await import('@/lib/email-service');
       const { loadBusinessTokens } = await import('@/lib/storage');
 
-      // Fetch from all accounts (capped at 500)
-      sentEmails = await fetchAllSentEmails(businessSession.businessId, maxResults, businessSession.email);
+      // CRITICAL FIX: Distribute email limit fairly across all accounts
+      // Get account count first to calculate per-account limit
+      const accounts = await loadBusinessTokens(businessSession.businessId, businessSession.email);
+      const accountCount = Math.max(accounts.length, 1); // At least 1 to avoid division by zero
+      
+      // Distribute limit evenly: each account gets maxResults / accountCount
+      // Ensure minimum of 50 emails per account so smaller accounts aren't excluded
+      const perAccountLimit = Math.max(Math.floor(maxResults / accountCount), 50);
+      
+      console.log(`[SYNC] Distributing ${maxResults} emails across ${accountCount} accounts (${perAccountLimit} per account)`);
+      
+      // Fetch from all accounts with fair distribution
+      sentEmails = await fetchAllSentEmails(businessSession.businessId, perAccountLimit, businessSession.email);
       
       // Also fetch inbox emails to create tickets from them
       console.log('[SYNC] Fetching inbox emails to create tickets...');
-      inboxEmails = await fetchAllInboxEmails(businessSession.businessId, maxResults, undefined, businessSession.email);
+      inboxEmails = await fetchAllInboxEmails(businessSession.businessId, perAccountLimit, undefined, businessSession.email);
       
       // Filter out spam/trash from inbox emails
       inboxEmails = inboxEmails.filter((email: any) => {

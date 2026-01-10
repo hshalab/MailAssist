@@ -4,9 +4,10 @@ import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Trash2, Mail, Plus } from 'lucide-react'
+import { Loader2, Trash2, Mail, Plus, AlertTriangle } from 'lucide-react'
 import { ConnectImapForm } from './connect-imap-form'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface Account {
     email: string
@@ -22,6 +23,7 @@ export function AccountManager() {
     const [showImapForm, setShowImapForm] = useState(false)
     const [currentPlan, setCurrentPlan] = useState<'personal' | 'business'>('personal')
     const [isSwitchingPlan, setIsSwitchingPlan] = useState(false)
+    const [accountToDelete, setAccountToDelete] = useState<string | null>(null)
 
     const fetchAccounts = async () => {
         try {
@@ -63,26 +65,39 @@ export function AccountManager() {
     }, [])
 
     const handleDisconnect = async (email: string) => {
-        if (!confirm(`Are you sure you want to disconnect ${email}?`)) return
+        setAccountToDelete(email)
+    }
 
-        setIsDisconnecting(email)
+    const confirmDisconnect = async () => {
+        if (!accountToDelete) return
+
+        setIsDisconnecting(accountToDelete)
         try {
             const res = await fetch('/api/auth/accounts/disconnect', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email }),
+                body: JSON.stringify({ email: accountToDelete }),
             })
 
             if (res.ok) {
-                setAccounts(prev => prev.filter(a => a.email !== email))
+                setAccounts(prev => prev.filter(a => a.email !== accountToDelete))
+                setAccountToDelete(null)
+                // Trigger refresh of inbox and tickets to remove emails from disconnected account
+                window.dispatchEvent(new CustomEvent('accountsChanged'))
+                // Also reload the page to ensure clean state
+                setTimeout(() => {
+                    window.location.reload()
+                }, 500)
             } else {
-                alert('Failed to disconnect account')
+                const data = await res.json()
+                alert(data.error || 'Failed to disconnect account')
             }
         } catch (error) {
             console.error('Error disconnecting account:', error)
             alert('Error disconnecting account')
         } finally {
             setIsDisconnecting(null)
+            setAccountToDelete(null)
         }
     }
 
@@ -266,6 +281,56 @@ export function AccountManager() {
                     )}
                 </div>
             </div>
+
+            {/* Delete Account Confirmation Dialog */}
+            <Dialog open={!!accountToDelete} onOpenChange={(open) => !open && setAccountToDelete(null)}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <div className="flex items-center gap-3 mb-2">
+                            <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
+                                <AlertTriangle className="h-5 w-5 text-destructive" />
+                            </div>
+                            <DialogTitle className="text-xl">Disconnect Account</DialogTitle>
+                        </div>
+                        <DialogDescription className="text-base pt-2">
+                            Are you sure you want to disconnect <strong>{accountToDelete}</strong>?
+                        </DialogDescription>
+                    </DialogHeader>
+                    <Alert className="bg-amber-500/10 border-amber-500/20">
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                        <AlertDescription className="text-sm text-amber-700 dark:text-amber-400 ml-2">
+                            This will remove the account connection. Emails and tickets from this account will no longer be accessible.
+                        </AlertDescription>
+                    </Alert>
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button
+                            variant="outline"
+                            onClick={() => setAccountToDelete(null)}
+                            disabled={isDisconnecting === accountToDelete}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={confirmDisconnect}
+                            disabled={isDisconnecting === accountToDelete}
+                            className="bg-destructive hover:bg-destructive/90"
+                        >
+                            {isDisconnecting === accountToDelete ? (
+                                <>
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    Disconnecting...
+                                </>
+                            ) : (
+                                <>
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Disconnect
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

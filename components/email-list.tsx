@@ -30,9 +30,10 @@ interface EmailListProps {
   onRefreshReady?: (refreshFn: () => void) => void
   selectedAccount?: string  // NEW: Filter by account email
   searchQuery?: string  // NEW: Search query for filtering
+  hasConnectedAccounts?: boolean  // NEW: Whether user has connected accounts
 }
 
-export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChange, viewType = "inbox", onRefreshReady, selectedAccount, searchQuery = "" }: EmailListProps) {
+export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChange, viewType = "inbox", onRefreshReady, selectedAccount, searchQuery = "", hasConnectedAccounts = false }: EmailListProps) {
   const [emails, setEmails] = useState<Email[]>([])
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -43,10 +44,25 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   const listContainerRef = useRef<HTMLDivElement>(null)
 
   // PRODUCTION FIX: Use state instead of recalculating from sessionStorage to fix race condition
+  // CRITICAL: Check sessionStorage immediately on mount to catch OAuth return
   const [showSkeleton, setShowSkeleton] = useState(() => {
-    return typeof window !== 'undefined' &&
-      sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
+    }
+    return false
   })
+  
+  // Check sessionStorage flag on mount to ensure it's set before any rendering
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const skeletonFlag = sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
+      if (skeletonFlag && !showSkeleton) {
+        setShowSkeleton(true)
+        setLoading(true) // Also ensure loading is true
+        onLoadingChange?.(true)
+      }
+    }
+  }, []) // Run only on mount
 
   // Client-side cache for email details to make clicking instant
   const emailCacheRef = useRef<Map<string, any>>(new Map())
@@ -189,6 +205,18 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
 
   // Initial fetch on mount and when viewType or selectedAccount changes
   useEffect(() => {
+    // CRITICAL FIX: Check for skeleton flag FIRST before any other logic
+    // This ensures skeleton shows immediately when returning from OAuth
+    let hasSkeletonFlag = false
+    if (typeof window !== 'undefined') {
+      hasSkeletonFlag = sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
+      if (hasSkeletonFlag) {
+        setShowSkeleton(true)
+        setLoading(true) // Also set loading to ensure skeleton shows
+        onLoadingChange?.(true)
+      }
+    }
+    
     // Ensure loading state is explicitly set to true before any async operations
     // This is critical for production builds where hydration timing differs
     setLoading(true)
@@ -210,7 +238,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       requestAnimationFrame(() => {
         timeoutId = setTimeout(() => {
           fetchEmails(150) // Skeleton clearing now happens inside fetchEmails after setEmails()
-        }, showSkeleton ? 200 : 10) // Longer delay if returning from OAuth (200ms for production)
+        }, hasSkeletonFlag ? 200 : 10) // Longer delay if returning from OAuth (200ms for production)
       })
     })
 
@@ -276,8 +304,8 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     }
   }
 
-  // PRODUCTION FIX: Use state variable instead of recalculating from sessionStorage
-  // This ensures skeleton persists across renders in production builds
+  // CRITICAL FIX: Show skeleton if loading OR if skeleton flag is set (returning from OAuth)
+  // This ensures skeleton shows immediately when returning from OAuth, even before accounts load
   if ((loading || showSkeleton) && !loadingMore) {
     return (
       <div className="p-3 space-y-2 animate-in fade-in duration-300">
@@ -348,10 +376,19 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     )
   }
 
-  // Don't show "No emails found" if we're still loading or have skeleton flag
+  // CRITICAL FIX: Don't show "No emails found" if we're still loading OR have skeleton flag
+  // The skeleton flag takes priority - it means we're returning from OAuth and emails are loading
+  // Only show empty state if we're completely done loading AND don't have skeleton flag
   if (emails.length === 0 && !loadingMore && !showSkeleton && !loading) {
     // Check if we are filtering by a specific account
     const isFiltering = !!selectedAccount;
+    
+    // Only show "Connect Gmail" button if:
+    // 1. We're in inbox view
+    // 2. Not filtering by account
+    // 3. We explicitly know there are NO connected accounts (hasConnectedAccounts is false)
+    // If hasConnectedAccounts is true or undefined (still loading), don't show connect button
+    const shouldShowConnectButton = viewType === 'inbox' && !isFiltering && hasConnectedAccounts === false;
 
     return (
       <div className="flex items-center justify-center p-12 animate-in fade-in duration-300">
@@ -367,10 +404,12 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
               {isFiltering
                 ? `No emails found for ${selectedAccount}. Try checking another filter or refresh the page.`
                 : viewType === 'inbox'
-                  ? "Connect your Gmail account to see your emails here."
+                  ? hasConnectedAccounts
+                    ? "Your inbox is empty. New emails will appear here."
+                    : "Connect your Gmail account to see your emails here."
                   : "Try checking another folder or refresh the page"}
             </p>
-            {viewType === 'inbox' && !isFiltering && (
+            {shouldShowConnectButton && (
               <div className="flex gap-2 justify-center mt-2">
                 <Button onClick={handleConnectGmail}>
                   <Mail className="mr-2 h-4 w-4" />

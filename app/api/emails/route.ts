@@ -43,12 +43,17 @@ export async function GET(request: NextRequest) {
     }
 
     // If business session exists, fetch from ALL connected accounts
-    // If business session exists, fetch from ALL connected accounts
     if (businessSession) {
       const { fetchAllInboxEmails, fetchAllSentEmails } = await import('@/lib/email-service');
+      const { loadBusinessTokens } = await import('@/lib/storage');
 
       // For personal accounts (no businessId), use sessionEmail if businessSession.email is not what we want
       const effectiveEmail = businessSession.businessId ? businessSession.email : (sessionEmail || businessSession.email);
+
+      // CRITICAL FIX: Get list of connected accounts FIRST to filter emails
+      // This ensures we only show emails from accounts that are still connected
+      const connectedAccounts = await loadBusinessTokens(businessSession.businessId, effectiveEmail);
+      const connectedEmails = new Set(connectedAccounts.map(acc => acc.email));
 
       if (type === 'sent') {
         emails = await fetchAllSentEmails(businessSession.businessId, maxResults, effectiveEmail);
@@ -66,6 +71,21 @@ export async function GET(request: NextRequest) {
             return !labels.some((label: string) => blockedLabels.includes(label));
           });
         }
+      }
+
+      // CRITICAL FIX: Filter out emails from disconnected accounts
+      // Only show emails from accounts that are still connected
+      if (connectedEmails.size > 0) {
+        emails = emails.filter((email: any) => {
+          // If email has ownerEmail, it must be in connected accounts
+          // If no ownerEmail, allow it (legacy emails)
+          return !email.ownerEmail || connectedEmails.has(email.ownerEmail);
+        });
+        console.log(`[API] Filtered emails to ${emails.length} from ${connectedEmails.size} connected accounts`);
+      } else {
+        // No connected accounts, return empty
+        console.log('[API] No connected accounts found, returning empty email list');
+        emails = [];
       }
 
       // NEW: Filter by account if specified

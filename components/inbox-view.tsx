@@ -225,6 +225,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
             onRefreshReady={handleRefreshReady}
             selectedAccount={selectedAccount === 'all' ? undefined : selectedAccount}
             searchQuery={searchQuery}
+            hasConnectedAccounts={connectedAccounts.length > 0}
           />
         </div>
       </div>

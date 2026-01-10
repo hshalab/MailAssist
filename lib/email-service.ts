@@ -164,7 +164,14 @@ export async function fetchAllInboxEmails(
     return [];
   }
 
-  // Fetch from all accounts in parallel
+  // CRITICAL FIX: Distribute limit evenly across accounts
+  // The limit parameter is now per-account (calculated by caller)
+  // This ensures fair distribution so all accounts get tickets created
+  const perAccountLimit = limit; // Already calculated by caller
+
+  console.log(`[EmailService] Fetching ${perAccountLimit} emails per account (${accounts.length} accounts)`);
+
+  // Fetch from all accounts in parallel with fair distribution
   const results = await Promise.all(
     accounts.map(async ({ email, tokens }) => {
       try {
@@ -203,7 +210,7 @@ export async function fetchAllInboxEmails(
           }
         }
 
-        console.log(`[EmailService] Fetching inbox for ${email} (Provider: ${providerType})`);
+        console.log(`[EmailService] Fetching inbox for ${email} (Provider: ${providerType}, Limit: ${perAccountLimit})`);
 
         const config: AccountConfig = {
           type: providerType,
@@ -213,9 +220,9 @@ export async function fetchAllInboxEmails(
         };
 
         const provider = createEmailProvider(config);
-        const emails = await provider.fetchInbox({ limit, query });
+        const emails = await provider.fetchInbox({ limit: perAccountLimit, query });
 
-        console.log(`[EmailService] Successfully fetched ${emails.length} emails for ${email}`);
+        console.log(`[EmailService] Successfully fetched ${emails.length} emails for ${email} (requested ${perAccountLimit})`);
 
         // Tag each email with the source account
         return emails.map(e => ({ ...e, ownerEmail: email }));
@@ -233,7 +240,7 @@ export async function fetchAllInboxEmails(
     return dateB - dateA;
   });
 
-  console.log(`[EmailService] Total emails fetched: ${allEmails.length}`);
+  console.log(`[EmailService] Total emails fetched: ${allEmails.length} from ${accounts.length} accounts`);
   return allEmails;
 }
 
@@ -249,7 +256,13 @@ export async function fetchAllSentEmails(
     return [];
   }
 
-  // Fetch from all accounts in parallel
+  // CRITICAL FIX: Distribute limit evenly across accounts
+  // The limit parameter is now per-account (calculated by caller)
+  const perAccountLimit = limit; // Already calculated by caller
+
+  console.log(`[EmailService] Fetching ${perAccountLimit} sent emails per account (${accounts.length} accounts)`);
+
+  // Fetch from all accounts in parallel with fair distribution
   const results = await Promise.all(
     accounts.map(async ({ email, tokens }) => {
       try {
@@ -261,7 +274,9 @@ export async function fetchAllSentEmails(
         };
 
         const provider = createEmailProvider(config);
-        const emails = await provider.fetchSent({ limit });
+        const emails = await provider.fetchSent({ limit: perAccountLimit });
+
+        console.log(`[EmailService] Successfully fetched ${emails.length} sent emails for ${email} (requested ${perAccountLimit})`);
 
         // Tag each email with the source account
         return emails.map(e => ({ ...e, ownerEmail: email }));
@@ -279,5 +294,6 @@ export async function fetchAllSentEmails(
     return dateB - dateA;
   });
 
+  console.log(`[EmailService] Total sent emails fetched: ${allEmails.length} from ${accounts.length} accounts`);
   return allEmails;
 }

@@ -1972,14 +1972,24 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full w-full bg-background animate-in fade-in duration-300">
-        <div className="flex flex-col items-center gap-4">
-          <div className="relative">
-            <Loader2 className="w-12 h-12 animate-spin text-primary" />
-            <div className="absolute inset-0 w-12 h-12 border-4 border-primary/20 rounded-full"></div>
+        <div className="flex flex-col items-center gap-6 w-full max-w-md px-6">
+          {/* Modern spinner with gradient */}
+          <div className="relative w-16 h-16">
+            <div className="absolute inset-0 rounded-full border-4 border-primary/10"></div>
+            <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-primary border-r-primary/60 animate-spin"></div>
+            <div className="absolute inset-2 rounded-full bg-gradient-to-br from-primary/5 to-accent/5 flex items-center justify-center">
+              <Loader2 className="w-6 h-6 text-primary animate-spin" />
+            </div>
           </div>
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-base font-medium text-foreground">Loading tickets...</p>
+          <div className="flex flex-col items-center gap-2 text-center">
+            <p className="text-base font-semibold text-foreground">Loading tickets...</p>
             <p className="text-sm text-muted-foreground">Please wait while we fetch your tickets</p>
+          </div>
+          {/* Subtle pulse animation */}
+          <div className="flex gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-primary/40 animate-pulse" style={{ animationDelay: '0ms' }}></div>
+            <div className="w-2 h-2 rounded-full bg-primary/40 animate-pulse" style={{ animationDelay: '150ms' }}></div>
+            <div className="w-2 h-2 rounded-full bg-primary/40 animate-pulse" style={{ animationDelay: '300ms' }}></div>
           </div>
         </div>
       </div>
@@ -2959,10 +2969,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                       {!conversationMinimized && (
                         <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300 w-full max-w-full overflow-hidden">
                           {loadingThread ? (
-                            <div className="flex items-center justify-center py-8">
-                              <div className="flex flex-col items-center gap-2 animate-in fade-in duration-300">
-                                <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                                <p className="text-sm text-muted-foreground">Loading conversation...</p>
+                            <div className="flex items-center justify-center py-12">
+                              <div className="flex flex-col items-center gap-3 animate-in fade-in duration-300">
+                                <div className="relative w-10 h-10">
+                                  <div className="absolute inset-0 rounded-full border-2 border-primary/10"></div>
+                                  <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-primary border-r-primary/50 animate-spin"></div>
+                                  <div className="absolute inset-1 rounded-full bg-gradient-to-br from-primary/5 to-accent/5 flex items-center justify-center">
+                                    <Loader2 className="w-4 h-4 text-primary animate-spin" />
+                                  </div>
+                                </div>
+                                <p className="text-sm font-medium text-muted-foreground">Loading conversation...</p>
                               </div>
                             </div>
                           ) : threadMessages.length === 0 ? (
