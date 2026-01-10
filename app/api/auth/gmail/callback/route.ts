@@ -143,9 +143,16 @@ export async function GET(request: NextRequest) {
           .single();
 
         if (existingUser) {
+          // CRITICAL: Check if user is active
+          if (!existingUser.is_active) {
+            console.log('[Gmail Callback] Inactive user attempting OAuth login:', gmailEmail);
+            const errorMsg = encodeURIComponent('Your account has been deactivated. Please contact your administrator.');
+            return NextResponse.redirect(`${frontendUrl}/auth/landing?view=login&error=${errorMsg}`);
+          }
+
           userName = existingUser.name;
           console.log('Found existing user:', gmailEmail, 'accountType:', accountInfo.accountType, 'businessId:', businessId, 'role:', existingUser.role);
-          
+
           // CRITICAL FIX: If this is a business account and the email matches the business owner email,
           // ensure the user is admin (they might have been created as agent)
           if (businessId && existingUser.role !== 'admin') {
@@ -154,7 +161,7 @@ export async function GET(request: NextRequest) {
               .select('business_email')
               .eq('id', businessId)
               .single();
-            
+
             // Case-insensitive email comparison
             if (business && business.business_email?.toLowerCase() === gmailEmail.toLowerCase()) {
               console.log('[Gmail Callback] Business owner email detected, promoting user to admin:', userId, 'email:', gmailEmail, 'business_email:', business.business_email);
@@ -162,7 +169,7 @@ export async function GET(request: NextRequest) {
                 .from('users')
                 .update({ role: 'admin' })
                 .eq('id', userId);
-              
+
               if (updateError) {
                 console.error('[Gmail Callback] Error promoting user to admin:', updateError);
               } else {

@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       .from('users')
       .select('*, businesses(*)')
       .eq('email', normalizedEmail)
-      .eq('is_active', true)
+    // Don't filter by is_active yet - we want to give a specific error message
 
     let targetUser = null
     let targetBusiness = null
@@ -56,6 +56,15 @@ export async function POST(req: NextRequest) {
       const businessUser = users.find(u => u.business_id !== null)
       targetUser = businessUser || users[0]
       targetBusiness = targetUser?.businesses
+
+      // CRITICAL: Check if user is inactive (removed from business)
+      if (targetUser && !targetUser.is_active) {
+        console.error('[Login] Inactive user attempting login:', normalizedEmail)
+        return NextResponse.json(
+          { error: 'Your account has been deactivated. Please contact your administrator for more information.' },
+          { status: 403 }
+        )
+      }
     }
 
     // If user found in users table, verify password there

@@ -23,8 +23,8 @@ export function getCookieOptions(options?: {
 } {
   // Detect production environment
   // Vercel sets VERCEL=1, also check NODE_ENV
-  const isProduction = 
-    process.env.VERCEL === '1' || 
+  const isProduction =
+    process.env.VERCEL === '1' ||
     process.env.NODE_ENV === 'production' ||
     process.env.NEXT_PUBLIC_APP_URL?.startsWith('https://');
 
@@ -34,8 +34,30 @@ export function getCookieOptions(options?: {
   // If COOKIE_DOMAIN is set, use it (e.g., ".yourdomain.com" for subdomain sharing)
   // Otherwise, don't set domain (works for same domain)
   let domain: string | undefined = undefined;
-  if (isProduction && process.env.COOKIE_DOMAIN) {
-    domain = process.env.COOKIE_DOMAIN;
+  if (isProduction) {
+    // Check if COOKIE_DOMAIN is explicitly set
+    if (process.env.COOKIE_DOMAIN) {
+      domain = process.env.COOKIE_DOMAIN;
+    } else if (process.env.NEXT_PUBLIC_APP_URL) {
+      // Auto-detect: If APP_URL contains a domain, extract base domain for www compatibility
+      try {
+        const url = new URL(process.env.NEXT_PUBLIC_APP_URL);
+        const hostname = url.hostname;
+
+        // If hostname is www.example.com, set domain to .example.com
+        // If hostname is example.com, set domain to .example.com
+        // This makes cookies work for both www and non-www
+        const parts = hostname.split('.');
+        if (parts.length >= 2) {
+          // Get the last two parts (e.g., "amnii.io" from "www.amnii.io")
+          const baseDomain = parts.slice(-2).join('.');
+          domain = `.${baseDomain}`; // Leading dot makes it work for all subdomains
+          console.log('[Cookie Config] Setting domain for www compatibility:', domain);
+        }
+      } catch (e) {
+        console.warn('[Cookie Config] Failed to parse NEXT_PUBLIC_APP_URL:', e);
+      }
+    }
   }
   // Note: If you need cross-subdomain cookies, set COOKIE_DOMAIN=".yourdomain.com"
   // If not set, cookies will work for the exact domain only (recommended for security)
