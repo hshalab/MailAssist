@@ -255,29 +255,44 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
       return null
     }
 
-    // CRITICAL FIX: Validate that session belongs to current user
+    // CRITICAL PRODUCTION FIX: Validate that session belongs to current user
     // This prevents old business sessions from being used when signing in with a new email
     // STRICT MODE: Always require current_user_id to match session user_id
     // If current_user_id doesn't exist, the session is invalid (new account creation)
     if (!currentUserId) {
       console.log(`[Session] No current_user_id cookie found - invalidating session (likely new account)`);
+      // Delete the orphaned session from database (non-blocking)
+      if (supabase) {
+        supabase
+          .from('user_sessions')
+          .delete()
+          .eq('session_token', sessionToken)
+          .then(({ error }) => {
+            if (error) {
+              console.error('[Session] Error deleting orphaned session:', error);
+            } else {
+              console.log('[Session] Deleted orphaned session from database');
+            }
+          });
+      }
       return null;
     }
     
     if (session.user_id !== currentUserId) {
-      console.log(`[Session] Session user_id (${session.user_id}) does not match current_user_id (${currentUserId}) - invalidating session`);
-      // Also delete the invalid session from database to prevent reuse (non-blocking)
+      console.log(`[Session] MISMATCH: Session user_id (${session.user_id}) does not match current_user_id (${currentUserId}) - DELETING INVALID SESSION`);
+      // CRITICAL: Delete the invalid session from database immediately (blocking)
+      // This prevents the old session from being reused
       if (supabase) {
-        Promise.resolve(
-          supabase
-            .from('user_sessions')
-            .delete()
-            .eq('session_token', sessionToken)
-        ).then(() => {
-          console.log('[Session] Deleted invalid session from database');
-        }).catch((err: any) => {
-          console.error('[Session] Error deleting invalid session:', err);
-        });
+        const { error: deleteError } = await supabase
+          .from('user_sessions')
+          .delete()
+          .eq('session_token', sessionToken);
+        
+        if (deleteError) {
+          console.error('[Session] Error deleting invalid session:', deleteError);
+        } else {
+          console.log('[Session] Invalid session deleted from database successfully');
+        }
       }
       return null;
     }
