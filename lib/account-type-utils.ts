@@ -214,9 +214,17 @@ export async function canLoginWithGoogle(email: string): Promise<{
         return { canLogin: true, accountInfo };
     }
 
-    // UPDATED: Allow Google OAuth for ALL accounts (business and personal)
-    // Users should be able to use both Google OAuth and password login
-    // This provides maximum flexibility for users
+    // SECURITY POLICY: Block Google OAuth for business accounts
+    // Business accounts must use password login for better security control
+    if (accountInfo.accountType === 'business') {
+        return {
+            canLogin: false,
+            reason: 'Business accounts must sign in with password. Please use the password login instead of Google OAuth.',
+            accountInfo
+        };
+    }
+
+    // Personal accounts can use Google OAuth
     return { canLogin: true, accountInfo };
 }
 
