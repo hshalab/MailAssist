@@ -26,8 +26,14 @@ export interface AccountInfo {
 
 /**
  * Get comprehensive account information for an email
+ * @param email - Email address to look up
+ * @param preferredAccountType - Optional account type preference ('business' or 'personal')
+ *                               If specified, prioritizes finding an account of this type
  */
-export async function getAccountInfo(email: string): Promise<AccountInfo> {
+export async function getAccountInfo(
+    email: string,
+    preferredAccountType?: 'business' | 'personal'
+): Promise<AccountInfo> {
     const normalizedEmail = email.toLowerCase().trim();
 
     try {
@@ -86,41 +92,67 @@ export async function getAccountInfo(email: string): Promise<AccountInfo> {
             };
         }
 
-        // Prioritize users in this order:
-        // 1. Admin users (business owners)
-        // 2. Business accounts (non-admin)
-        // 3. Personal accounts
-        // Also check if any user's email matches the business owner email
+        // NEW: If preferred account type is specified, try to find it first
         let userToUse = users[0];
 
-        // First, try to find a user whose email matches the business owner email
-        for (const user of users) {
-            if (user.business_id) {
-                const { data: business } = await supabase
-                    .from('businesses')
-                    .select('business_email')
-                    .eq('id', user.business_id)
-                    .single();
+        if (preferredAccountType) {
+            console.log(`[getAccountInfo] Preferred account type requested: ${preferredAccountType}`);
 
-                if (business && business.business_email?.toLowerCase() === normalizedEmail) {
-                    userToUse = user;
-                    console.log('[getAccountInfo] Found business owner user:', user.id, 'role:', user.role);
-                    break;
-                }
+            // Try to find an account matching the preferred type
+            const preferredUser = users.find(u => {
+                const isPersonal = u.business_id === null;
+                const isBusiness = u.business_id !== null;
+                return preferredAccountType === 'personal' ? isPersonal : isBusiness;
+            });
+
+            if (preferredUser) {
+                userToUse = preferredUser;
+                console.log(`[getAccountInfo] Found ${preferredAccountType} account:`, preferredUser.id, 'role:', preferredUser.role);
+            } else {
+                console.log(`[getAccountInfo] No ${preferredAccountType} account found, falling back to prioritization`);
+                // Fall through to default prioritization below
             }
         }
 
-        // If no business owner found, prioritize admin users
-        if (!userToUse || userToUse.role !== 'admin') {
-            const adminUser = users.find(u => u.role === 'admin' && u.business_id !== null);
-            if (adminUser) {
-                userToUse = adminUser;
-                console.log('[getAccountInfo] Using admin user:', adminUser.id);
-            } else {
-                // Fallback: prioritize business accounts over personal
-                const businessUser = users.find(u => u.business_id !== null);
-                if (businessUser) {
-                    userToUse = businessUser;
+        // Default prioritization (used when no preference or preferred type not found):
+        // 1. Admin users (business owners)
+        // 2. Business accounts (non-admin)
+        // 3. Personal accounts
+        // Only apply if we didn't find a preferred account above
+        if (!preferredAccountType || !users.find(u => {
+            const isPersonal = u.business_id === null;
+            const isBusiness = u.business_id !== null;
+            return (preferredAccountType === 'personal' ? isPersonal : isBusiness) && u.id === userToUse.id;
+        })) {
+            // First, try to find a user whose email matches the business owner email
+            for (const user of users) {
+                if (user.business_id) {
+                    const { data: business } = await supabase
+                        .from('businesses')
+                        .select('business_email')
+                        .eq('id', user.business_id)
+                        .single();
+
+                    if (business && business.business_email?.toLowerCase() === normalizedEmail) {
+                        userToUse = user;
+                        console.log('[getAccountInfo] Found business owner user:', user.id, 'role:', user.role);
+                        break;
+                    }
+                }
+            }
+
+            // If no business owner found, prioritize admin users
+            if (!userToUse || userToUse.role !== 'admin') {
+                const adminUser = users.find(u => u.role === 'admin' && u.business_id !== null);
+                if (adminUser) {
+                    userToUse = adminUser;
+                    console.log('[getAccountInfo] Using admin user:', adminUser.id);
+                } else {
+                    // Fallback: prioritize business accounts over personal
+                    const businessUser = users.find(u => u.business_id !== null);
+                    if (businessUser) {
+                        userToUse = businessUser;
+                    }
                 }
             }
         }
