@@ -58,7 +58,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     }
     return false
   })
-  
+
   // CRITICAL: Set initial loading state to prevent empty state flash
   // Always start with loading=true to prevent empty state from flashing
   // Also check URL params immediately to catch OAuth return
@@ -71,14 +71,14 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     }
     return true
   })
-  
+
   // Check sessionStorage flag and URL params on mount to ensure skeleton shows immediately
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const skeletonFlag = sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
       const urlParams = new URLSearchParams(window.location.search)
       const isOAuthReturn = urlParams.get('auth') === 'success' || urlParams.get('connected') === 'true'
-      
+
       if (skeletonFlag || isOAuthReturn) {
         setShowSkeleton(true)
         setLoading(true) // Also ensure loading is true
@@ -91,7 +91,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   const emailCacheRef = useRef<Map<string, any>>(new Map())
   const prefetchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  const fetchEmails = async (newLimit = limit, isLoadMore = false, silent = false) => {
+  const fetchEmails = async (newLimit = limit, isLoadMore = false, silent = false, retryCount = 0) => {
     try {
       if (!silent) {
         if (isLoadMore) {
@@ -126,11 +126,24 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       // - Load more: Use 'default' to leverage browser cache for faster pagination
       // The API response includes Cache-Control headers (30s cache, 60s stale-while-revalidate)
       const response = await fetch(url, {
-        cache: isLoadMore ? 'default' : 'no-cache'
+        cache: isLoadMore ? 'default' : 'no-cache',
+        // CRITICAL: Add credentials to ensure cookies are sent
+        credentials: 'include'
       })
 
+      // CRITICAL FIX: Handle 401 with retry logic for race conditions on initial login
+      // When user first logs in, cookies might not be ready yet, so retry with exponential backoff
       if (!response.ok) {
         if (response.status === 401) {
+          // If this is initial load (not silent) and we haven't retried too many times, retry
+          const maxRetries = 3;
+          if (!silent && retryCount < maxRetries) {
+            const delay = Math.min(1000 * Math.pow(2, retryCount), 3000); // Exponential backoff: 1s, 2s, 3s max
+            console.log(`[EmailList] Auth not ready yet (attempt ${retryCount + 1}/${maxRetries}), retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return fetchEmails(newLimit, isLoadMore, silent, retryCount + 1);
+          }
+          // After max retries, show auth error
           setError('Not authenticated')
           return
         }
@@ -239,7 +252,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
         onLoadingChange?.(true)
       }
     }
-    
+
     // Ensure loading state is explicitly set to true before any async operations
     // This is critical for production builds where hydration timing differs
     setLoading(true)
@@ -273,7 +286,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewType, selectedAccount])
-  
+
   // Listen for account changes to refresh emails
   // This ensures ALL users (agents, managers, admins) see the changes
   useEffect(() => {
@@ -284,7 +297,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       setLoading(true)
       fetchEmails(150)
     }
-    
+
     // Also listen for storage events (cross-tab communication)
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'accountsChanged') {
@@ -294,10 +307,10 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
         fetchEmails(150)
       }
     }
-    
+
     window.addEventListener('accountsChanged', handleAccountsChanged)
     window.addEventListener('storage', handleStorageChange)
-    
+
     // Check on mount if accounts changed
     const checkAccountsChanged = () => {
       const accountsChanged = localStorage.getItem('accountsChanged')
@@ -309,7 +322,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       }
     }
     checkAccountsChanged()
-    
+
     return () => {
       window.removeEventListener('accountsChanged', handleAccountsChanged)
       window.removeEventListener('storage', handleStorageChange)
@@ -497,7 +510,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     }
     // Check if we are filtering by a specific account
     const isFiltering = !!selectedAccount;
-    
+
     // Only show "Connect Gmail" button if:
     // 1. We're in inbox view
     // 2. Not filtering by account

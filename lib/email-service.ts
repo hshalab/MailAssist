@@ -233,14 +233,34 @@ export async function fetchAllInboxEmails(
     })
   );
 
-  // Flatten and sort by date (newest first)
-  const allEmails = results.flat().sort((a, b) => {
+  // Flatten all emails
+  const allEmailsFlat = results.flat();
+
+  // CRITICAL FIX: Deduplicate emails by ID and threadId
+  // When multiple accounts are connected, the same email might appear in multiple inboxes
+  // (e.g., when CC'd, BCC'd, forwarded, or in shared mailboxes)
+  const seenIds = new Set<string>();
+  const deduplicatedEmails = allEmailsFlat.filter((email) => {
+    // Create a unique key using both email ID and threadId for more robust deduplication
+    const uniqueKey = `${email.id}|${email.threadId || email.id}`;
+
+    if (seenIds.has(uniqueKey)) {
+      console.log(`[EmailService] Skipping duplicate email: ${email.id} (Subject: ${email.subject})`);
+      return false; // Skip this duplicate
+    }
+
+    seenIds.add(uniqueKey);
+    return true; // Keep this email
+  });
+
+  // Sort by date (newest first)
+  const allEmails = deduplicatedEmails.sort((a, b) => {
     const dateA = new Date(a.date || 0).getTime();
     const dateB = new Date(b.date || 0).getTime();
     return dateB - dateA;
   });
 
-  console.log(`[EmailService] Total emails fetched: ${allEmails.length} from ${accounts.length} accounts`);
+  console.log(`[EmailService] Total emails after deduplication: ${allEmails.length} (removed ${allEmailsFlat.length - allEmails.length} duplicates) from ${accounts.length} accounts`);
   return allEmails;
 }
 
@@ -287,13 +307,32 @@ export async function fetchAllSentEmails(
     })
   );
 
-  // Flatten and sort by date (newest first)
-  const allEmails = results.flat().sort((a, b) => {
+  // Flatten all emails
+  const allEmailsFlat = results.flat();
+
+  // CRITICAL FIX: Deduplicate emails by ID and threadId
+  // When multiple accounts are connected, the same sent email might appear multiple times
+  const seenIds = new Set<string>();
+  const deduplicatedEmails = allEmailsFlat.filter((email) => {
+    // Create a unique key using both email ID and threadId for more robust deduplication
+    const uniqueKey = `${email.id}|${email.threadId || email.id}`;
+
+    if (seenIds.has(uniqueKey)) {
+      console.log(`[EmailService] Skipping duplicate sent email: ${email.id} (Subject: ${email.subject})`);
+      return false; // Skip this duplicate
+    }
+
+    seenIds.add(uniqueKey);
+    return true; // Keep this email
+  });
+
+  // Sort by date (newest first)
+  const allEmails = deduplicatedEmails.sort((a, b) => {
     const dateA = new Date(a.date || 0).getTime();
     const dateB = new Date(b.date || 0).getTime();
     return dateB - dateA;
   });
 
-  console.log(`[EmailService] Total sent emails fetched: ${allEmails.length} from ${accounts.length} accounts`);
+  console.log(`[EmailService] Total sent emails after deduplication: ${allEmails.length} (removed ${allEmailsFlat.length - allEmails.length} duplicates) from ${accounts.length} accounts`);
   return allEmails;
 }
