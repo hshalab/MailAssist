@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useRef, useState } from "react"
+import React, { useEffect, useRef, useState, useMemo } from "react"
 import DOMPurify from "isomorphic-dompurify"
 import { cn } from "@/lib/utils"
 import { useTheme } from "next-themes"
@@ -12,9 +12,152 @@ interface EmailContentViewerProps {
     className?: string
 }
 
+// Helper function to process email content (extracted for useMemo)
+function processEmailContent(
+    content: string,
+    emailId: string | undefined,
+    attachments: any[] | undefined,
+    remoteImagesAllowed: boolean
+): { processedContent: string; extractedStyles: string[]; blockedRemoteCount: number } {
+    if (!content) {
+        return { processedContent: "", extractedStyles: [], blockedRemoteCount: 0 }
+    }
+
+    // If message is plain text, preserve line breaks and auto-link URLs/emails
+    const isPlainText = !/\<\s*(p|div|br|table|img|ul|ol|li|span|style|body|html|blockquote)/i.test(content)
+    let normalizedContent = content
+
+    if (isPlainText) {
+        // Escape HTML entities first
+        normalizedContent = normalizedContent
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+
+        // Auto-link URLs (Gmail/Outlook style)
+        normalizedContent = normalizedContent.replace(
+            /\b(https?:\/\/[^\s<>"]+)/gi,
+            '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
+        )
+
+        // Auto-link email addresses
+        normalizedContent = normalizedContent.replace(
+            /\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})\b/g,
+            '<a href="mailto:$1">$1</a>'
+        )
+
+        // Auto-link phone numbers (basic patterns)
+        normalizedContent = normalizedContent.replace(
+            /\b(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b/g,
+            '<a href="tel:$1">$1</a>'
+        )
+
+        // Convert newlines to <br>
+        normalizedContent = normalizedContent.replace(/\n/g, '<br>')
+    }
+
+    // Extract style tags BEFORE sanitization to preserve their content
+    const styleTagRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi
+    const styles: string[] = []
+    let styleMatch
+    
+    styleTagRegex.lastIndex = 0
+    while ((styleMatch = styleTagRegex.exec(normalizedContent)) !== null) {
+        if (styleMatch[1]) {
+            styles.push(styleMatch[1].trim())
+        }
+    }
+    
+    // Remove style tags from content before sanitization
+    let contentWithoutStyles = normalizedContent
+    contentWithoutStyles = contentWithoutStyles.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    contentWithoutStyles = contentWithoutStyles.replace(/<style[^>]*>[\s\S]*?(?=<[^>]*>|$)/gi, '')
+    contentWithoutStyles = contentWithoutStyles.replace(/<style[^>]*>/gi, '')
+    contentWithoutStyles = contentWithoutStyles.replace(/<\/style>/gi, '')
+
+    // Configure DOMPurify
+    const clean = DOMPurify.sanitize(contentWithoutStyles, {
+        USE_PROFILES: { html: true },
+        ADD_TAGS: ['center', 'font', 'table', 'tbody', 'thead', 'tfoot', 'tr', 'td', 'th', 'div', 'span', 'p', 'br', 'hr', 'img', 'a', 'ul', 'ol', 'li', 'blockquote', 'b', 'strong', 'i', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
+        ADD_ATTR: ['style', 'target', 'href', 'src', 'width', 'height', 'align', 'valign', 'bgcolor', 'border', 'cellpadding', 'cellspacing', 'colspan', 'rowspan', 'class', 'id', 'alt', 'title'],
+        ADD_URI_SAFE_ATTR: ['src', 'href'],
+        ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|data|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+        FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button', 'svg', 'canvas', 'video', 'audio', 'style'],
+        FORBID_ATTR: ['onmouseover', 'onclick', 'onerror', 'onload', 'onmouseenter', 'onmouseleave']
+    })
+
+    let processed = clean
+    let remoteImageCount = 0
+    const transparentPixel = "data:image/gif;base64,R0lGODlhAQABAIAAAP///////ywAAAAAAQABAAACAUwAOw=="
+
+    // Replace CID images with attachment route
+    if (emailId && attachments?.length) {
+        attachments.forEach(att => {
+            const nameWithoutExt = att.filename?.replace(/\.[^.]+$/, '') || ''
+            const contentId = att.contentId || att.id
+            const patterns = [
+                `cid:${att.id}`, `cid:${contentId}`, `cid:${att.filename}`, `cid:${nameWithoutExt}`,
+                `<${att.id}>`, `<${contentId}>`, `<${att.filename}>`, `<${nameWithoutExt}>`
+            ].filter(Boolean).map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+            
+            const replacementSrc = att.data 
+                ? `data:${att.mimeType || 'application/octet-stream'};base64,${att.data}`
+                : `/api/emails/${emailId}/attachments/${att.id}`
+            
+            const cidRegex = new RegExp(`src=["'](?:${patterns.join('|')})["']`, 'gi')
+            processed = processed.replace(cidRegex, `src="${replacementSrc}"`)
+        })
+    }
+
+    // Handle remote images
+    processed = processed.replace(
+        /<img\s+([^>]*?)src=["']([^"']+)["']([^>]*)>/gi,
+        (match, beforeSrc, srcValue, afterSrc) => {
+            const hasLoading = /loading=/i.test(beforeSrc + afterSrc)
+            const hasDecoding = /decoding=/i.test(beforeSrc + afterSrc)
+            const isHttp = /^https?:\/\//i.test(srcValue)
+
+            if (isHttp) {
+                remoteImageCount += 1
+                if (!remoteImagesAllowed) {
+                    return `<img ${beforeSrc}src="${transparentPixel}" data-remote-src="${encodeURIComponent(srcValue)}" data-remote-blocked="true" alt="Remote image blocked" ${hasLoading ? '' : 'loading="lazy" '} ${hasDecoding ? '' : 'decoding="async" '} ${afterSrc}>`
+                }
+                const proxiedSrc = `/api/proxy/image?url=${encodeURIComponent(srcValue)}`
+                return `<img ${beforeSrc}src="${proxiedSrc}" ${hasLoading ? '' : 'loading="lazy" '} ${hasDecoding ? '' : 'decoding="async" '} ${afterSrc}>`
+            }
+            return `<img ${beforeSrc}src="${srcValue}" ${hasLoading ? '' : 'loading="lazy" '} ${hasDecoding ? '' : 'decoding="async" '} ${afterSrc}>`
+        }
+    )
+
+    // Hide tracking pixels
+    processed = processed.replace(/<img\s+([^>]*?)width=["']1["']\s*height=["']1["']([^>]*)>/gi, '<img $1width="1" height="1" style="display:none!important" $2>')
+    processed = processed.replace(/<img\s+([^>]*?)height=["']1["']\s*width=["']1["']([^>]*)>/gi, '<img $1height="1" width="1" style="display:none!important" $2>')
+
+    // Ensure links open in new tab
+    processed = processed.replace(
+        /<a\s+([^>]*href=["']([^"']+)["'][^>]*)>/gi,
+        (match, attrs, href) => {
+            const isExternal = /^https?:\/\//i.test(href) && !href.includes(window.location.hostname)
+            const hasTarget = /target=/i.test(attrs)
+            let newAttrs = attrs
+            if (!hasTarget) {
+                newAttrs += ' target="_blank" rel="noopener noreferrer"'
+            }
+            if (isExternal) {
+                newAttrs += ' data-external="true"'
+            }
+            return `<a ${newAttrs}>`
+        }
+    )
+
+    // Collapse quoted text
+    processed = processed.replace(/(<blockquote[^>]*>[\s\S]*?<\/blockquote>)/gi, '<div class="gmail-quote" data-collapsed="true">$1</div>')
+    processed = processed.replace(/(On\s+.+\s+wrote:?\s*<br\s*\/?>)/gi, '<div class="quote-header" data-collapsed="true">$1<button class="expand-quote" onclick="this.parentElement.classList.toggle(\'expanded\')">[...]</button></div><div class="quoted-content">')
+
+    return { processedContent: processed, extractedStyles: styles, blockedRemoteCount: remoteImageCount }
+}
+
 export function EmailContentViewer({ content, emailId, attachments, className }: EmailContentViewerProps) {
-    const [processedContent, setProcessedContent] = useState("")
-    const [extractedStyles, setExtractedStyles] = useState<string[]>([])
     const [iframeHeight, setIframeHeight] = useState(200)
     const [loading, setLoading] = useState(false)
     const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(true)
@@ -24,270 +167,30 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
     const { theme, resolvedTheme } = useTheme()
     const isDarkMode = (theme === "dark" || resolvedTheme === "dark")
 
+    // Process content synchronously using useMemo to avoid flash
+    const { processedContent, extractedStyles, blockedRemoteCount: computedBlockedCount } = useMemo(() => {
+        return processEmailContent(content, emailId, attachments, remoteImagesAllowed)
+    }, [content, emailId, attachments, remoteImagesAllowed])
+
     // Reset remote image permissions when switching emails
     useEffect(() => {
         setRemoteImagesAllowed(true)
         setBlockedRemoteCount(0)
     }, [emailId])
 
+    // Update blocked count when it changes
     useEffect(() => {
-        if (!content) {
-            setProcessedContent("")
-            setExtractedStyles([])
-            setLoading(false)
-            return
-        }
+        setBlockedRemoteCount(computedBlockedCount)
+    }, [computedBlockedCount])
 
-        // Only show loading overlay when actually switching to a new email
-        // Not when re-processing the same content due to parent re-renders
+    // Set loading state when switching emails
+    useEffect(() => {
         const isNewEmail = emailId !== previousEmailIdRef.current
-        if (isNewEmail) {
+        if (isNewEmail && processedContent) {
             setLoading(true)
-            setExtractedStyles([]) // Reset styles when switching emails
             previousEmailIdRef.current = emailId
         }
-
-        // If message is plain text, preserve line breaks and auto-link URLs/emails
-        const isPlainText = !/\<\s*(p|div|br|table|img|ul|ol|li|span|style|body|html|blockquote)/i.test(content)
-        let normalizedContent = content
-
-        if (isPlainText) {
-            // Escape HTML entities first
-            normalizedContent = normalizedContent
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-
-            // Auto-link URLs (Gmail/Outlook style)
-            normalizedContent = normalizedContent.replace(
-                /\b(https?:\/\/[^\s<>"]+)/gi,
-                '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
-            )
-
-            // Auto-link email addresses
-            normalizedContent = normalizedContent.replace(
-                /\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,})\b/g,
-                '<a href="mailto:$1">$1</a>'
-            )
-
-            // Auto-link phone numbers (basic patterns)
-            normalizedContent = normalizedContent.replace(
-                /\b(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})\b/g,
-                '<a href="tel:$1">$1</a>'
-            )
-
-            // Convert newlines to <br>
-            normalizedContent = normalizedContent.replace(/\n/g, '<br>')
-        }
-
-        // Extract style tags BEFORE sanitization to preserve their content
-        // Some emails have style tags in the body that get stripped by DOMPurify
-        // Use a more robust regex that handles various style tag formats
-        const styleTagRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi
-        const styles: string[] = []
-        let styleMatch
-        let lastIndex = 0
-        const tempContent = normalizedContent
-        
-        // Reset regex lastIndex to ensure we match all occurrences
-        styleTagRegex.lastIndex = 0
-        while ((styleMatch = styleTagRegex.exec(tempContent)) !== null) {
-            if (styleMatch[1]) {
-                styles.push(styleMatch[1].trim()) // Extract and trim the CSS content
-            }
-            lastIndex = styleTagRegex.lastIndex
-        }
-        
-        // Store extracted styles for injection into iframe head
-        setExtractedStyles(styles)
-        
-        // Remove style tags from content before sanitization (we'll add them back to iframe head)
-        // Use a more aggressive pattern that handles nested or malformed style tags
-        let contentWithoutStyles = normalizedContent
-        
-        // First pass: remove properly formatted style tags
-        contentWithoutStyles = contentWithoutStyles.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-        
-        // Second pass: remove any remaining style tags that might be malformed
-        contentWithoutStyles = contentWithoutStyles.replace(/<style[^>]*>[\s\S]*?(?=<[^>]*>|$)/gi, '')
-        
-        // Third pass: remove any standalone style opening tags
-        contentWithoutStyles = contentWithoutStyles.replace(/<style[^>]*>/gi, '')
-        contentWithoutStyles = contentWithoutStyles.replace(/<\/style>/gi, '')
-
-        // Configure DOMPurify to allow common email tags, attributes, and URI schemes
-        const clean = DOMPurify.sanitize(contentWithoutStyles, {
-            USE_PROFILES: { html: true },
-            // Allow common formatting tags (style tags are handled separately)
-            ADD_TAGS: ['center', 'font', 'table', 'tbody', 'thead', 'tfoot', 'tr', 'td', 'th', 'div', 'span', 'p', 'br', 'hr', 'img', 'a', 'ul', 'ol', 'li', 'blockquote', 'b', 'strong', 'i', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
-            ADD_ATTR: ['style', 'target', 'href', 'src', 'width', 'height', 'align', 'valign', 'bgcolor', 'border', 'cellpadding', 'cellspacing', 'colspan', 'rowspan', 'class', 'id', 'alt', 'title'],
-            ADD_URI_SAFE_ATTR: ['src', 'href'],
-            ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|data|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
-            // Forbid active/unsafe embeds
-            FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button', 'svg', 'canvas', 'video', 'audio', 'style'],
-            FORBID_ATTR: ['onmouseover', 'onclick', 'onerror', 'onload', 'onmouseenter', 'onmouseleave']
-        })
-
-        // Process the cleaned HTML - style tags have already been removed
-        let processed = clean
-        
-        // Gmail/Outlook behavior: Strip any CSS that appears as plain text
-        // This handles malformed emails where CSS leaks through without style tags
-        // Be aggressive like Gmail - remove CSS patterns that appear as text
-        if (processed.trim()) {
-            // Pattern to match CSS rules at the start (before HTML or email content)
-            // Matches: .selector { }, @media { }, property: value;
-            const cssPattern = /^([\s\n]*(?:\.[\w-]+\s*\{[^}]*\}|@media[^}]*\{[^}]*\}|@[^{]+\{[^}]*\}|[a-z-]+\s*:\s*[^;]+;)+[\s\n]*)+/i
-            
-            // Try to match CSS at the start
-            let cssMatch = processed.match(cssPattern)
-            
-            // If no match at start, try to find CSS anywhere before the first substantial content
-            if (!cssMatch) {
-                // Look for CSS patterns followed by email-like content
-                const cssWithContentPattern = /([\s\n]*(?:\.[\w-]+\s*\{[^}]*\}|@media[^}]*\{[^}]*\}|@[^{]+\{[^}]*\}|[a-z-]+\s*:\s*[^;]+;)+[\s\n]*)+(?=[A-Z][a-z]+\s+(placed|order|view|shipping|payment|delivery|total|subtotal|address)|<[a-z])/i
-                cssMatch = processed.match(cssWithContentPattern)
-            }
-            
-            if (cssMatch && cssMatch[0]) {
-                const potentialCss = cssMatch[0]
-                const cssStartIndex = processed.indexOf(potentialCss)
-                const afterCss = processed.substring(cssStartIndex + potentialCss.length).trim()
-                
-                // Verify it's CSS (has CSS structure)
-                const isCssBlock = potentialCss.includes('{') && 
-                                   potentialCss.includes('}') &&
-                                   (potentialCss.includes('.') || potentialCss.includes('@media') || potentialCss.includes('@') || potentialCss.includes(':'))
-                
-                // Check if followed by actual email content (not more CSS)
-                const hasEmailContent = afterCss.length > 0 && 
-                                       (!afterCss.match(/^[\s\n]*(?:\.[\w-]+\s*\{|@media|@[^{]+\{)/i) && // Not more CSS
-                                        (afterCss.startsWith('<') || // HTML tags
-                                         /^[A-Z][a-z]+/.test(afterCss) || // Name/word
-                                         /placed order|order summary|view order|shipping|payment|delivery|total|subtotal|address/i.test(afterCss) ||
-                                         afterCss.length > 15)) // Substantial content
-                
-                if (isCssBlock && hasEmailContent) {
-                    // Remove the CSS block (like Gmail/Outlook do)
-                    processed = processed.substring(0, cssStartIndex) + processed.substring(cssStartIndex + potentialCss.length)
-                    processed = processed.trim()
-                }
-            }
-        }
-        
-        // Process the cleaned HTML to handle images
-        let remoteImageCount = 0
-
-        const transparentPixel = "data:image/gif;base64,R0lGODlhAQABAIAAAP///////ywAAAAAAQABAAACAUwAOw=="
-
-        // Replace CID images with attachment route (robust patterns)
-        // Gmail attachments use /api route, IMAP attachments may have inline data
-        if (emailId && attachments?.length) {
-            attachments.forEach(att => {
-                const nameWithoutExt = att.filename?.replace(/\.[^.]+$/, '') || ''
-                const contentId = att.contentId || att.id
-
-                // Build list of possible CID patterns this attachment might match
-                const patterns = [
-                    `cid:${att.id}`,
-                    `cid:${contentId}`,
-                    `cid:${att.filename}`,
-                    `cid:${nameWithoutExt}`,
-                    `<${att.id}>`,
-                    `<${contentId}>`,
-                    `<${att.filename}>`,
-                    `<${nameWithoutExt}>`
-                ].filter(Boolean).map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-
-                // Determine replacement src: inline data URI for IMAP, API route for Gmail
-                let replacementSrc: string
-                if (att.data) {
-                    // IMAP-style: attachment has inline base64 data
-                    replacementSrc = `data:${att.mimeType || 'application/octet-stream'};base64,${att.data}`
-                } else {
-                    // Gmail-style: fetch via API route
-                    replacementSrc = `/api/emails/${emailId}/attachments/${att.id}`
-                }
-
-                const cidRegex = new RegExp(`src=["'](?:${patterns.join('|')})["']`, 'gi')
-                processed = processed.replace(cidRegex, `src="${replacementSrc}"`)
-            })
-        }
-
-        // Outlook/Gmail-style remote image handling: block remote loads until user opts in
-        processed = processed.replace(
-            /<img\s+([^>]*?)src=["']([^"']+)["']([^>]*)>/gi,
-            (match, beforeSrc, srcValue, afterSrc) => {
-                const hasLoading = /loading=/i.test(beforeSrc + afterSrc)
-                const hasDecoding = /decoding=/i.test(beforeSrc + afterSrc)
-                const isDataUri = srcValue.startsWith('data:')
-                const isAlreadyProxied = srcValue.startsWith('/api/proxy/image')
-                const isHttp = /^https?:\/\//i.test(srcValue)
-
-                if (isHttp) {
-                    remoteImageCount += 1
-
-                    if (!remoteImagesAllowed) {
-                        return `<img ${beforeSrc}src="${transparentPixel}" data-remote-src="${encodeURIComponent(srcValue)}" data-remote-blocked="true" alt="Remote image blocked" ${hasLoading ? '' : 'loading="lazy" '} ${hasDecoding ? '' : 'decoding="async" '} ${afterSrc}>`
-                    }
-
-                    const proxiedSrc = `/api/proxy/image?url=${encodeURIComponent(srcValue)}`
-                    return `<img ${beforeSrc}src="${proxiedSrc}" ${hasLoading ? '' : 'loading="lazy" '} ${hasDecoding ? '' : 'decoding="async" '} ${afterSrc}>`
-                }
-
-                // For cid/data/relative images just ensure lazy/async
-                return `<img ${beforeSrc}src="${srcValue}" ${hasLoading ? '' : 'loading="lazy" '} ${hasDecoding ? '' : 'decoding="async" '} ${afterSrc}>`
-            }
-        )
-
-        // Gmail/Outlook: Hide tracking pixels (1x1 images)
-        processed = processed.replace(
-            /<img\s+([^>]*?)width=["']1["']\s*height=["']1["']([^>]*)>/gi,
-            '<img $1width="1" height="1" style="display:none!important" $2>'
-        )
-        processed = processed.replace(
-            /<img\s+([^>]*?)height=["']1["']\s*width=["']1["']([^>]*)>/gi,
-            '<img $1height="1" width="1" style="display:none!important" $2>'
-        )
-
-        setBlockedRemoteCount(remoteImageCount)
-
-        // Ensure links open in new tab and add external link indicator
-        processed = processed.replace(
-            /<a\s+([^>]*href=["']([^"']+)["'][^>]*)>/gi,
-            (match, attrs, href) => {
-                const isExternal = /^https?:\/\//i.test(href) && !href.includes(window.location.hostname)
-                const hasTarget = /target=/i.test(attrs)
-
-                let newAttrs = attrs
-                if (!hasTarget) {
-                    newAttrs += ' target="_blank" rel="noopener noreferrer"'
-                }
-
-                // Add data attribute for external links (can be styled in CSS)
-                if (isExternal) {
-                    newAttrs += ' data-external="true"'
-                }
-
-                return `<a ${newAttrs}>`
-            }
-        )
-
-        // Gmail-style: Collapse quoted text (lines starting with > or quoted blocks)
-        // Wrap quoted sections in a collapsible container
-        processed = processed.replace(
-            /(<blockquote[^>]*>[\s\S]*?<\/blockquote>)/gi,
-            '<div class="gmail-quote" data-collapsed="true">$1</div>'
-        )
-
-        // Detect "On ... wrote:" pattern and wrap following content
-        processed = processed.replace(
-            /(On\s+.+\s+wrote:?\s*<br\s*\/?>)/gi,
-            '<div class="quote-header" data-collapsed="true">$1<button class="expand-quote" onclick="this.parentElement.classList.toggle(\'expanded\')">[...]</button></div><div class="quoted-content">'
-        )
-
-        setProcessedContent(processed)
-    }, [content, emailId, attachments, remoteImagesAllowed])
+    }, [emailId, processedContent])
 
     // Wait for all images to load before calculating height
     const waitForImages = (iframeDoc: Document): Promise<void> => {
@@ -358,11 +261,16 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
                 if (!iframeDoc) return
                 waitForImages(iframeDoc).then(() => {
-                    measureHeight()
-                    setLoading(false)
+                    // Check if component is still mounted and iframe still exists
+                    if (iframeRef.current === iframe) {
+                        measureHeight()
+                        setLoading(false)
+                    }
                 })
             } catch {
-                setLoading(false)
+                if (iframeRef.current === iframe) {
+                    setLoading(false)
+                }
             }
         }
         const imagesTimer = setTimeout(scheduleAfterImages, 100)
@@ -375,7 +283,10 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 if (!iframeDoc?.body) return
 
                 resizeObserver = new ResizeObserver(() => {
-                    measureHeight()
+                    // Throttle resize updates to prevent excessive re-renders
+                    if (iframeRef.current === iframe) {
+                        measureHeight()
+                    }
                 })
                 resizeObserver.observe(iframeDoc.body)
             } catch (error) {
@@ -389,7 +300,11 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             clearTimeout(imagesTimer)
             clearTimeout(observerTimer)
             clearTimeout(loadingFallback)
-            resizeObserver?.disconnect()
+            // CRITICAL: Always disconnect ResizeObserver to prevent memory leaks
+            if (resizeObserver) {
+                resizeObserver.disconnect()
+                resizeObserver = null
+            }
         }
     }, [processedContent])
 

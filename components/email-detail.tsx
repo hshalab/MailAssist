@@ -184,9 +184,19 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
   const latestRequestRef = useRef(0)
   const prevEmailIdRef = useRef<string | null>(null)
+  const transitionTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (emailId) {
+      // CRITICAL: Clean up previous request and timers when switching emails
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current)
+      }
+
       // Only clear state if switching to a different email
       const isDifferentEmail = prevEmailIdRef.current !== emailId
       prevEmailIdRef.current = emailId
@@ -225,7 +235,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         setIsTransitioning(true)
 
         // Brief delay to allow fade-out effect
-        setTimeout(() => {
+        transitionTimeoutRef.current = setTimeout(() => {
           setLoadingFullContent(false)
 
           // If we already set the data above, skip re-setting it
@@ -307,22 +317,39 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       latestRequestRef.current += 1
       const requestToken = latestRequestRef.current
 
+      // Create new AbortController for this request
+      abortControllerRef.current = new AbortController()
+
       // Fetch the email content immediately (guarded by current token)
       if (isDifferentEmail) {
-        fetchThread(requestToken)
+        fetchThread(requestToken, abortControllerRef.current.signal)
+      }
+    }
+
+    // Cleanup function
+    return () => {
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current)
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
       }
     }
   }, [emailId, initialEmailData])
 
-  const fetchThread = async (requestToken?: number) => {
+  const fetchThread = async (requestToken?: number, signal?: AbortSignal) => {
     try {
       setError(null)
 
       // PERFORMANCE: Use force-cache to leverage browser cache from prefetch
       // This makes email loading instant if it was prefetched
       const emailResponse = await fetch(`/api/emails/${emailId}`, {
-        cache: 'force-cache'
+        cache: 'force-cache',
+        signal
       })
+
+      // Check if request was aborted
+      if (signal?.aborted) return
 
       if (!emailResponse.ok) {
         throw new Error('Failed to fetch email')
@@ -332,6 +359,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       const email: EmailSummary = emailData.email
       // If user switched emails, abort applying this result
       if (requestToken && requestToken !== latestRequestRef.current) return
+      if (signal?.aborted) return
 
       // Update email summary with full data
       setEmailSummary(email)
@@ -339,13 +367,19 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
       // Now fetch the thread using the threadId
       const threadId = email.threadId || emailId
-      const threadResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`)
+      const threadResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`, {
+        signal
+      })
+
+      // Check if request was aborted
+      if (signal?.aborted) return
 
       if (threadResponse.ok) {
         const threadData = await threadResponse.json()
         // Fix: thread data is nested under 'thread' key from API
         const thread: EmailMessage[] = threadData.thread?.messages || threadData.messages || []
         if (requestToken && requestToken !== latestRequestRef.current) return
+        if (signal?.aborted) return
 
         if (thread.length > 0) {
           setThreadMessages(thread)
@@ -367,6 +401,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       } else {
         // Thread fetch failed, show single email with attachments
         if (requestToken && requestToken !== latestRequestRef.current) return
+        if (signal?.aborted) return
         setThreadMessages([{
           id: email.id,
           threadId: email.threadId,
@@ -381,6 +416,10 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         }])
       }
     } catch (err) {
+      // Ignore abort errors
+      if (err instanceof Error && err.name === 'AbortError') {
+        return
+      }
       console.error('Error fetching email:', err)
       setError(err instanceof Error ? err.message : 'Failed to load email')
       setLoading(false)

@@ -195,7 +195,13 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
   }, [viewType, onSelectEmail])
 
   // Auto-refresh every 30 seconds to pick up department classifications
+  // PERFORMANCE: Skip auto-refresh if user has an email selected (reduces load)
   useEffect(() => {
+    // Don't auto-refresh if user is viewing an email (reduces unnecessary requests)
+    if (selectedEmail) {
+      return () => {} // Return empty cleanup function to keep dependency array consistent
+    }
+
     const interval = setInterval(() => {
       if (emailListRefresh && !listLoading) {
         emailListRefresh()
@@ -204,7 +210,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
     }, 30000) // 30 seconds
 
     return () => clearInterval(interval)
-  }, [emailListRefresh, listLoading])
+  }, [emailListRefresh, listLoading, selectedEmail])
 
   // Memoized callback to prevent infinite loops
   const handleRefreshReady = useCallback((refreshFn: () => void) => {

@@ -88,6 +88,8 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   }, []) // Run only on mount
 
   // Client-side cache for email details to make clicking instant
+  // PERFORMANCE: Limit cache size to prevent memory leaks
+  const MAX_CACHE_SIZE = 50 // Limit to 50 emails in cache
   const emailCacheRef = useRef<Map<string, any>>(new Map())
   const prefetchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -224,6 +226,16 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       })
       if (response.ok) {
         const data = await response.json()
+        
+        // PERFORMANCE: Limit cache size - remove oldest entries if cache is full
+        if (emailCacheRef.current.size >= MAX_CACHE_SIZE) {
+          // Remove first (oldest) entry
+          const firstKey = emailCacheRef.current.keys().next().value
+          if (firstKey) {
+            emailCacheRef.current.delete(firstKey)
+          }
+        }
+        
         emailCacheRef.current.set(emailId, data.email)
       }
     } catch (err) {
@@ -256,14 +268,20 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   }, [onRefreshReady, handleRefresh])
 
   // Auto-poll for new emails every 30 seconds (silent refresh)
+  // PERFORMANCE: Skip polling if user has an email selected (reduces load)
   useEffect(() => {
+    // Don't poll if user is viewing an email (reduces unnecessary requests)
+    if (selectedEmail) {
+      return () => {} // Return empty cleanup function to keep dependency array consistent
+    }
+
     const pollInterval = setInterval(() => {
       console.log('Auto-polling for new emails...')
       fetchEmails(limit, false, true)
     }, 30000) // 30 seconds
 
     return () => clearInterval(pollInterval)
-  }, [limit])
+  }, [limit, selectedEmail])
 
   // Initial fetch on mount and when viewType or selectedAccount changes
   useEffect(() => {
