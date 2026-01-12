@@ -262,13 +262,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [bulkUpdating, setBulkUpdating] = useState(false)
   const [bulkProgress, setBulkProgress] = useState<{ id: string; status: 'pending' | 'success' | 'error'; message?: string }[]>([])
   const [lastBulkUpdates, setLastBulkUpdates] = useState<{ status?: Ticket["status"]; assigneeUserId?: string | null; tags?: string[] } | null>(null)
-  const [showShortcutsModal, setShowShortcutsModal] = useState(false)
-
-  // Refs to hold latest values for keyboard handler (avoid re-attaching listener each render)
-  const filteredTicketsRef = useRef<Ticket[]>([])
-  const selectedTicketRef = useRef<Ticket | null>(null)
-  const isSelectModeRef = useRef<boolean>(false)
-  const handleUpdateStatusRef = useRef<(status: Ticket["status"], ticketId?: string) => Promise<void> | undefined>(undefined as any)
 
   // Filters collapse state - collapsed by default
   const [filtersExpanded, setFiltersExpanded] = useState(false)
@@ -290,8 +283,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const conversationScrollRef = useRef<HTMLDivElement>(null)
   const savedScrollPositionRef = useRef<number>(0)
   const ticketListRef = useRef<HTMLDivElement>(null)
-  const searchInputRef = useRef<HTMLInputElement>(null)
-  const replyTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Panel width preferences - load from localStorage with proper state management
   const getInitialPanelSizes = (): number[] => {
@@ -886,122 +877,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [currentUserId])
 
-  // Keyboard shortcuts
-  // Use refs to hold latest values so we can attach a single listener once
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const activeTag = (document.activeElement?.tagName || "").toLowerCase()
-      const isTypingInInput = ["input", "textarea", "select"].includes(activeTag) || (document.activeElement as HTMLElement | null)?.isContentEditable
-      if (isTypingInInput) return
-
-      const filtered = filteredTicketsRef.current
-      const selected = selectedTicketRef.current
-      const selectByOffset = (offset: number) => {
-        if (!filtered.length) return
-        const currentIndex = selected ? filtered.findIndex(t => t.id === selected.id) : -1
-        let nextIndex = currentIndex + offset
-        if (nextIndex < 0) nextIndex = 0
-        if (nextIndex >= filtered.length) nextIndex = filtered.length - 1
-        const nextTicket = filtered[nextIndex]
-        if (nextTicket) {
-          setSelectedTicket(nextTicket)
-          setSelectedTicketIds(new Set([nextTicket.id]))
-        }
-      }
-
-      // Arrow navigation (list)
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        selectByOffset(1)
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        selectByOffset(-1)
-      }
-      // Panel focus
-      if (e.key === 'ArrowLeft') {
-        ticketListRef.current?.focus({ preventScroll: false } as any)
-      }
-      if (e.key === 'ArrowRight') {
-        replyTextareaRef.current?.focus()
-      }
-
-      // Gmail-style
-      if (e.key.toLowerCase() === 'j') {
-        e.preventDefault()
-        selectByOffset(1)
-      }
-      if (e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        selectByOffset(-1)
-      }
-
-      // Reply
-      if (e.key.toLowerCase() === 'r') {
-        e.preventDefault()
-        replyTextareaRef.current?.focus()
-      }
-
-      // Assign dialog (block agents from opening for others)
-      if (e.key.toLowerCase() === 'a') {
-        e.preventDefault()
-        if (!selected) return
-        if (currentUserRole === 'agent' && selected.assigneeUserId && selected.assigneeUserId !== currentUserId) {
-          toast({
-            title: "Permission denied",
-            description: "Agents can only assign tickets to themselves.",
-            variant: "destructive"
-          })
-          return
-        }
-        setPendingAssignment({ ticketId: selected.id, assigneeUserId: selected.assigneeUserId || null })
-        setShowAssignDialog(true)
-      }
-
-      // Close ticket
-      if (e.key.toLowerCase() === 'c') {
-        e.preventDefault()
-        // Call latest handleUpdateStatus via ref
-        handleUpdateStatusRef.current?.("closed")
-      }
-
-      // Focus search
-      if (e.key.toLowerCase() === 's') {
-        e.preventDefault()
-        searchInputRef.current?.focus()
-      }
-
-      // Shortcuts modal
-      if (e.key === '?') {
-        e.preventDefault()
-        setShowShortcutsModal(true)
-      }
-
-      // Ctrl+K or Cmd+K to toggle select mode
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault()
-        const next = !isSelectModeRef.current
-        setIsSelectMode(next)
-        if (isSelectModeRef.current) {
-          setSelectedTicketIds(new Set())
-        }
-      }
-      // Ctrl+A to select all when in select mode
-      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && isSelectModeRef.current) {
-        e.preventDefault()
-        const allIds = new Set(filtered.map(t => t.id))
-        setSelectedTicketIds(allIds)
-      }
-      // Escape to exit select mode
-      if (e.key === 'Escape' && isSelectModeRef.current) {
-        setIsSelectMode(false)
-        setSelectedTicketIds(new Set())
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [toast])
 
   const fetchQuickReplies = async () => {
     try {
@@ -2211,13 +2086,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
   const filteredTickets = getFilteredTickets()
 
-  // Keep refs in sync with latest values used by keyboard handler
-  useEffect(() => {
-    filteredTicketsRef.current = filteredTickets
-    selectedTicketRef.current = selectedTicket
-    isSelectModeRef.current = isSelectMode
-    handleUpdateStatusRef.current = handleUpdateStatus
-  }, [filteredTickets, selectedTicket, isSelectMode, handleUpdateStatus])
 
   // Show loading spinner only if loading AND no tickets yet
   // If tickets exist but are being created, show tickets list with banner instead
@@ -3751,50 +3619,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           </>
         )}
       </ResizablePanelGroup>
-
-      {/* Shortcuts Help */}
-      <Dialog open={showShortcutsModal} onOpenChange={setShowShortcutsModal}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Keyboard Shortcuts</DialogTitle>
-            <DialogDescription>Navigate and act faster</DialogDescription>
-          </DialogHeader>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
-              <span>Next / Previous</span>
-              <span className="text-xs text-muted-foreground">J / K or ↑ / ↓</span>
-            </div>
-            <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
-              <span>Focus search</span>
-              <span className="text-xs text-muted-foreground">S</span>
-            </div>
-            <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
-              <span>Reply</span>
-              <span className="text-xs text-muted-foreground">R</span>
-            </div>
-            <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
-              <span>Assign</span>
-              <span className="text-xs text-muted-foreground">A</span>
-            </div>
-            <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
-              <span>Close ticket</span>
-              <span className="text-xs text-muted-foreground">C</span>
-            </div>
-            <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
-              <span>Toggle select mode</span>
-              <span className="text-xs text-muted-foreground">Ctrl/Cmd + K</span>
-            </div>
-            <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
-              <span>Select all (select mode)</span>
-              <span className="text-xs text-muted-foreground">Ctrl/Cmd + A</span>
-            </div>
-            <div className="flex items-center justify-between rounded border border-border/60 px-3 py-2">
-              <span>Open shortcuts</span>
-              <span className="text-xs text-muted-foreground">?</span>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Assignment Dialog with Priority Selection */}
       <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
