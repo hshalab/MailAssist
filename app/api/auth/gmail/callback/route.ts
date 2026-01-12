@@ -173,7 +173,7 @@ export async function GET(request: NextRequest) {
           // CRITICAL: Check if user is active
           if (!existingUser.is_active) {
             console.log('[Gmail Callback] Inactive user attempting OAuth login:', gmailEmail);
-            const errorMsg = encodeURIComponent('Your account has been deactivated. Please contact your administrator.');
+            const errorMsg = encodeURIComponent('You have been removed from this team by an administrator. If you believe this is a mistake, please contact your team administrator.');
             return NextResponse.redirect(`${frontendUrl}/auth/landing?view=login&error=${errorMsg}`);
           }
 

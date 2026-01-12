@@ -82,12 +82,12 @@ export async function POST(
     // Get user info for logging
     let userEmail = getSessionUserEmailFromRequest(request as any);
     const userId = getCurrentUserIdFromRequest(request as any);
-    
+
     // CRITICAL FIX: For invited users, get the connected Gmail account email
     if (!userEmail) {
       const { validateBusinessSession } = await import('@/lib/session');
       const businessSession = await validateBusinessSession();
-      
+
       if (businessSession?.businessId) {
         const { loadBusinessTokens } = await import('@/lib/storage');
         const connectedAccounts = await loadBusinessTokens(businessSession.businessId, businessSession?.email || undefined);
@@ -97,12 +97,12 @@ export async function POST(
         }
       }
     }
-    
+
     // Find the original draft to compare if it was edited
     let originalDraftText = '';
     let draftId = body?.draftId || null;
     let wasEdited = false;
-    
+
     if (draftId && userEmail) {
       try {
         const drafts = await loadDrafts(userId || null);
@@ -119,12 +119,12 @@ export async function POST(
 
     // CRITICAL FIX: For invited users, get tokens from business-connected accounts
     let tokens = await getValidTokens();
-    
+
     if (!tokens || !tokens.access_token) {
       // Check if this is a business account user (invited agent/manager)
       const { validateBusinessSession } = await import('@/lib/session');
       const businessSession = await validateBusinessSession();
-      
+
       if (businessSession?.businessId) {
         // For business accounts, try to get tokens from business-connected accounts
         const { loadBusinessTokens } = await import('@/lib/storage');
@@ -136,7 +136,7 @@ export async function POST(
         }
       }
     }
-    
+
     if (!tokens || !tokens.access_token) {
       return NextResponse.json(
         { error: 'Not authenticated. Please connect Gmail or ensure your business has connected email accounts.' },
@@ -190,8 +190,8 @@ export async function POST(
         fromAddress = userEmail;
       } else {
         // Fallback: get from profile
-      const profile = await getUserProfile(tokens);
-      fromAddress = profile?.emailAddress || undefined;
+        const profile = await getUserProfile(tokens);
+        fromAddress = profile?.emailAddress || undefined;
       }
     } catch {
       // best-effort, fallback handled below
@@ -199,7 +199,7 @@ export async function POST(
         fromAddress = userEmail;
       }
     }
-    
+
     console.log(`[Reply API] Sending email FROM: ${fromAddress} (userEmail: ${userEmail})`);
 
     const sentMessage = await sendReplyMessage(tokens, {
@@ -258,12 +258,53 @@ export async function POST(
           // Don't throw - draft deletion failure shouldn't break the send
         }
       }
+
+      // Auto-assign ticket to replier if unassigned
+      if (userId && incomingEmail.threadId) {
+        try {
+          const { getTicketById, assignTicket, ensureTicketForEmail } = await import('@/lib/tickets');
+
+          // 1. Ensure ticket exists and has updated timestamps/status
+          // This handles creating the ticket if missing, and updating lastAgentReplyAt/status
+          const ticketEmailLike = {
+            id: sentMessage?.id || `sent-${Date.now()}`,
+            threadId: incomingEmail.threadId,
+            subject: incomingEmail.subject || '(No Subject)',
+            from: fromAddress || userEmail || 'me',
+            to: replyRecipient,
+            date: new Date().toISOString()
+          };
+
+          let ticket = await ensureTicketForEmail(ticketEmailLike, true); // true = isFromAgent
+          if (ticket) {
+            ticketId = ticket.id;
+          }
+
+          // 2. Auto-assign if unassigned
+          if (ticket && !ticket.assigneeUserId) {
+            // CRITICAL: Verify user is active before auto-assigning
+            const { getUserById } = await import('@/lib/users');
+            const replierUser = await getUserById(userId);
+            if (replierUser && replierUser.isActive) {
+              console.log(`[Reply] Auto-assigning unassigned ticket ${ticket.id} to replier ${userId}`);
+              await assignTicket(ticket.id, userId, userEmail, userId);
+              // Refresh ticket to get latest state including assignment
+              // ticket = await getTicketById(ticket.id, userId, true, userEmail);
+            } else {
+              console.warn(`[Reply] Skipping auto-assignment - replier ${userId} is inactive`);
+            }
+          }
+        } catch (assignError) {
+          console.warn('[Reply] Failed to auto-assign/update ticket:', assignError);
+        }
+      }
     }
 
     return NextResponse.json({
       success: true,
       messageId: sentMessage?.id ?? null,
       threadId: sentMessage?.threadId ?? incomingEmail.threadId ?? null,
+      ticketId: ticketId
     });
   } catch (error) {
     console.error('[Reply] Failed to send draft reply:', error);

@@ -62,18 +62,18 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const prevUnreadIdsRef = useRef<Set<string>>(new Set())
   const { toast } = useToast()
-  
+
   // Local state for search input to prevent clearing while typing
   const [localSearchValue, setLocalSearchValue] = useState(searchValue)
   const isTypingRef = useRef(false)
-  
-  // Sync with prop when it changes externally (but don't override user typing)
-  useEffect(() => {
-    // Only sync if we're not currently typing (prevents clearing while user types)
-    if (!isTypingRef.current && searchValue !== localSearchValue) {
-      setLocalSearchValue(searchValue)
-    }
-  }, [searchValue, localSearchValue])
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const prevSearchValueRef = useRef(searchValue)
+
+  // Sync with prop when it changes externally (using ref to avoid dependency issues)
+  if (searchValue !== prevSearchValueRef.current && !isTypingRef.current) {
+    prevSearchValueRef.current = searchValue
+    setLocalSearchValue(searchValue)
+  }
 
   const fetchNotifications = async (opts?: { showToast?: boolean }) => {
     setNotificationsLoading(true)
@@ -257,36 +257,40 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
                 if (onSearch) {
                   onSearch(value) // Update parent state
                 }
-                // Reset typing flag after a short delay
-                setTimeout(() => {
+                // Clear any previous timeout
+                if (typingTimeoutRef.current) {
+                  clearTimeout(typingTimeoutRef.current)
+                }
+                // Reset typing flag after user stops typing (1000ms delay for slow typing)
+                typingTimeoutRef.current = setTimeout(() => {
                   isTypingRef.current = false
-                }, 100)
+                }, 1000)
               }}
             />
             {/* Clear button - only show when there's a search value */}
             {localSearchValue && (
-            <button
-              type="button"
-              onClick={(e) => {
+              <button
+                type="button"
+                onClick={(e) => {
                   e.preventDefault()
                   setLocalSearchValue('') // Clear local state immediately
                   if (onSearch) {
                     onSearch('') // Clear parent state
                   }
                   // Focus the input after clearing
-                const form = e.currentTarget.closest('form')
-                const input = form?.querySelector<HTMLInputElement>('input[name="global-search"]')
-                if (input) {
-                  input.focus()
-                }
-              }}
+                  const form = e.currentTarget.closest('form')
+                  const input = form?.querySelector<HTMLInputElement>('input[name="global-search"]')
+                  if (input) {
+                    input.focus()
+                  }
+                }}
                 className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-md hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="Clear search"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+                aria-label="Clear search"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             )}
           </form>
         )}

@@ -33,7 +33,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { UserPlus, Mail, User, Shield, Clock, CheckCircle2, XCircle, Loader2, Users } from "lucide-react"
+import { UserPlus, Mail, User, Shield, Clock, CheckCircle2, XCircle, Loader2, Users, Trash2, AlertTriangle } from "lucide-react"
 
 interface TeamMember {
   id: string
@@ -88,6 +88,11 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
   const [editMemberFullAccess, setEditMemberFullAccess] = useState(false)
   const [savingDepartments, setSavingDepartments] = useState(false)
 
+  // Delete member dialog
+  const [deleteMemberDialogOpen, setDeleteMemberDialogOpen] = useState(false)
+  const [memberToDelete, setMemberToDelete] = useState<TeamMember | null>(null)
+  const [deletingMember, setDeletingMember] = useState(false)
+
   // State to hold fresh user data from API
   const [freshUserData, setFreshUserData] = useState<{ businessId?: string | null; role?: string } | null>(null)
 
@@ -119,7 +124,7 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
         console.error('[TeamManagement] Error fetching current user:', error)
       }
     }
-    
+
     fetchCurrentUser()
   }, []) // Run once on mount
 
@@ -370,6 +375,42 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
     }
   }
 
+  const handleRemoveMember = async (member: TeamMember) => {
+    setMemberToDelete(member)
+    setDeleteMemberDialogOpen(true)
+  }
+
+  const confirmRemoveMember = async () => {
+    if (!memberToDelete) return
+
+    setDeletingMember(true)
+    setError(null)
+
+    try {
+      const response = await fetch(`/api/users/${memberToDelete.id}`, {
+        method: "DELETE",
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        setError(data.error || "Failed to remove team member")
+        return
+      }
+
+      setSuccess(`Successfully removed ${memberToDelete.name} from the team`)
+      setDeleteMemberDialogOpen(false)
+      setMemberToDelete(null)
+
+      // Reload team data to reflect the changes
+      await loadTeamData()
+    } catch (err) {
+      setError("An unexpected error occurred")
+      console.error("Error removing team member:", err)
+    } finally {
+      setDeletingMember(false)
+    }
+  }
+
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case "admin":
@@ -503,7 +544,7 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
                         </p>
                       </div>
                     </div>
-                    
+
                     {!inviteFullAccess && (
                       <div className="space-y-2.5">
                         <Label className="text-slate-300 ml-1">Workstreams (Optional)</Label>
@@ -624,7 +665,7 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
               </div>
               <h4 className="text-xl font-semibold text-white mb-2">Build your team</h4>
               <p className="text-slate-400 max-w-xs mx-auto">
-                {isBusinessAccount 
+                {isBusinessAccount
                   ? "Invite colleagues to help you manage your support emails more effectively."
                   : "Team member invitations are only available for business accounts. Upgrade to a business plan to invite team members."}
               </p>
@@ -659,14 +700,24 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
                         {formatDate(member.created_at)}
                       </div>
                       {canManage && isBusinessAccount && member.id !== currentUser?.id && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs rounded-lg text-slate-400 hover:text-white hover:bg-white/5"
-                          onClick={() => handleEditDepartments(member)}
-                        >
-                          Edit Access
-                        </Button>
+                        <div className="flex gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs rounded-lg text-slate-400 hover:text-white hover:bg-white/5"
+                            onClick={() => handleEditDepartments(member)}
+                          >
+                            Edit Access
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs rounded-lg text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                            onClick={() => handleRemoveMember(member)}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
                       )}
                     </div>
                   </Card>
@@ -825,6 +876,65 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 "Save Changes"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Member Confirmation Dialog */}
+      <Dialog open={deleteMemberDialogOpen} onOpenChange={setDeleteMemberDialogOpen}>
+        <DialogContent className="bg-slate-950 border-slate-800 rounded-2xl max-w-md">
+          <DialogHeader className="space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="h-6 w-6 text-destructive" />
+              </div>
+              <div className="flex-1 pt-1">
+                <DialogTitle className="text-xl font-semibold text-white mb-2">Remove Team Member</DialogTitle>
+                <DialogDescription className="text-sm text-slate-400">
+                  Are you sure you want to remove <span className="font-semibold text-white">{memberToDelete?.name}</span> from the team?
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <Alert className="mt-4 bg-amber-500/10 border-amber-500/20">
+            <AlertTriangle className="h-4 w-4 text-amber-500" />
+            <AlertDescription className="text-sm text-amber-400 ml-2">
+              This action will deactivate the user account. They will no longer have access to the team workspace.
+            </AlertDescription>
+          </Alert>
+          {error && (
+            <Alert className="mt-4 bg-red-500/10 border-red-500/20">
+              <XCircle className="h-4 w-4 text-red-400" />
+              <AlertDescription className="text-sm text-red-300 ml-2">{error}</AlertDescription>
+            </Alert>
+          )}
+          <DialogFooter className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteMemberDialogOpen(false)}
+              disabled={deletingMember}
+              className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 border-slate-700 text-white rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmRemoveMember}
+              disabled={deletingMember}
+              className="w-full sm:w-auto bg-destructive hover:bg-destructive/90 rounded-xl"
+            >
+              {deletingMember ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Removing...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Remove Member
+                </>
               )}
             </Button>
           </DialogFooter>

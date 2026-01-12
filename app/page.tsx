@@ -108,7 +108,7 @@ function PageContent() {
         // Set skeleton flag from URL param or sessionStorage, or set it fresh
         const urlSkeletonFlag = params.get("showSkeleton") === "true"
         const hasSkeletonFlag = sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
-        
+
         if (urlSkeletonFlag || !hasSkeletonFlag) {
           // Always set it when returning from OAuth to ensure skeleton shows
           sessionStorage.setItem('show_inbox_skeleton_on_return', 'true')
@@ -612,9 +612,10 @@ function PageContent() {
   useEffect(() => {
     if (!shouldPoll) return
 
+    // Reduced polling frequency from 5s to 15s to reduce server load
     const interval = setInterval(() => {
       fetchSyncStatus()
-    }, 5000)
+    }, 15000) // 15 seconds instead of 5
 
     return () => {
       clearInterval(interval)
@@ -632,7 +633,8 @@ function PageContent() {
     }
   }, [isConnected, syncStatus?.processing, syncInProgress, startSync])
 
-  // Automatic background sync - runs every 5 minutes when connected
+  // Automatic background sync - runs every 10 minutes when connected
+  // Increased interval to reduce server load
   useEffect(() => {
     if (!isConnected) return
 
@@ -648,7 +650,7 @@ function PageContent() {
       } else {
         console.log('[Background Sync] Skipping - sync already in progress')
       }
-    }, 5 * 60 * 1000) // Every 5 minutes
+    }, 10 * 60 * 1000) // Every 10 minutes instead of 5
 
     return () => clearInterval(backgroundSyncInterval)
   }, [isConnected, syncInProgress, syncStatus?.processing, startSync])
@@ -715,16 +717,38 @@ function PageContent() {
     try {
       await fetch("/api/auth/logout", { method: "POST" })
     } finally {
-      // Clear sessionStorage for this tab
+      // CRITICAL: Clear ALL caches to prevent showing previous account's data
       if (typeof window !== "undefined") {
+        // Clear sessionStorage for this tab
         sessionStorage.removeItem("current_user_id")
         sessionStorage.removeItem("current_user_name")
         sessionStorage.removeItem("current_user_role")
         sessionStorage.removeItem("current_user_business_id")
         sessionStorage.removeItem("current_user_email")
+
         // Clear localStorage items that may contain stale email references
         localStorage.removeItem("inbox_selected_account")
+
+        // CRITICAL FIX: Clear browser cache for email endpoints
+        // This prevents showing cached emails from previous account
+        try {
+          // Clear all API cache entries for email-related routes
+          if ('caches' in window) {
+            caches.keys().then((names) => {
+              names.forEach((name) => {
+                caches.delete(name)
+              })
+            })
+          }
+        } catch (e) {
+          console.warn('Failed to clear browser caches:', e)
+        }
+
+        // CRITICAL FIX: Set a flag to force fresh data on next login
+        // This timestamp ensures React components fetch fresh data
+        sessionStorage.setItem('logout_timestamp', Date.now().toString())
       }
+
       setIsConnected(false)
       setCurrentUserId(null)
       setCurrentUser(null)
@@ -732,6 +756,7 @@ function PageContent() {
       setSelectedEmail(null)
       setUserProfile(null)
       setDraftsVersion((v) => v + 1)
+
       // Reset sync state to prevent showing stale sync data
       setSyncStatus(null)
       setSyncInProgress(false)
@@ -740,6 +765,7 @@ function PageContent() {
       setSyncError(null)
       setHideSyncToast(true)
       setHasAutoSynced(false)
+
       // Keep the logging overlay visible briefly to show feedback
       setTimeout(() => setLoggingOut(false), 600)
     }
@@ -748,6 +774,10 @@ function PageContent() {
   const handleDraftGenerated = () => {
     setDraftsVersion((v) => v + 1)
   }
+
+  const handleClearGlobalSearch = useCallback(() => {
+    setGlobalSearch("")
+  }, [])
 
   const renderView = () => {
     switch (activeView) {
@@ -782,7 +812,7 @@ function PageContent() {
             currentUserId={currentUserId}
             currentUserRole={currentUser?.role as "admin" | "manager" | "agent" | null}
             globalSearchTerm={globalSearch}
-            onClearGlobalSearch={() => setGlobalSearch("")}
+            onClearGlobalSearch={handleClearGlobalSearch}
             refreshKey={ticketsVersion}
             initialTicketId={deepLinkTicketId || undefined}
             ticketNavKey={ticketNavKey}

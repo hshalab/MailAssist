@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
         .from('users')
         .select('id, name, email, role, created_at')
         .eq('id', sessionUser.id)
+        .eq('is_active', true)
         .single()
 
       if (error) {
@@ -50,6 +51,7 @@ export async function GET(request: NextRequest) {
       .from('users')
       .select('id, name, email, role, created_at')
       .eq('business_id', sessionUser.businessId)
+      .eq('is_active', true)
       .order('created_at', { ascending: false })
 
     if (error) {

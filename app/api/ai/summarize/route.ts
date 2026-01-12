@@ -1,9 +1,47 @@
 import { NextRequest, NextResponse } from "next/server"
 
+/**
+ * Convert HTML content to plain text for AI processing
+ * Strips HTML tags, decodes entities, and cleans up whitespace
+ */
+function htmlToText(html: string): string {
+  if (!html) return ''
+
+  let text = html
+
+  // Remove script and style elements completely
+  text = text.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+  text = text.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+
+  // Convert common block elements to newlines
+  text = text.replace(/<\/(div|p|br|tr|h[1-6]|li)>/gi, '\n')
+  text = text.replace(/<br\s*\/?>/gi, '\n')
+  text = text.replace(/<\/li>/gi, '\n')
+
+  // Remove all remaining HTML tags
+  text = text.replace(/<[^>]+>/g, '')
+
+  // Decode common HTML entities
+  text = text.replace(/&nbsp;/g, ' ')
+  text = text.replace(/&amp;/g, '&')
+  text = text.replace(/&lt;/g, '<')
+  text = text.replace(/&gt;/g, '>')
+  text = text.replace(/&quot;/g, '"')
+  text = text.replace(/&#39;/g, "'")
+  text = text.replace(/&apos;/g, "'")
+
+  // Clean up whitespace
+  text = text.replace(/\n\s*\n\s*\n/g, '\n\n')  // Max 2 consecutive newlines
+  text = text.replace(/[ \t]+/g, ' ')  // Multiple spaces to single space
+  text = text.trim()
+
+  return text
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { conversation } = await request.json()
-    
+
     if (!conversation || typeof conversation !== "string") {
       return NextResponse.json(
         { error: "Conversation text is required" },
@@ -12,13 +50,16 @@ export async function POST(request: NextRequest) {
     }
 
     const apiKey = process.env.GROQ_API_KEY
-    
+
     if (!apiKey) {
       return NextResponse.json(
         { error: "GROQ_API_KEY not configured" },
         { status: 500 }
       )
     }
+
+    // Convert HTML to plain text for better AI processing
+    const plainTextConversation = htmlToText(conversation)
 
     // Call Groq API to generate summary
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -36,7 +77,7 @@ export async function POST(request: NextRequest) {
           },
           {
             role: 'user',
-            content: `Summarize this email conversation in 2-3 sentences:\n\n${conversation}`,
+            content: `Summarize this email conversation in 2-3 sentences:\n\n${plainTextConversation}`,
           },
         ],
         temperature: 0.3,

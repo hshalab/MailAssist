@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
       if (targetUser && !targetUser.is_active) {
         console.error('[Login] Inactive user attempting login:', normalizedEmail)
         return NextResponse.json(
-          { error: 'Your account has been deactivated. Please contact your administrator for more information.' },
+          { error: 'You have been removed from this team by an administrator. If you believe this is a mistake, please contact your team administrator.' },
           { status: 403 }
         )
       }
@@ -232,9 +232,9 @@ export async function POST(req: NextRequest) {
     // 8. Set session cookies
     const cookieStore = await cookies()
     const { getCookieOptions, getClientCookieOptions } = await import('@/lib/cookie-config')
-    
+
     // If rememberMe is true, use 30 days; otherwise use session-only cookies (no maxAge/expires)
-    const cookieOptions = rememberMe 
+    const cookieOptions = rememberMe
       ? { maxAge: 30 * 24 * 60 * 60 } // 30 days
       : {} // Session-only (expires when browser closes)
 

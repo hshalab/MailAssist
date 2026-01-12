@@ -80,6 +80,28 @@ export async function PATCH(
           { status: 400 }
         );
       }
+
+      // CRITICAL: Verify the assignee user is active before assigning
+      const { getUserById } = await import('@/lib/users');
+      const assigneeUser = await getUserById(assigneeUserId);
+      if (!assigneeUser || !assigneeUser.isActive) {
+        console.error(`[Assign] Attempted to assign ticket to inactive user: ${assigneeUserId}`);
+        return NextResponse.json(
+          { error: 'Cannot assign ticket to inactive user' },
+          { status: 400 }
+        );
+      }
+    }
+
+    // CRITICAL: Verify the current user is active before allowing assignment
+    const { getUserById } = await import('@/lib/users');
+    const currentUser = await getUserById(userId);
+    if (!currentUser || !currentUser.isActive) {
+      console.error(`[Assign] Inactive user attempting to assign ticket: ${userId}`);
+      return NextResponse.json(
+        { error: 'Your account has been deactivated' },
+        { status: 403 }
+      );
     }
 
     // Assign the ticket (and update priority if provided)

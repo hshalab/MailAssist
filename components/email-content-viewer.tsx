@@ -19,6 +19,7 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
     const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(true)
     const [blockedRemoteCount, setBlockedRemoteCount] = useState(0)
     const iframeRef = useRef<HTMLIFrameElement>(null)
+    const previousEmailIdRef = useRef<string | undefined>(undefined)
     const { theme, resolvedTheme } = useTheme()
     const isDarkMode = (theme === "dark" || resolvedTheme === "dark")
 
@@ -35,8 +36,16 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             return
         }
 
+        // Only show loading overlay when actually switching to a new email
+        // Not when re-processing the same content due to parent re-renders
+        const isNewEmail = emailId !== previousEmailIdRef.current
+        if (isNewEmail) {
+            setLoading(true)
+            previousEmailIdRef.current = emailId
+        }
+
         // If message is plain text, preserve line breaks and auto-link URLs/emails
-        const isPlainText = !/<\s*(p|div|br|table|img|ul|ol|li|span|style|body|html|blockquote)/i.test(content)
+        const isPlainText = !/\<\s*(p|div|br|table|img|ul|ol|li|span|style|body|html|blockquote)/i.test(content)
         let normalizedContent = content
 
         if (isPlainText) {
@@ -48,7 +57,7 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
 
             // Auto-link URLs (Gmail/Outlook style)
             normalizedContent = normalizedContent.replace(
-                /\b(https?:\/\/[^\s<>"\]]+)/gi,
+                /\b(https?:\/\/[^\s<>"]+)/gi,
                 '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
             )
 
@@ -81,8 +90,6 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             FORBID_ATTR: ['onmouseover', 'onclick', 'onerror', 'onload', 'onmouseenter', 'onmouseleave']
         })
 
-        setLoading(true)
-
         // Process the cleaned HTML to handle images
         let processed = clean
         let remoteImageCount = 0
@@ -95,7 +102,7 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             attachments.forEach(att => {
                 const nameWithoutExt = att.filename?.replace(/\.[^.]+$/, '') || ''
                 const contentId = att.contentId || att.id
-                
+
                 // Build list of possible CID patterns this attachment might match
                 const patterns = [
                     `cid:${att.id}`,
@@ -167,17 +174,17 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             (match, attrs, href) => {
                 const isExternal = /^https?:\/\//i.test(href) && !href.includes(window.location.hostname)
                 const hasTarget = /target=/i.test(attrs)
-                
+
                 let newAttrs = attrs
                 if (!hasTarget) {
                     newAttrs += ' target="_blank" rel="noopener noreferrer"'
                 }
-                
+
                 // Add data attribute for external links (can be styled in CSS)
                 if (isExternal) {
                     newAttrs += ' data-external="true"'
                 }
-                
+
                 return `<a ${newAttrs}>`
             }
         )
@@ -338,8 +345,8 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 .email-body {
                     max-width: 100%;
                 }
-                /* Only apply spacing if email doesn't have its own */
-                .email-body > p:not([style]) { margin: 0 0 1em 0; }
+                /* Apply better paragraph spacing for sent emails */
+                .email-body > p:not([style]) { margin: 0 0 1.5em 0; }
                 .email-body > ul:not([style]), .email-body > ol:not([style]) { padding-left: 20px; margin: 0 0 1em 0; }
                 img {
                     max-width: 100%;

@@ -91,6 +91,32 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   const emailCacheRef = useRef<Map<string, any>>(new Map())
   const prefetchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
+  // CRITICAL FIX: Track last logout timestamp to clear cache on account switch
+  const [lastLogoutCheck, setLastLogoutCheck] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('logout_timestamp') || '0'
+    }
+    return '0'
+  })
+
+  // Clear email cache when logout is detected (account switch)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const currentLogoutTimestamp = sessionStorage.getItem('logout_timestamp') || '0'
+
+      // If logout timestamp changed, clear all caches
+      if (currentLogoutTimestamp !== lastLogoutCheck && currentLogoutTimestamp !== '0') {
+        console.log('[EmailList] Logout detected, clearing email cache')
+        setEmails([]) // Clear email list immediately
+        emailCacheRef.current.clear() // Clear prefetch cache
+        setLastLogoutCheck(currentLogoutTimestamp)
+
+        // Clear the logout timestamp after processing to avoid repeated clears
+        sessionStorage.removeItem('logout_timestamp')
+      }
+    }
+  }, [lastLogoutCheck])
+
   const fetchEmails = async (newLimit = limit, isLoadMore = false, silent = false, retryCount = 0) => {
     try {
       if (!silent) {

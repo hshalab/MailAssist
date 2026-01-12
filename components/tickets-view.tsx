@@ -24,6 +24,23 @@ import QuickRepliesSidebar from "@/components/quick-replies-sidebar"
 import ShopifySidebar from "@/components/shopify-sidebar"
 import RichTextEditor from "@/components/rich-text-editor"
 import { EmailContentViewer } from "@/components/email-content-viewer"
+import { htmlToText } from "@/lib/html-to-text"
+
+const toPlainText = (html: string) => {
+  if (!html) return ""
+  const tmp = typeof window !== "undefined" ? document.createElement("div") : null
+  if (!tmp) return html
+  tmp.innerHTML = html
+  return tmp.textContent || tmp.innerText || ""
+}
+
+const textToHtml = (text: string) => {
+  if (!text) return ""
+  return text
+    .split(/\n{2,}/)
+    .map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`)
+    .join("")
+}
 
 interface Ticket {
   id: string
@@ -135,6 +152,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [emails, setEmails] = useState<string[]>([]) // For account filter dropdown
   const [departments, setDepartments] = useState<any[]>([]) // For department filter dropdown
   const [allowedDeptIds, setAllowedDeptIds] = useState<string[] | null>(null) // For agents: only see tickets in these depts
+  const lastSearchLogRef = useRef<string | undefined>(undefined)
 
   // Sync global search into local search field
   useEffect(() => {
@@ -143,49 +161,54 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [globalSearchTerm])
 
+  // Use global search term if provided, otherwise fallback to local
+  const activeSearchQuery = globalSearchTerm !== undefined ? globalSearchTerm : searchQuery
+
+
   // Auto-switch to tab containing search results when searching
-  useEffect(() => {
-    if (!searchQuery || tickets.length === 0) return
+  // DISABLED: This was causing search results to flash and disappear
+  // useEffect(() => {
+  //   if (!activeSearchQuery || tickets.length === 0) return
 
-    const query = searchQuery.toLowerCase()
+  //   const query = activeSearchQuery.toLowerCase()
 
-    // Find all tickets matching the search (ignoring tab filter)
-    const matchingTickets = tickets.filter(t =>
-      t.subject.toLowerCase().includes(query) ||
-      t.customerEmail.toLowerCase().includes(query) ||
-      (t.customerName && t.customerName.toLowerCase().includes(query))
-    )
+  //   // Find all tickets matching the search (ignoring tab filter)
+  //   const matchingTickets = tickets.filter(t =>
+  //     t.subject.toLowerCase().includes(query) ||
+  //     t.customerEmail.toLowerCase().includes(query) ||
+  //     (t.customerName && t.customerName.toLowerCase().includes(query))
+  //   )
 
-    if (matchingTickets.length === 0) return
+  //   if (matchingTickets.length === 0) return
 
-    // Helper to determine which tab a ticket belongs to
-    const getTicketTab = (t: Ticket): typeof activeTab => {
-      if (t.status === 'closed') return 'closed'
-      if (t.assigneeUserId === currentUserId) return 'assigned'
-      if (!t.assigneeUserId) return 'unassigned'
-      return 'open'
-    }
+  //   // Helper to determine which tab a ticket belongs to
+  //   const getTicketTab = (t: Ticket): typeof activeTab => {
+  //     if (t.status === 'closed') return 'closed'
+  //     if (t.assigneeUserId === currentUserId) return 'assigned'
+  //     if (!t.assigneeUserId) return 'unassigned'
+  //     return 'open'
+  //   }
 
-    // Check if current tab has any matching tickets
-    const currentTabMatches = matchingTickets.filter(t => {
-      const tab = getTicketTab(t)
-      return tab === activeTab
-    })
+  //   // Check if current tab has any matching tickets
+  //   const currentTabMatches = matchingTickets.filter(t => {
+  //     const tab = getTicketTab(t)
+  //     return tab === activeTab
+  //   })
 
-    // If current tab has matches, no need to switch
-    if (currentTabMatches.length > 0) return
+  //   // If current tab has matches, no need to switch
+  //   if (currentTabMatches.length > 0) return
 
-    // Find the best tab to switch to (prefer in order: assigned, unassigned, open, closed)
-    const tabPriority: (typeof activeTab)[] = ['assigned', 'unassigned', 'open', 'closed']
-    for (const tab of tabPriority) {
-      const hasMatch = matchingTickets.some(t => getTicketTab(t) === tab)
-      if (hasMatch) {
-        console.log(`[Search] Switching to "${tab}" tab where search results exist`)
-        setActiveTab(tab)
-        break
-      }
-    }
-  }, [searchQuery, tickets, currentUserId, activeTab])
+  //   // Find the best tab to switch to (prefer in order: assigned, unassigned, open, closed)
+  //   const tabPriority: (typeof activeTab)[] = ['assigned', 'unassigned', 'open', 'closed']
+  //   for (const tab of tabPriority) {
+  //     const hasMatch = matchingTickets.some(t => getTicketTab(t) === tab)
+  //     if (hasMatch) {
+  //       console.log(`[Search] Switching to "${tab}" tab where search results exist`)
+  //       setActiveTab(tab)
+  //       break
+  //     }
+  //   }
+  // }, [activeSearchQuery, tickets, currentUserId, activeTab])
 
   // Typing indicator state
   const [isTyping, setIsTyping] = useState(false)
@@ -543,10 +566,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (!silent) setLoading(true)
       setError(null)
       console.log('[Tickets] Fetching tickets...')
-      
+
       // Check if sync is running (tickets being created) - do this in parallel with ticket fetch
       const syncCheckPromise = checkSyncStatus()
-      
+
       const timestamp = Date.now()
       let url = `/api/tickets?_=${timestamp}`
       if (selectedAccount !== 'all') {
@@ -556,20 +579,20 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       // CRITICAL: Send user ID in header from sessionStorage (per-tab) to prevent cookie sharing issues
       // This ensures each tab uses its own user ID even when cookies are shared
       const headers: Record<string, string> = {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
       };
-      
+
       if (currentUserId) {
         headers['x-user-id'] = currentUserId;
       }
-      
+
       // Fetch tickets and check sync status in parallel
       const [response, syncRunning] = await Promise.all([
         fetch(url, { cache: "no-store", headers }),
         syncCheckPromise
       ])
-      
+
       if (!response.ok) {
         throw new Error("Failed to fetch tickets")
       }
@@ -592,7 +615,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       const list = data.tickets || []
       setTickets(list)
-      
+
       // If sync is running, keep showing creating indicator and poll for updates
       if (syncRunning) {
         setIsCreatingTickets(true)
@@ -618,7 +641,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             }
           }
         }, 2000)
-        
+
         // Clear interval after 60 seconds max (safety)
         setTimeout(() => {
           clearInterval(pollInterval)
@@ -629,7 +652,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         setIsCreatingTickets(false)
         if (!silent) setLoading(false)
       }
-      
+
       if (returnData) return list
     } catch (err) {
       console.error('[Tickets] Error fetching tickets:', err)
@@ -638,7 +661,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (!silent) setLoading(false)
     }
   }, [selectedAccount, currentUserId, checkSyncStatus]) // Add checkSyncStatus dependency
-  
+
   // Listen for account changes to refresh tickets and email list
   // This ensures ALL users (agents, managers, admins) see the changes
   useEffect(() => {
@@ -648,7 +671,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setEmails([])
       fetchTickets()
     }
-    
+
     // Also listen for storage events (cross-tab communication)
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'accountsChanged') {
@@ -657,10 +680,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         fetchTickets()
       }
     }
-    
+
     window.addEventListener('accountsChanged', handleAccountsChanged)
     window.addEventListener('storage', handleStorageChange)
-    
+
     // Check on mount if accounts changed
     const checkAccountsChanged = () => {
       const accountsChanged = localStorage.getItem('accountsChanged')
@@ -671,7 +694,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
     }
     checkAccountsChanged()
-    
+
     return () => {
       window.removeEventListener('accountsChanged', handleAccountsChanged)
       window.removeEventListener('storage', handleStorageChange)
@@ -694,7 +717,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     // Ensure loading state is set before fetch
     setLoading(true)
-    
+
     // OPTIMIZED: Fetch all data in parallel instead of sequentially
     // This makes initial page load much faster
     // Use setTimeout to ensure React has rendered the skeleton before fetch starts
@@ -709,7 +732,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         ...(currentUserId ? [fetchQuickReplies()] : [])
       ]).catch(err => console.error('Error loading initial data:', err))
     }, 0)
-    
+
     return () => clearTimeout(timeoutId)
   }, [currentUserId, refreshKey, fetchTickets]) // currentUserRole is stable
 
@@ -738,7 +761,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       console.log('🔔 Ticket update event received:', e.type)
       if (e instanceof CustomEvent && e.detail) {
         console.log('📦 Event detail:', e.detail)
-        const detail = e.detail as { ticketId?: string; status?: Ticket['status']; assigneeUserId?: string | null }
+        const detail = e.detail as { ticketId?: string; status?: Ticket['status']; assigneeUserId?: string | null; switchToTab?: 'assigned' | 'closed' | 'unassigned' | 'open' }
         if (detail?.ticketId) {
           console.log('⚡ Optimistically updating ticket:', detail.ticketId, 'status:', detail.status, 'assignee:', detail.assigneeUserId)
           setTickets(prev => {
@@ -750,6 +773,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             console.log('✨ Tickets updated, new count:', updated.length)
             return updated
           })
+          
+          // Switch to the appropriate tab if specified
+          if (detail.switchToTab && ['assigned', 'closed', 'unassigned', 'open'].includes(detail.switchToTab)) {
+            console.log('🎯 Switching to tab:', detail.switchToTab)
+            setActiveTab(detail.switchToTab as typeof activeTab)
+          }
         }
       }
       console.log('🔄 Fetching fresh tickets...')
@@ -769,15 +798,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [fetchTickets])
 
-  // Auto-poll for ticket updates every 30 seconds (silent refresh)
+  // Auto-poll for ticket updates every 60 seconds (silent refresh)
+  // Reduced frequency to minimize server load
   useEffect(() => {
     const pollInterval = setInterval(() => {
       console.log('Auto-polling for ticket updates...')
       fetchTickets({ silent: true })
-    }, 30000) // 30 seconds
+    }, 60000) // 60 seconds instead of 30
 
     return () => clearInterval(pollInterval)
-  }, [])
+  }, [fetchTickets])
 
   // Apply deep-linked ticket selection once tickets are loaded
   useEffect(() => {
@@ -1063,8 +1093,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     return new Date(ticket.lastCustomerReplyAt) > new Date(lastSeen)
   }
 
-  // Light polling only for the currently selected ticket (once per minute) to react
-  // when a new customer email arrives. No global refresh spam.
+  // Light polling only for the currently selected ticket (every 2 minutes) to react
+  // when a new customer email arrives. Reduced frequency to minimize server load.
   useEffect(() => {
     if (!selectedTicket) return
 
@@ -1093,10 +1123,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       } catch {
         // ignore transient errors
       }
-    }, 60000) // 1 minute
+    }, 120000) // 2 minutes instead of 1 minute
 
     return () => clearInterval(interval)
-  }, [selectedTicket])
+  }, [selectedTicket?.id])
 
   // Fetch departments for filter dropdown
   useEffect(() => {
@@ -1825,7 +1855,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          draftText: replyHtml.trim(),
+          draftText: toPlainText(replyHtml) || replyText || replyHtml.trim(),
+          draftHtml: replyHtml.trim(), // Send HTML version for proper rendering
           draftId: draftId || null,
           attachments: replyAttachments
         }),
@@ -1835,6 +1866,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         const errorData = await response.json()
         throw new Error(errorData.error || "Failed to send reply")
       }
+
+      const data = await response.json().catch(() => ({}))
+      const activeTicketId = data?.ticketId || targetTicketId
 
       setReplyHtml("")
       setReplyAttachments([])
@@ -1849,8 +1883,98 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       toast({ title: "Reply sent successfully" })
 
-      if (opts?.closeTicket) {
-        await handleUpdateStatus("closed", targetTicketId)
+      // Always assign ticket to replier if unassigned (first replier gets it)
+      if (activeTicketId && currentUserId && !opts?.closeTicket) {
+        try {
+          // Check if ticket is already assigned, if not, assign it
+          const ticketCheckResponse = await fetch(`/api/tickets/${activeTicketId}`)
+          if (ticketCheckResponse.ok) {
+            const ticketData = await ticketCheckResponse.json()
+            const ticket = ticketData.ticket
+            
+            // Only assign if ticket is unassigned
+            if (ticket && !ticket.assigneeUserId) {
+              console.log('📝 Auto-assigning ticket to first replier:', activeTicketId, 'user:', currentUserId)
+              const assignResponse = await fetch(`/api/tickets/${activeTicketId}/assign`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assigneeUserId: currentUserId }),
+              })
+              
+              if (assignResponse.ok) {
+                console.log('✅ Ticket auto-assigned to replier')
+                // Broadcast event to switch to "assigned" tab
+                window.dispatchEvent(new CustomEvent('ticketUpdated', {
+                  detail: { ticketId: activeTicketId, assigneeUserId: currentUserId, status: 'pending', switchToTab: 'assigned' }
+                }))
+              }
+            } else {
+              // Ticket already assigned
+              const assignedToCurrentUser = ticket?.assigneeUserId === currentUserId
+              // If assigned to current user, switch to assigned tab
+              window.dispatchEvent(new CustomEvent('ticketUpdated', {
+                detail: { 
+                  ticketId: activeTicketId, 
+                  assigneeUserId: ticket?.assigneeUserId || currentUserId, 
+                  status: 'pending',
+                  switchToTab: assignedToCurrentUser ? 'assigned' : undefined
+                }
+              }))
+            }
+          }
+        } catch (assignError) {
+          console.warn('⚠️ Failed to auto-assign ticket (non-critical):', assignError)
+          // Still broadcast the update even if assignment fails
+          window.dispatchEvent(new CustomEvent('ticketUpdated', {
+            detail: { ticketId: activeTicketId, assigneeUserId: currentUserId, status: 'pending' }
+          }))
+        }
+      }
+
+      // If closeTicket option is set, assign and close it
+      if (opts?.closeTicket && activeTicketId && currentUserId) {
+        console.log('🎫 Starting Send & Close for ticket:', activeTicketId, 'user:', currentUserId)
+
+        try {
+          // Step 1: Assign the ticket
+          console.log('📝 Step 1: Assigning ticket to user...')
+          const assignResponse = await fetch(`/api/tickets/${activeTicketId}/assign`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ assigneeUserId: currentUserId }),
+          })
+
+          if (!assignResponse.ok) {
+            const error = await assignResponse.json().catch(() => ({}))
+            console.error('❌ Failed to assign ticket:', error)
+            throw new Error(error.error || 'Failed to assign ticket')
+          }
+
+          console.log('✅ Ticket assigned successfully')
+
+          // Step 2: Close the ticket
+          console.log('🔒 Step 2: Closing ticket...')
+          await handleUpdateStatus("closed", activeTicketId)
+
+          // Step 3: Broadcast event to switch to closed tab
+          console.log('📢 Broadcasting ticket update event...')
+          window.dispatchEvent(new CustomEvent('ticketUpdated', {
+            detail: { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId, switchToTab: 'closed' }
+          }))
+          console.log('✅ Send & Close completed successfully!')
+
+          toast({
+            title: "Ticket closed",
+            description: "Ticket has been assigned to you and closed",
+          })
+        } catch (error) {
+          console.error('❌ Error in Send & Close:', error)
+          toast({
+            title: "Ticket update failed",
+            description: error instanceof Error ? error.message : "Failed to update ticket",
+            variant: "destructive",
+          })
+        }
       }
     } catch (err) {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Failed to send reply", variant: "destructive" })
@@ -1965,8 +2089,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     } else if (departmentFilter !== "all") {
       filtered = filtered.filter(t => t.departmentName === departmentFilter)
     }
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase()
+    if (activeSearchQuery) {
+      const query = activeSearchQuery.toLowerCase()
       filtered = filtered.filter(t =>
         t.subject.toLowerCase().includes(query) ||
         t.customerEmail.toLowerCase().includes(query) ||
@@ -2069,6 +2193,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       return aDate - bDate // Ascending: oldest first
     })
 
+    // Debug logging for search issues
+    if (activeSearchQuery || lastSearchLogRef.current !== activeSearchQuery) {
+      console.log(`[Tickets Search] globalSearchTerm: "${globalSearchTerm}", activeSearchQuery: "${activeSearchQuery}", filtered: ${filtered.length}/${tickets.length}`)
+      lastSearchLogRef.current = activeSearchQuery
+    }
+
     return filtered
   }
 
@@ -2090,9 +2220,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         <div className="flex flex-col items-center gap-6 w-full max-w-md px-6">
           {/* Simple, smooth spinner */}
           <div className="relative w-20 h-20">
-            <div 
+            <div
               className="absolute inset-0 rounded-full border-4 border-transparent border-t-primary animate-spin"
-              style={{ 
+              style={{
                 animationDuration: '0.8s',
                 animationTimingFunction: 'ease-in-out'
               }}
@@ -2104,8 +2234,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               {isCreatingTickets ? 'Creating tickets from emails...' : 'Loading tickets...'}
             </p>
             <p className="text-sm text-muted-foreground">
-              {isCreatingTickets 
-                ? 'Please wait while we process your emails and create tickets' 
+              {isCreatingTickets
+                ? 'Please wait while we process your emails and create tickets'
                 : 'Please wait while we fetch your tickets'}
             </p>
             {isCreatingTickets && (
@@ -2282,6 +2412,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                               setDateFilter("all")
                               setShowUnreadOnly(false)
                               setSearchQuery("")
+                              if (onClearGlobalSearch) onClearGlobalSearch()
                               setSelectedAccount("all")
                             }}
                             className="ml-auto h-5 px-2 text-[10px] rounded-md bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground transition-colors cursor-pointer inline-flex items-center"
@@ -2568,13 +2699,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                     <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mx-auto">
                       <Inbox className="w-10 h-10 text-muted-foreground/50" />
                     </div>
-                    {searchQuery || statusFilter !== "all" || priorityFilter !== "all" || assigneeFilter !== "all" || tagsFilter !== "all" || dateFilter !== "all" || showUnreadOnly ? (
+                    {activeSearchQuery || statusFilter !== "all" || priorityFilter !== "all" || assigneeFilter !== "all" || tagsFilter !== "all" || dateFilter !== "all" || showUnreadOnly ? (
                       <>
                         <h3 className="text-lg font-semibold text-foreground">No tickets match your filters</h3>
                         <p className="text-sm text-muted-foreground">Try adjusting your search or filter criteria</p>
                         <Button
                           onClick={() => {
                             setSearchQuery("")
+                            if (onClearGlobalSearch) onClearGlobalSearch()
                             setStatusFilter("all")
                             setPriorityFilter("all")
                             setAssigneeFilter("all")
@@ -3034,7 +3166,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                                 if (!conversationSummary) {
                                   setGeneratingSummary(true)
                                   try {
-                                    const summary = threadMessages.map(m => `${m.from}: ${(m.body || m.subject || "").substring(0, 200)}`).join("\n\n")
+                                    // Convert HTML to plain text before sending to AI
+                                    const summary = threadMessages.map(m => {
+                                      const plainText = htmlToText(m.body || m.subject || "")
+                                      return `${m.from}: ${plainText.substring(0, 200)}`
+                                    }).join("\n\n")
                                     const response = await fetch("/api/ai/summarize", {
                                       method: "POST",
                                       headers: { "Content-Type": "application/json" },
@@ -3108,8 +3244,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                               <div className="flex flex-col items-center gap-3 animate-in fade-in duration-300">
                                 {/* Simple, smooth spinner */}
                                 <div className="relative w-12 h-12">
-                                  <div 
-                                    className="absolute inset-0 rounded-full border-3 border-transparent border-t-primary animate-spin" 
+                                  <div
+                                    className="absolute inset-0 rounded-full border-3 border-transparent border-t-primary animate-spin"
                                     style={{ animationDuration: '0.8s', animationTimingFunction: 'ease-in-out' }}
                                   ></div>
                                 </div>
@@ -3161,9 +3297,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                                         <div className="mt-3 pt-3 border-t border-border/50">
                                           <div className="flex flex-wrap gap-2">
                                             {msg.attachments.map((att: any, attIdx: number) => {
-                                              const downloadHref = att.data
-                                                ? `data:${att.mimeType || 'application/octet-stream'};base64,${att.data}`
-                                                : `/api/emails/${msg.id}/attachments/${att.id}?filename=${encodeURIComponent(att.filename)}&mimeType=${encodeURIComponent(att.mimeType || '')}`
+                                              // Always use API route for downloads to avoid browser data URI size limits
+                                              // Data URIs are only used for inline display (images in email content)
+                                              const downloadHref = `/api/emails/${msg.id}/attachments/${att.id}?filename=${encodeURIComponent(att.filename)}&mimeType=${encodeURIComponent(att.mimeType || 'application/octet-stream')}`
 
                                               // Handle size display
                                               let sizeDisplay = ''

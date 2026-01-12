@@ -36,16 +36,16 @@ export async function POST(
     }
 
     const groqApiKey = process.env.GROQ_API_KEY;
-    
+
     // CRITICAL FIX: For invited users (agents) who don't have their own Gmail connected,
     // allow them to use business-connected email accounts for draft generation
     let userEmail = getSessionUserEmailFromRequest(request as any);
-    
+
     if (!userEmail) {
       // Check if this is a business account user (invited agent/manager)
       const { validateBusinessSession } = await import('@/lib/session');
       const businessSession = await validateBusinessSession();
-      
+
       if (businessSession?.businessId) {
         // For business accounts, use any connected account email from the business
         const { loadBusinessTokens } = await import('@/lib/storage');
@@ -56,7 +56,7 @@ export async function POST(
         }
       }
     }
-    
+
     if (!userEmail) {
       return NextResponse.json(
         { error: 'Not authenticated. Please connect Gmail or ensure your business has connected email accounts.' },
@@ -74,12 +74,12 @@ export async function POST(
     // Load and refresh tokens if needed
     // CRITICAL FIX: For invited users, try to get tokens from business-connected accounts
     let tokens = await getValidTokens();
-    
+
     if (!tokens || !tokens.access_token) {
       // Check if this is a business account user (invited agent/manager)
       const { validateBusinessSession } = await import('@/lib/session');
       const businessSession = await validateBusinessSession();
-      
+
       if (businessSession?.businessId) {
         // For business accounts, try to get tokens from business-connected accounts
         const { loadBusinessTokens } = await import('@/lib/storage');
@@ -91,7 +91,7 @@ export async function POST(
         }
       }
     }
-    
+
     if (!tokens || !tokens.access_token) {
       return NextResponse.json(
         { error: 'Not authenticated. Please connect Gmail or ensure your business has connected email accounts.' },
@@ -101,7 +101,7 @@ export async function POST(
 
     // Fetch the specific email
     const incomingEmail = await getEmailById(tokens, emailId);
-    
+
     if (!incomingEmail) {
       return NextResponse.json(
         { error: 'Email not found' },
@@ -115,14 +115,14 @@ export async function POST(
       const { getCurrentUserEmail } = await import('@/lib/storage');
       userEmail = await getCurrentUserEmail();
     }
-    
+
     // Get current user ID for logging
     const userId = getCurrentUserIdFromRequest(request);
-    
+
     // OPTIMIZATION: Parallelize all data loading operations for faster draft generation
     // Load conversation thread, past emails, knowledge, guardrails, and ticket lookup in parallel
     const threadIdForContext = incomingEmail.threadId || incomingEmail.id;
-    
+
     const [
       pastEmailsResult,
       threadResult,
@@ -183,20 +183,20 @@ export async function POST(
     if (pastEmails.length === 0) {
       console.warn(`[Draft] No past emails with embeddings found`);
       return NextResponse.json(
-        { 
+        {
           error: 'No past emails found for style matching. Please send some emails first.',
           draft: 'I received your email and will get back to you soon.' // Fallback draft
         },
         { status: 200 }
       );
     }
-    
+
     // Ensure pastEmails have valid structure (safety check)
     const validPastEmails = pastEmails.filter(e => e && e.id && (e.embedding?.length > 0 || true)); // Allow emails without embeddings as fallback
     if (validPastEmails.length === 0) {
       console.warn(`[Draft] No valid past emails found after filtering`);
       return NextResponse.json(
-        { 
+        {
           error: 'No valid past emails found for style matching.',
           draft: 'I received your email and will get back to you soon.'
         },
@@ -207,7 +207,7 @@ export async function POST(
     // Check if this is a regeneration (query param or check if draft exists)
     const url = new URL(request.url);
     const isRegeneration = url.searchParams.get('regenerate') === 'true';
-    
+
     // Check for existing draft for this email
     let existingDraftId: string | null = null;
     if (userEmail) {
@@ -230,7 +230,7 @@ export async function POST(
         // Extract email from "Name <email@example.com>" format
         const emailMatch = customerEmail.match(/<(.+?)>/) || [null, customerEmail];
         const extractedEmail = emailMatch[1] || customerEmail;
-        
+
         // Check if Shopify is configured and fetch customer data
         const { supabase } = await import('@/lib/supabase');
         if (supabase) {
@@ -240,7 +240,7 @@ export async function POST(
             .eq('user_email', userEmail)
             .limit(1)
             .maybeSingle();
-          
+
           if (shopifyConfig && shopifyConfig.access_token) {
             const { getCustomerData } = await import('@/lib/shopify');
             const customerData = await getCustomerData(
@@ -250,7 +250,7 @@ export async function POST(
               },
               extractedEmail
             );
-            
+
             if (customerData.customer || customerData.recentOrders.length > 0) {
               const ordersInfo = customerData.recentOrders.slice(0, 3).map(order => {
                 const orderDate = new Date(order.createdAt).toLocaleDateString();
@@ -265,7 +265,7 @@ export async function POST(
                 const orderNote = order.note ? ` - Note: ${order.note}` : '';
                 return `- Order #${orderName} (${orderDate}): ${orderCurrency} ${orderTotal} - Status: ${orderStatus} - Items: ${items}${orderNote}`;
               }).join('\n');
-              
+
               shopifyContext = `\n\nSHOPIFY CUSTOMER INFORMATION (use this to personalize the reply):
 Customer Name: ${customerData.customer?.firstName || ''} ${customerData.customer?.lastName || ''}
 Total Spent: ${customerData.totalSpent || 0}
@@ -304,11 +304,11 @@ IMPORTANT: Use this information to personalize your response. Reference their or
     } catch (draftError) {
       console.error('[Draft] Error in generateDraftReply:', draftError);
       const errorMessage = draftError instanceof Error ? draftError.message : String(draftError);
-      
+
       // If it's a Groq API error, provide more details
       if (errorMessage.includes('Groq API') || errorMessage.includes('401') || errorMessage.includes('403')) {
         return NextResponse.json(
-          { 
+          {
             error: 'Failed to generate draft',
             details: errorMessage,
             hint: 'Please check your GROQ_API_KEY environment variable'
@@ -316,7 +316,7 @@ IMPORTANT: Use this information to personalize your response. Reference their or
           { status: 500 }
         );
       }
-      
+
       throw draftError; // Re-throw to be caught by outer catch
     }
 
@@ -357,14 +357,14 @@ IMPORTANT: Use this information to personalize your response. Reference their or
           draftText: draft,
         }, userId || null);
       }
-      
+
       // Update AI usage log with draft ID if we have it
       // Note: The log was created in generateDraftReply, but we can't update it easily
       // In a production system, you might want to query and update the most recent log
     } catch (storeError) {
       console.error('[Draft] Error storing draft:', storeError);
       // Still return the draft even if storing fails
-      return NextResponse.json({ 
+      return NextResponse.json({
         draft,
         emailId: incomingEmail.id,
         subject: incomingEmail.subject,
@@ -373,7 +373,7 @@ IMPORTANT: Use this information to personalize your response. Reference their or
       });
     }
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       draft,
       emailId: incomingEmail.id,
       subject: incomingEmail.subject,
@@ -383,9 +383,9 @@ IMPORTANT: Use this information to personalize your response. Reference their or
     console.error('[Draft] Unexpected error generating draft:', error);
     const errorMessage = error instanceof Error ? error.message : String(error);
     const errorStack = error instanceof Error ? error.stack : undefined;
-    
+
     return NextResponse.json(
-      { 
+      {
         error: 'Failed to generate draft',
         details: errorMessage,
         ...(errorStack && { stack: errorStack })

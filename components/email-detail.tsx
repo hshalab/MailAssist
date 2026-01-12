@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { useToast } from "@/components/ui/use-toast"
 import { ArrowLeft, ChevronDown, ChevronUp, Sparkles, Loader2, Mail, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Paperclip, Code, Bold, Italic, Underline, Strikethrough, List, ListOrdered, Quote, AlignLeft, AlignCenter, AlignRight, Highlighter, Type, FileText, Download } from "lucide-react"
 import { EmailContentViewer } from "@/components/email-content-viewer"
+import { htmlToText } from "@/lib/html-to-text"
 
 const toPlainText = (html: string) => {
   if (!html) return ""
@@ -162,7 +163,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       try {
         setAutoSaving(true)
         // Save full draft state including showDraft flag and draftId
-        localStorage.setItem(`draft_${emailId}`, JSON.stringify({ 
+        localStorage.setItem(`draft_${emailId}`, JSON.stringify({
           html: draftHtml,
           text: draftText,
           draftId: draftId,
@@ -222,11 +223,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
         // Trigger smooth fade transition
         setIsTransitioning(true)
-        
+
         // Brief delay to allow fade-out effect
         setTimeout(() => {
           setLoadingFullContent(false)
-          
+
           // If we already set the data above, skip re-setting it
           if (hasFullBody) {
             // Already handled above - just reset UI state
@@ -273,7 +274,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           setError(null)
           setConversationSummary("")
           setSummaryExpanded(false)
-          
+
           // End transition after content loads
           setIsTransitioning(false)
         }, 100) // Match fade-out animation duration
@@ -322,7 +323,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       const emailResponse = await fetch(`/api/emails/${emailId}`, {
         cache: 'force-cache'
       })
-      
+
       if (!emailResponse.ok) {
         throw new Error('Failed to fetch email')
       }
@@ -331,11 +332,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       const email: EmailSummary = emailData.email
       // If user switched emails, abort applying this result
       if (requestToken && requestToken !== latestRequestRef.current) return
-      
+
       // Update email summary with full data
       setEmailSummary(email)
       setLoading(false) // Content is ready to display
-      
+
       // Now fetch the thread using the threadId
       const threadId = email.threadId || emailId
       const threadResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`)
@@ -345,7 +346,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         // Fix: thread data is nested under 'thread' key from API
         const thread: EmailMessage[] = threadData.thread?.messages || threadData.messages || []
         if (requestToken && requestToken !== latestRequestRef.current) return
-        
+
         if (thread.length > 0) {
           setThreadMessages(thread)
         } else {
@@ -409,11 +410,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       setDraftHtml(textToHtml(regenerated))
       setDraftId(data.draftId || null)
       setShowDraft(true)
-      
+
       // Immediately save to localStorage so it persists when reopening
       if (emailId) {
         try {
-          localStorage.setItem(`draft_${emailId}`, JSON.stringify({ 
+          localStorage.setItem(`draft_${emailId}`, JSON.stringify({
             html: textToHtml(regenerated),
             text: regenerated,
             draftId: data.draftId || null,
@@ -423,7 +424,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           // Ignore localStorage errors
         }
       }
-      
+
       onDraftGenerated?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate draft')
@@ -462,11 +463,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       setDraftText(regenerated)
       setDraftId(data.draftId || null)
       setShowDraft(true)
-      
+
       // Immediately save to localStorage so it persists when reopening
       if (emailId) {
         try {
-          localStorage.setItem(`draft_${emailId}`, JSON.stringify({ 
+          localStorage.setItem(`draft_${emailId}`, JSON.stringify({
             html: textToHtml(regenerated),
             text: regenerated,
             draftId: data.draftId || null,
@@ -476,7 +477,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           // Ignore localStorage errors
         }
       }
-      
+
       onDraftGenerated?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to regenerate draft')
@@ -490,7 +491,17 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     if (!emailId) return
     if (sending) return // Prevent double-submit
 
-    const htmlValue = draftHtml || editorRef.current?.innerHTML || ""
+    // Get HTML from either:
+    // 1. Explicitly set draftHtml (if available)
+    // 2. Editor's innerHTML (if user edited in editor)
+    // 3. Convert draftText to HTML (if AI generated plain text)
+    let htmlValue = draftHtml || editorRef.current?.innerHTML || ""
+
+    // If no HTML but we have plain text, convert it to HTML
+    if (!htmlValue && draftText) {
+      htmlValue = textToHtml(draftText)
+    }
+
     const textValue = draftText || toPlainText(htmlValue)
 
     if (!textValue.trim() && !htmlValue.trim()) {
@@ -568,15 +579,67 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         description: "Your reply was delivered via Gmail.",
       })
 
+      // Use the ticketId returned from the reply API (it ensures creation) or the prop ticketId
+      const activeTicketId = data?.ticketId || ticketId
+
+      // Always assign ticket to replier if unassigned (first replier gets it)
+      if (activeTicketId && currentUserId && !opts?.closeTicket) {
+        try {
+          // Check if ticket is already assigned, if not, assign it
+          const ticketCheckResponse = await fetch(`/api/tickets/${activeTicketId}`)
+          if (ticketCheckResponse.ok) {
+            const ticketData = await ticketCheckResponse.json()
+            const ticket = ticketData.ticket
+            
+            // Only assign if ticket is unassigned
+            if (ticket && !ticket.assigneeUserId) {
+              console.log('📝 Auto-assigning ticket to first replier:', activeTicketId, 'user:', currentUserId)
+              const assignResponse = await fetch(`/api/tickets/${activeTicketId}/assign`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assigneeUserId: currentUserId }),
+              })
+              
+              if (assignResponse.ok) {
+                console.log('✅ Ticket auto-assigned to replier')
+                // Broadcast event to switch to "assigned" tab
+                window.dispatchEvent(new CustomEvent('ticketUpdated', {
+                  detail: { ticketId: activeTicketId, assigneeUserId: currentUserId, status: 'pending', switchToTab: 'assigned' }
+                }))
+              }
+            } else {
+              // Ticket already assigned
+              const assignedToCurrentUser = ticket?.assigneeUserId === currentUserId
+              // If assigned to current user, switch to assigned tab
+              window.dispatchEvent(new CustomEvent('ticketUpdated', {
+                detail: { 
+                  ticketId: activeTicketId, 
+                  assigneeUserId: ticket?.assigneeUserId || currentUserId, 
+                  status: 'pending',
+                  switchToTab: assignedToCurrentUser ? 'assigned' : undefined
+                }
+              }))
+            }
+          }
+        } catch (assignError) {
+          console.warn('⚠️ Failed to auto-assign ticket (non-critical):', assignError)
+          // Still broadcast the update even if assignment fails
+          window.dispatchEvent(new CustomEvent('ticketUpdated', {
+            detail: { ticketId: activeTicketId, assigneeUserId: currentUserId, status: 'pending' }
+          }))
+        }
+        window.dispatchEvent(new Event('ticketsForceRefresh'))
+      }
+
       // If closeTicket option is set and we have a ticketId, assign and close it
-      if (opts?.closeTicket && ticketId && currentUserId) {
-        console.log('🎫 Starting Send & Close for ticket:', ticketId, 'user:', currentUserId)
+      if (opts?.closeTicket && activeTicketId && currentUserId) {
+        console.log('🎫 Starting Send & Close for ticket:', activeTicketId, 'user:', currentUserId)
 
         // Execute assign and close sequentially - wait for completion
         try {
           // Step 1: Assign the ticket
           console.log('📝 Step 1: Assigning ticket to user...')
-          const assignResponse = await fetch(`/api/tickets/${ticketId}/assign`, {
+          const assignResponse = await fetch(`/api/tickets/${activeTicketId}/assign`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ assigneeUserId: currentUserId }),
@@ -595,7 +658,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
           // Step 2: Close the ticket
           console.log('🔒 Step 2: Closing ticket...')
-          const closeResponse = await fetch(`/api/tickets/${ticketId}/status`, {
+          const closeResponse = await fetch(`/api/tickets/${activeTicketId}/status`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: 'closed' }),
@@ -612,11 +675,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           const closeResult = await closeResponse.json()
           console.log('✅ Ticket closed successfully:', closeResult)
 
-          // Step 3: Broadcast event to refresh tickets page
+          // Step 3: Broadcast event to refresh tickets page and switch to closed tab
           console.log('📢 Broadcasting ticket update event...')
-          console.log('📦 Event detail:', { ticketId, status: 'closed', assigneeUserId: currentUserId })
+          console.log('📦 Event detail:', { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId })
           window.dispatchEvent(new CustomEvent('ticketUpdated', {
-            detail: { ticketId, status: 'closed', assigneeUserId: currentUserId }
+            detail: { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId, switchToTab: 'closed' }
           }))
           // Also fire a simpler refresh event for listeners
           window.dispatchEvent(new Event('ticketsForceRefresh'))
@@ -703,7 +766,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     if (!editorRef.current) return
     // If minimized, don't sync (editor is hidden)
     if (draftMinimized) return
-    
+
     // Use a timeout to ensure DOM is ready when expanding from minimized state
     const timeoutId = setTimeout(() => {
       if (!editorRef.current || draftMinimized) return
@@ -717,7 +780,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         editorRef.current.innerHTML = ''
       }
     }, 50) // Delay to ensure DOM is ready when expanding
-    
+
     return () => clearTimeout(timeoutId)
   }, [draftHtml, draftText, draftMinimized])
 
@@ -1047,12 +1110,12 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
             </Button>
           </div>
         )}
-        
+
         <div className="flex-1 overflow-y-auto overflow-x-hidden" style={{ paddingTop: '0.75rem' }}>
           <Card className="mx-4 md:mx-6 mt-4 mb-3 shadow-lg border-border relative overflow-hidden" style={{ borderRadius: '1rem' }}>
             {/* Shimmer overlay */}
             <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-white/10 to-transparent z-10" />
-            
+
             <div className="px-6 py-5 border-b border-border relative">
               <div className="space-y-3">
                 <div className="h-7 bg-muted/70 rounded-md w-3/4" />
@@ -1065,7 +1128,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                 </div>
               </div>
             </div>
-            
+
             <div className="px-6 py-5 space-y-4 relative">
               <div className="space-y-2">
                 <div className="h-4 bg-muted/70 rounded w-full" />
@@ -1135,7 +1198,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                     if (!conversationSummary) {
                       setGeneratingSummary(true)
                       try {
-                        const summary = threadMessages.map(m => `${m.from}: ${(m.body || m.subject || "").substring(0, 200)}`).join("\n\n")
+                        // Convert HTML to plain text before sending to AI
+                        const summary = threadMessages.map(m => {
+                          const plainText = htmlToText(m.body || m.subject || "")
+                          return `${m.from}: ${plainText.substring(0, 200)}`
+                        }).join("\n\n")
                         const response = await fetch("/api/ai/summarize", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
@@ -1190,97 +1257,97 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
           <div className="max-h-[60vh] overflow-y-auto px-6 py-4">
             <div className="space-y-6 max-w-full">{threadMessages.length > 0 ? (
-                threadMessages.map((msg, index) => (
-                  <div
-                    key={msg.id}
-                    className="pb-6 border-b border-border last:border-b-0 last:pb-0 overflow-hidden"
-                  >
-                    <div className="flex justify-between items-start gap-4 mb-3 min-w-0">
-                      <div className="flex items-center gap-3 flex-1 min-w-0 overflow-hidden">
-                        {/* Clickable Avatar for Shopify */}
-                        {onToggleShopify && (
-                          <button
-                            onClick={() => onToggleShopify(msg.from)}
-                            className="flex-shrink-0 transition-colors duration-200 cursor-pointer group"
-                            title="View Shopify customer info"
-                          >
-                            <Avatar className="h-10 w-10 border-2 border-border group-hover:border-primary transition-colors">
-                              <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xs">
-                                {msg.from.split("<")[0].trim()
-                                  ? msg.from.split("<")[0].trim()
-                                    .replace(/["'""''`]/g, "")
-                                    .split(" ")
-                                    .map((n) => n[0])
-                                    .join("")
-                                    .slice(0, 2)
-                                    .toUpperCase()
-                                  : msg.from.slice(0, 2).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                          </button>
-                        )}
-                        <div className="flex-1 min-w-0 overflow-hidden">
-                          <div className="flex items-center gap-2 mb-1.5 min-w-0">
-                            <div className="text-sm font-semibold text-foreground truncate">
-                              {msg.from.split("<")[0].trim() || msg.from}
-                            </div>
-                            {index === 0 && (
-                              <Badge variant="outline" className="text-xs flex-shrink-0">Original</Badge>
-                            )}
-                          </div>
-                          <div className="text-xs text-muted-foreground truncate">
-                            To: {msg.to.split("<")[0].trim() || msg.to}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
-                        {formatDate(msg.date)}
-                      </div>
-                    </div>
-                    <div className="text-sm text-foreground/90 leading-relaxed overflow-hidden break-words">
-                      {msg.body && msg.body.trim() ? (
-                        <EmailContentViewer
-                          content={msg.body}
-                          emailId={msg.id}
-                          attachments={msg.attachments}
-                          className="rounded-md overflow-hidden"
-                        />
-                      ) : (
-                        <div className="text-muted-foreground italic">
-                          No content
-                        </div>
+              threadMessages.map((msg, index) => (
+                <div
+                  key={msg.id}
+                  className="pb-6 border-b border-border last:border-b-0 last:pb-0 overflow-hidden"
+                >
+                  <div className="flex justify-between items-start gap-4 mb-3 min-w-0">
+                    <div className="flex items-center gap-3 flex-1 min-w-0 overflow-hidden">
+                      {/* Clickable Avatar for Shopify */}
+                      {onToggleShopify && (
+                        <button
+                          onClick={() => onToggleShopify(msg.from)}
+                          className="flex-shrink-0 transition-colors duration-200 cursor-pointer group"
+                          title="View Shopify customer info"
+                        >
+                          <Avatar className="h-10 w-10 border-2 border-border group-hover:border-primary transition-colors">
+                            <AvatarFallback className="bg-primary/10 text-primary font-semibold text-xs">
+                              {msg.from.split("<")[0].trim()
+                                ? msg.from.split("<")[0].trim()
+                                  .replace(/["'""''`]/g, "")
+                                  .split(" ")
+                                  .map((n) => n[0])
+                                  .join("")
+                                  .slice(0, 2)
+                                  .toUpperCase()
+                                : msg.from.slice(0, 2).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                        </button>
                       )}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                // Fallback: show emailSummary if we have it but no thread messages yet
-                emailSummary ? (
-                  <div className="pb-4 border-b border-border/50 last:border-b-0">
-                    <div className="flex justify-between items-start gap-3 mb-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="text-xs font-medium text-muted-foreground">Message</div>
-                          <div className="text-xs font-semibold text-foreground truncate">
-                            {emailSummary.from.split("<")[0].trim() || emailSummary.from}
+                      <div className="flex-1 min-w-0 overflow-hidden">
+                        <div className="flex items-center gap-2 mb-1.5 min-w-0">
+                          <div className="text-sm font-semibold text-foreground truncate">
+                            {msg.from.split("<")[0].trim() || msg.from}
                           </div>
+                          {index === 0 && (
+                            <Badge variant="outline" className="text-xs flex-shrink-0">Original</Badge>
+                          )}
                         </div>
                         <div className="text-xs text-muted-foreground truncate">
-                          To: {emailSummary.to.split("<")[0].trim() || emailSummary.to}
+                          To: {msg.to.split("<")[0].trim() || msg.to}
                         </div>
                       </div>
-                      <div className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
-                        {formatDate(emailSummary.date)}
-                      </div>
                     </div>
-                    <div className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed overflow-hidden" style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>
-                      {emailSummary.body || emailSummary.snippet || "Loading content..."}
+                    <div className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
+                      {formatDate(msg.date)}
                     </div>
                   </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">Loading content...</div>
-                )
-              )}
+                  <div className="text-sm text-foreground/90 leading-relaxed overflow-hidden break-words">
+                    {msg.body && msg.body.trim() ? (
+                      <EmailContentViewer
+                        content={msg.body}
+                        emailId={msg.id}
+                        attachments={msg.attachments}
+                        className="rounded-md overflow-hidden"
+                      />
+                    ) : (
+                      <div className="text-muted-foreground italic">
+                        No content
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            ) : (
+              // Fallback: show emailSummary if we have it but no thread messages yet
+              emailSummary ? (
+                <div className="pb-4 border-b border-border/50 last:border-b-0">
+                  <div className="flex justify-between items-start gap-3 mb-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="text-xs font-medium text-muted-foreground">Message</div>
+                        <div className="text-xs font-semibold text-foreground truncate">
+                          {emailSummary.from.split("<")[0].trim() || emailSummary.from}
+                        </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        To: {emailSummary.to.split("<")[0].trim() || emailSummary.to}
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
+                      {formatDate(emailSummary.date)}
+                    </div>
+                  </div>
+                  <div className="text-sm text-foreground whitespace-pre-wrap break-words leading-relaxed overflow-hidden" style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+                    {emailSummary.body || emailSummary.snippet || "Loading content..."}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">Loading content...</div>
+              )
+            )}
             </div>
           </div>
         </Card>
@@ -1296,7 +1363,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
         {/* Consolidated Attachment List - above Shopify button */}
         {(() => {
-          const allAttachments = threadMessages.flatMap(msg => 
+          const allAttachments = threadMessages.flatMap(msg =>
             (msg.attachments || []).map(att => ({ ...att, messageId: msg.id }))
           );
           if (allAttachments.length === 0) return null;
@@ -1308,9 +1375,9 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
               </div>
               <div className="flex flex-wrap gap-2">
                 {allAttachments.map((att: any, idx: number) => {
-                  const downloadHref = att.data
-                    ? `data:${att.mimeType || 'application/octet-stream'};base64,${att.data}`
-                    : `/api/emails/${att.messageId}/attachments/${att.id}?filename=${encodeURIComponent(att.filename)}&mimeType=${encodeURIComponent(att.mimeType)}`;
+                  // Always use API route for downloads to avoid browser data URI size limits
+                  // Data URIs are only used for inline display (images in email content)
+                  const downloadHref = `/api/emails/${att.messageId}/attachments/${att.id}?filename=${encodeURIComponent(att.filename)}&mimeType=${encodeURIComponent(att.mimeType || 'application/octet-stream')}`;
                   return (
                     <a
                       key={`${att.messageId}-${att.id}-${idx}`}
@@ -1401,58 +1468,77 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
               ) : (
                 <div className="flex-1 overflow-y-auto p-6 space-y-4">
                   <div className="space-y-3">
-                      <div className="flex flex-wrap gap-1 items-center bg-muted/40 border border-border rounded-lg px-2 py-1.5">
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('bold'))} aria-label="Bold"><Bold className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('italic'))} aria-label="Italic"><Italic className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('underline'))} aria-label="Underline"><Underline className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('strikeThrough'))} aria-label="Strikethrough"><Strikethrough className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={toggleHeading} aria-label="Heading"><Type className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('hiliteColor', '#fef08a'))} aria-label="Highlight"><Highlighter className="w-3.5 h-3.5 text-amber-500" /></button>
+                    <div className="flex flex-wrap gap-1 items-center bg-muted/40 border border-border rounded-lg px-2 py-1.5">
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('bold'))} aria-label="Bold"><Bold className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('italic'))} aria-label="Italic"><Italic className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('underline'))} aria-label="Underline"><Underline className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('strikeThrough'))} aria-label="Strikethrough"><Strikethrough className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={toggleHeading} aria-label="Heading"><Type className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('hiliteColor', '#fef08a'))} aria-label="Highlight"><Highlighter className="w-3.5 h-3.5 text-amber-500" /></button>
 
-                        <div className="w-px h-5 bg-border mx-0.5" />
+                      <div className="w-px h-5 bg-border mx-0.5" />
 
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => makeListFromSelection(false)} aria-label="Bullet list"><List className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => makeListFromSelection(true)} aria-label="Numbered list"><ListOrdered className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={toggleBlockquote} aria-label="Quote"><Quote className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('justifyLeft'))} aria-label="Align left"><AlignLeft className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('justifyCenter'))} aria-label="Align center"><AlignCenter className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('justifyRight'))} aria-label="Align right"><AlignRight className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => makeListFromSelection(false)} aria-label="Bullet list"><List className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => makeListFromSelection(true)} aria-label="Numbered list"><ListOrdered className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={toggleBlockquote} aria-label="Quote"><Quote className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('justifyLeft'))} aria-label="Align left"><AlignLeft className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('justifyCenter'))} aria-label="Align center"><AlignCenter className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('justifyRight'))} aria-label="Align right"><AlignRight className="w-3.5 h-3.5" /></button>
 
-                        <div className="w-px h-5 bg-border mx-0.5" />
+                      <div className="w-px h-5 bg-border mx-0.5" />
 
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={handleInsertLink} aria-label="Insert link"><LinkIcon className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('insertHTML', '<code></code>'))} aria-label="Inline code"><Code className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => imageInputRef.current?.click()} aria-label="Inline image"><ImageIcon className="w-3.5 h-3.5" /></button>
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => fileInputRef.current?.click()} aria-label="Attach file"><Paperclip className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={handleInsertLink} aria-label="Insert link"><LinkIcon className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('insertHTML', '<code></code>'))} aria-label="Inline code"><Code className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => imageInputRef.current?.click()} aria-label="Inline image"><ImageIcon className="w-3.5 h-3.5" /></button>
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => fileInputRef.current?.click()} aria-label="Attach file"><Paperclip className="w-3.5 h-3.5" /></button>
 
-                        <div className="w-px h-5 bg-border mx-0.5" />
+                      <div className="w-px h-5 bg-border mx-0.5" />
 
-                        <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 px-2.5 inline-flex items-center justify-center rounded hover:bg-accent text-xs font-medium" onClick={handleClearFormatting} aria-label="Clear formatting">Clear</button>
-                      </div>
-                      <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleAttachFiles(e.target.files)} />
-                      <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleInsertInlineImage(e.target.files)} />
-                      <div className="relative">
-                        {linkInputOpen && linkDialogPosition && (
-                          <div
-                            ref={linkDialogRef}
-                            className="absolute z-50 bg-popover border border-border rounded-md p-1.5 shadow-md text-xs"
-                            style={{
-                              top: `${linkDialogPosition.top}px`,
-                              left: `${linkDialogPosition.left}px`,
-                              minWidth: '280px',
-                              maxWidth: '320px'
-                            }}
-                          >
-                            <div className="space-y-1">
-                              {linkHasSelection && linkTextValue && (
-                                <div className="text-[9px] text-muted-foreground px-1 pb-0.5">
-                                  <span className="font-medium">Selected:</span> "{linkTextValue}"
-                                </div>
-                              )}
+                      <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 px-2.5 inline-flex items-center justify-center rounded hover:bg-accent text-xs font-medium" onClick={handleClearFormatting} aria-label="Clear formatting">Clear</button>
+                    </div>
+                    <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => handleAttachFiles(e.target.files)} />
+                    <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleInsertInlineImage(e.target.files)} />
+                    <div className="relative">
+                      {linkInputOpen && linkDialogPosition && (
+                        <div
+                          ref={linkDialogRef}
+                          className="absolute z-50 bg-popover border border-border rounded-md p-1.5 shadow-md text-xs"
+                          style={{
+                            top: `${linkDialogPosition.top}px`,
+                            left: `${linkDialogPosition.left}px`,
+                            minWidth: '280px',
+                            maxWidth: '320px'
+                          }}
+                        >
+                          <div className="space-y-1">
+                            {linkHasSelection && linkTextValue && (
+                              <div className="text-[9px] text-muted-foreground px-1 pb-0.5">
+                                <span className="font-medium">Selected:</span> "{linkTextValue}"
+                              </div>
+                            )}
+                            <Input
+                              id="link-input-inline"
+                              value={linkInputValue}
+                              onChange={(e) => setLinkInputValue(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && linkInputValue.trim()) {
+                                  e.preventDefault()
+                                  applyLink()
+                                } else if (e.key === 'Escape') {
+                                  setLinkInputOpen(false)
+                                  setLinkInputValue("")
+                                  setLinkTextValue("")
+                                  setLinkDialogPosition(null)
+                                }
+                              }}
+                              placeholder="URL"
+                              className="h-7 text-xs px-2"
+                            />
+                            {!linkHasSelection && (
                               <Input
-                                id="link-input-inline"
-                                value={linkInputValue}
-                                onChange={(e) => setLinkInputValue(e.target.value)}
+                                id="link-text-inline"
+                                value={linkTextValue}
+                                onChange={(e) => setLinkTextValue(e.target.value)}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter' && linkInputValue.trim()) {
                                     e.preventDefault()
@@ -1464,100 +1550,81 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                                     setLinkDialogPosition(null)
                                   }
                                 }}
-                                placeholder="URL"
+                                placeholder="Text (optional)"
                                 className="h-7 text-xs px-2"
                               />
-                              {!linkHasSelection && (
-                                <Input
-                                  id="link-text-inline"
-                                  value={linkTextValue}
-                                  onChange={(e) => setLinkTextValue(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && linkInputValue.trim()) {
-                                      e.preventDefault()
-                                      applyLink()
-                                    } else if (e.key === 'Escape') {
-                                      setLinkInputOpen(false)
-                                      setLinkInputValue("")
-                                      setLinkTextValue("")
-                                      setLinkDialogPosition(null)
-                                    }
-                                  }}
-                                  placeholder="Text (optional)"
-                                  className="h-7 text-xs px-2"
-                                />
-                              )}
-                              <div className="flex items-center gap-1">
-                                <Button size="sm" onClick={applyLink} disabled={!linkInputValue.trim()} className="flex-1 h-6 text-[11px] px-2">
-                                  Insert
-                                </Button>
-                                <Button size="sm" variant="ghost" onClick={() => { setLinkInputOpen(false); setLinkInputValue(""); setLinkTextValue(""); setLinkDialogPosition(null) }} className="h-6 text-[11px] px-2">
-                                  Cancel
-                                </Button>
-                              </div>
+                            )}
+                            <div className="flex items-center gap-1">
+                              <Button size="sm" onClick={applyLink} disabled={!linkInputValue.trim()} className="flex-1 h-6 text-[11px] px-2">
+                                Insert
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => { setLinkInputOpen(false); setLinkInputValue(""); setLinkTextValue(""); setLinkDialogPosition(null) }} className="h-6 text-[11px] px-2">
+                                Cancel
+                              </Button>
                             </div>
                           </div>
-                        )}
-                        <div
-                          ref={editorRef}
-                          contentEditable
-                          suppressContentEditableWarning
-                          onClick={(e) => {
-                            // Clear selection when clicking on empty area (not on text)
-                            const target = e.target as HTMLElement
-                            if (target === editorRef.current) {
-                              const sel = window.getSelection()
-                              sel?.removeAllRanges()
+                        </div>
+                      )}
+                      <div
+                        ref={editorRef}
+                        contentEditable
+                        suppressContentEditableWarning
+                        onClick={(e) => {
+                          // Clear selection when clicking on empty area (not on text)
+                          const target = e.target as HTMLElement
+                          if (target === editorRef.current) {
+                            const sel = window.getSelection()
+                            sel?.removeAllRanges()
+                          }
+                        }}
+                        onInput={handleEditorInput}
+                        onPaste={(e) => {
+                          e.preventDefault()
+                          const text = e.clipboardData.getData('text/plain')
+                          execAndSync(() => {
+                            if (!document.execCommand('insertText', false, text)) {
+                              document.execCommand('insertHTML', false, text)
                             }
-                          }}
-                          onInput={handleEditorInput}
-                          onPaste={(e) => {
+                          })
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            setDraftMinimized(true)
                             e.preventDefault()
-                            const text = e.clipboardData.getData('text/plain')
-                            execAndSync(() => {
-                              if (!document.execCommand('insertText', false, text)) {
-                                document.execCommand('insertHTML', false, text)
-                              }
-                            })
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') {
-                              setDraftMinimized(true)
+                          }
+                          if ((e.key === 'Backspace' || e.key === 'Delete') && typeof window !== 'undefined') {
+                            const sel = window.getSelection()
+                            const node = sel?.anchorNode as HTMLElement | null
+                            const img = node?.nodeType === 1 ? (node as HTMLElement).closest('img') : node?.parentElement?.closest('img')
+                            if (img) {
                               e.preventDefault()
+                              execAndSync(() => img.remove())
+                              return
                             }
-                            if ((e.key === 'Backspace' || e.key === 'Delete') && typeof window !== 'undefined') {
-                              const sel = window.getSelection()
-                              const node = sel?.anchorNode as HTMLElement | null
-                              const img = node?.nodeType === 1 ? (node as HTMLElement).closest('img') : node?.parentElement?.closest('img')
-                              if (img) {
-                                e.preventDefault()
-                                execAndSync(() => img.remove())
-                                return
-                              }
-                            }
-                            handleEditorShortcut(e)
-                          }}
-                          className="w-full min-h-[200px] max-h-[300px] overflow-y-auto p-4 border-2 border-border rounded-xl bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200 prose prose-sm max-w-none prose-img:max-w-full prose-img:max-h-96"
-                          aria-label="Email draft editor"
-                        />
-                        {autoSaving && (
-                          <div className="text-xs text-muted-foreground bg-background/90 px-2 py-1 rounded shadow-sm border border-border absolute top-3 right-3 pointer-events-none select-none">
-                            Saving...
-                          </div>
-                        )}
-                        {attachments.length > 0 && (
-                          <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            {attachments.map(att => (
-                              <div key={att.id} className="flex items-center gap-2 px-3 py-1 rounded-full border border-border bg-muted/40">
-                                <Paperclip className="w-3 h-3" />
-                                <span>{att.name}</span>
-                                <button type="button" onClick={() => setAttachments(prev => prev.filter(a => a.id !== att.id))} className="text-xs text-foreground hover:text-destructive">✕</button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    
+                          }
+                          handleEditorShortcut(e)
+                        }}
+                        className="w-full min-h-[200px] max-h-[300px] overflow-y-auto p-4 border-2 border-border rounded-xl bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all duration-200 prose prose-sm max-w-none prose-img:max-w-full prose-img:max-h-96"
+                        aria-label="Email draft editor"
+                      />
+                      {autoSaving && (
+                        <div className="text-xs text-muted-foreground bg-background/90 px-2 py-1 rounded shadow-sm border border-border absolute top-3 right-3 pointer-events-none select-none">
+                          Saving...
+                        </div>
+                      )}
+                      {attachments.length > 0 && (
+                        <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                          {attachments.map(att => (
+                            <div key={att.id} className="flex items-center gap-2 px-3 py-1 rounded-full border border-border bg-muted/40">
+                              <Paperclip className="w-3 h-3" />
+                              <span>{att.name}</span>
+                              <button type="button" onClick={() => setAttachments(prev => prev.filter(a => a.id !== att.id))} className="text-xs text-foreground hover:text-destructive">✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
                     {!draftMinimized && (
                       <div className="space-y-3 pt-4 border-t border-border">
                         <div className="flex items-center gap-2">

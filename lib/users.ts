@@ -200,17 +200,23 @@ export async function updateUser(
 export async function deleteUser(userId: string): Promise<boolean> {
   if (!supabase) return false;
 
-  const sharedGmailEmail = await getSessionUserEmail();
-  if (!sharedGmailEmail) {
-    throw new Error('No shared Gmail account found');
+  // Get the user to check their business_id
+  const { data: userToDelete, error: fetchError } = await supabase
+    .from('users')
+    .select('business_id')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (fetchError || !userToDelete) {
+    console.error('Error fetching user to delete:', fetchError);
+    throw new Error('User not found');
   }
 
   // Soft delete by setting is_active to false
   const { error } = await supabase
     .from('users')
     .update({ is_active: false })
-    .eq('id', userId)
-    .eq('user_email', sharedGmailEmail);
+    .eq('id', userId);
 
   if (error) {
     console.error('Error deleting user:', error);

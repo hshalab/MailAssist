@@ -411,7 +411,7 @@ export async function getTickets(
     .from('tickets')
     .select(`
       *,
-      assignee:users!tickets_assignee_user_id_fkey(id, name),
+      assignee:users!tickets_assignee_user_id_fkey(id, name, is_active),
       department:departments(id, name)
     `);
 
@@ -478,9 +478,24 @@ export async function getTickets(
   return data.map((row: any) => {
     const ticket = mapRowToTicket(row);
     // Extract assignee name from joined users table
-    if (row.assignee && typeof row.assignee === 'object' && row.assignee.name) {
-      ticket.assigneeName = row.assignee.name;
+    if (row.assignee && typeof row.assignee === 'object') {
+      // Check if user is active (soft-delete check)
+      // If user is ID-present but inactive, treat as unassigned
+      if (row.assignee.is_active === false) {
+        console.log(`[getTickets] Ticket ${ticket.id} assigned to INACTIVE user ${ticket.assigneeUserId}, treating as unassigned`);
+        ticket.assigneeUserId = null;
+        ticket.assigneeName = null;
+      } else if (row.assignee.name) {
+        ticket.assigneeName = row.assignee.name;
+      }
+    } else if (ticket.assigneeUserId) {
+      // If we have an assigneeUserId but no assignee object from the join,
+      // it means the user was deleted or is inaccessible.
+      // Treat this ticket as unassigned.
+      console.log(`[getTickets] Ticket ${ticket.id} assigned to missing user ${ticket.assigneeUserId}, treating as unassigned`);
+      ticket.assigneeUserId = null;
     }
+
     // Extract department name from joined departments table
     if (row.department && typeof row.department === 'object' && row.department.name) {
       ticket.departmentName = row.department.name;
