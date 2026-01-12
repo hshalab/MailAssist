@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { recipientEmail, recipientName, subject, body: emailBody } = body;
+    const { recipientEmail, recipientName, subject, body: emailBody, bodyHtml } = body;
 
     if (!recipientEmail || !subject || !emailBody) {
       return NextResponse.json(
@@ -38,8 +38,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Convert HTML to plain text if only HTML is provided
+    let plainTextBody = emailBody;
+    let htmlBody = bodyHtml;
+    
+    // If emailBody contains HTML tags but no bodyHtml was provided, extract plain text
+    if (!htmlBody && /<[^>]+>/.test(emailBody)) {
+      // Import htmlToText to convert HTML to plain text
+      const { htmlToText } = await import('@/lib/html-to-text');
+      plainTextBody = htmlToText(emailBody);
+      htmlBody = emailBody; // Use the original as HTML
+    } else if (htmlBody && !plainTextBody) {
+      // If only HTML is provided, extract plain text
+      const { htmlToText } = await import('@/lib/html-to-text');
+      plainTextBody = htmlToText(htmlBody);
+    }
+
     // Send email and create ticket
-    const result = await sendNewEmail(recipientEmail, recipientName || null, subject, emailBody, userId);
+    const result = await sendNewEmail(recipientEmail, recipientName || null, subject, plainTextBody, userId, htmlBody);
 
     return NextResponse.json({
       success: true,

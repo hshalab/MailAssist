@@ -108,6 +108,9 @@ export default function ComposeView({ currentUserId, onEmailSent, setActiveView 
     setError(null)
 
     try {
+      // Ensure we have plain text version (for email clients that don't support HTML)
+      const plainTextBody = bodyText.trim() || bodyHtml.replace(/<[^>]+>/g, '').trim()
+      
       const response = await fetch("/api/compose/send", {
         method: "POST",
         headers: {
@@ -117,7 +120,8 @@ export default function ComposeView({ currentUserId, onEmailSent, setActiveView 
           recipientEmail: recipient.trim(),
           recipientName: recipientName.trim() || null,
           subject: subject.trim(),
-          body: bodyHtml.trim(),
+          body: plainTextBody,
+          bodyHtml: bodyHtml.trim(),
           attachments: attachments,
         }),
       })

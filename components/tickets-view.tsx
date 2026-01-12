@@ -2051,7 +2051,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     let filtered = [...tickets]
     console.log('[Filter] Starting with', filtered.length, 'tickets')
 
-    // IMPORTANT: When searching, search across ALL tickets first, then apply tab filter
+    // IMPORTANT: When searching, search across ALL tickets (including closed) regardless of tab
     // This allows searching closed tickets even when not on the closed tab
     if (activeSearchQuery) {
       const query = activeSearchQuery.toLowerCase()
@@ -2060,40 +2060,25 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         t.customerEmail.toLowerCase().includes(query) ||
         (t.customerName && t.customerName.toLowerCase().includes(query))
       )
-      console.log('[Filter] After search query:', filtered.length)
-    }
-
-    // Tab-based filtering (applied after search so search works across all tabs)
-    // When searching, still apply tab filter but include closed tickets in search results
-    console.log('[Filter] After tab filter (' + activeTab + '):', filtered.length)
-    if (activeTab === "assigned") {
-      // When searching, include closed assigned tickets; otherwise exclude closed
-      if (activeSearchQuery) {
-        filtered = filtered.filter(t => t.assigneeUserId === currentUserId)
-      } else {
+      console.log('[Filter] After search query (searching ALL tickets including closed):', filtered.length)
+      // When searching, skip tab-based filtering - show all matching tickets regardless of tab
+      // This ensures closed tickets are searchable from any tab
+    } else {
+      // Tab-based filtering (only applied when NOT searching)
+      console.log('[Filter] Applying tab filter (' + activeTab + '):', filtered.length)
+      if (activeTab === "assigned") {
         filtered = filtered.filter(t => t.assigneeUserId === currentUserId && t.status !== "closed")
-      }
-      console.log('[Filter] Assigned filter:', filtered.length)
-    } else if (activeTab === "unassigned") {
-      // When searching, include closed unassigned tickets; otherwise exclude closed
-      if (activeSearchQuery) {
-        filtered = filtered.filter(t => t.assigneeUserId === null)
-      } else {
+        console.log('[Filter] Assigned filter:', filtered.length)
+      } else if (activeTab === "unassigned") {
         filtered = filtered.filter(t => t.assigneeUserId === null && t.status !== "closed")
-      }
-      console.log('[Filter] Unassigned filter:', filtered.length)
-    } else if (activeTab === "open") {
-      // When searching, include closed tickets that match; otherwise exclude closed
-      if (activeSearchQuery) {
-        // Don't filter by status when searching - show all matching tickets including closed
-        // The search already filtered, so we just keep all results
-      } else {
+        console.log('[Filter] Unassigned filter:', filtered.length)
+      } else if (activeTab === "open") {
         filtered = filtered.filter(t => t.status !== "closed")
+        console.log('[Filter] Open filter:', filtered.length)
+      } else if (activeTab === "closed") {
+        filtered = filtered.filter(t => t.status === "closed")
+        console.log('[Filter] Closed filter:', filtered.length)
       }
-      console.log('[Filter] Open filter:', filtered.length)
-    } else if (activeTab === "closed") {
-      filtered = filtered.filter(t => t.status === "closed")
-      console.log('[Filter] Closed filter:', filtered.length)
     }
 
     // Auto-filter closed tickets if preference is set (only applies when not on closed tab)

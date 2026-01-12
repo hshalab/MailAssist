@@ -631,7 +631,8 @@ export async function sendNewEmail(
   recipientName: string | null,
   subject: string,
   body: string,
-  userId: string
+  userId: string,
+  bodyHtml?: string
 ) {
   // CRITICAL FIX: For invited users, get tokens from business-connected accounts
   let tokens = await getValidTokens();
@@ -663,11 +664,43 @@ export async function sendNewEmail(
     `To: ${to}`,
     `Subject: ${subject}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
   ].filter(Boolean).join('\r\n');
 
-  const normalizedBody = body.replace(/\r?\n/g, '\r\n');
-  const message = `${headers}\r\n\r\n${normalizedBody}`;
+  const hasHtml = Boolean(bodyHtml);
+  const altBoundary = `alt-${Date.now()}`;
+
+  const textPart = [
+    `--${altBoundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    '',
+    body.replace(/\r?\n/g, '\r\n'),
+    '',
+  ].join('\r\n');
+
+  const htmlPart = hasHtml
+    ? [
+      `--${altBoundary}`,
+      'Content-Type: text/html; charset="UTF-8"',
+      '',
+      bodyHtml!,
+      '',
+    ].join('\r\n')
+    : '';
+
+  const altClosing = `--${altBoundary}--`;
+
+  let message = '';
+  if (hasHtml) {
+    // Use multipart/alternative to send both text and HTML
+    message += `${headers}\r\nContent-Type: multipart/alternative; boundary="${altBoundary}"\r\n\r\n`;
+    message += textPart;
+    message += htmlPart;
+    message += altClosing;
+  } else {
+    // Plain text only
+    message += `${headers}\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n${body.replace(/\r?\n/g, '\r\n')}`;
+  }
+
   const encodedMessage = encodeBase64Url(message);
 
   // Send the email with retry logic and better error handling
