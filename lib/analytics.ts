@@ -84,11 +84,14 @@ export async function logAIUsage(log: AIUsageLog): Promise<void> {
 /**
  * Get ticket analytics for a date range
  * Calculates from actual tickets table instead of aggregated table
+ * For business accounts, includes all tickets for the business
+ * For personal accounts, includes only tickets for the user email
  */
 export async function getTicketAnalytics(
   userEmail: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  businessId?: string | null
 ): Promise<{
   byStatus: Record<string, number>;
   totalTickets: number;
@@ -105,13 +108,50 @@ export async function getTicketAnalytics(
   }
 
   try {
-    // Get all tickets for this user email within date range
-    const { data: tickets, error } = await supabase
+    let query = supabase
       .from('tickets')
       .select('status, created_at, updated_at, last_customer_reply_at, last_agent_reply_at')
-      .eq('user_email', userEmail)
       .gte('created_at', startDate.toISOString())
       .lte('created_at', endDate.toISOString());
+
+    // For business accounts, get all tickets for connected Gmail accounts in this business
+    // For personal accounts, filter by user_email
+    if (businessId) {
+      // Get all connected account emails from tokens table
+      const { data: tokens } = await supabase
+        .from('tokens')
+        .select('user_email')
+        .eq('business_id', businessId)
+        .not('user_email', 'is', null);
+      
+      if (tokens && tokens.length > 0) {
+        const accountEmails = [...new Set(tokens.map(t => t.user_email).filter(Boolean))] as string[];
+        if (accountEmails.length > 0) {
+          query = query.in('user_email', accountEmails);
+        } else {
+          // No connected accounts found, return empty
+          return {
+            byStatus: {},
+            totalTickets: 0,
+            avgResponseTime: 0,
+            avgResolutionTime: 0,
+          };
+        }
+      } else {
+        // No connected accounts found, return empty
+        return {
+          byStatus: {},
+          totalTickets: 0,
+          avgResponseTime: 0,
+          avgResolutionTime: 0,
+        };
+      }
+    } else {
+      // Personal account - filter by user email
+      query = query.eq('user_email', userEmail);
+    }
+
+    const { data: tickets, error } = await query;
 
     if (error) throw error;
 
@@ -176,11 +216,14 @@ export async function getTicketAnalytics(
 
 /**
  * Get guardrail usage statistics
+ * For business accounts, includes all guardrail logs for the business
+ * For personal accounts, includes only logs for the user email
  */
 export async function getGuardrailStats(
   userEmail: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  businessId?: string | null
 ): Promise<{
   totalApplied: number;
   totalBlocked: number;
@@ -201,12 +244,48 @@ export async function getGuardrailStats(
     const endDateWithTime = new Date(endDate);
     endDateWithTime.setHours(23, 59, 59, 999);
     
-    const { data, error } = await supabase
+    let query = supabase
       .from('guardrail_logs')
       .select('action, guardrail_type, details')
-      .eq('user_email', userEmail)
       .gte('created_at', startDate.toISOString())
       .lte('created_at', endDateWithTime.toISOString());
+
+    // For business accounts, get all logs for connected Gmail accounts in this business
+    // For personal accounts, filter by user_email
+    if (businessId) {
+      // Get all connected account emails from tokens table
+      const { data: tokens } = await supabase
+        .from('tokens')
+        .select('user_email')
+        .eq('business_id', businessId)
+        .not('user_email', 'is', null);
+      
+      if (tokens && tokens.length > 0) {
+        const accountEmails = [...new Set(tokens.map(t => t.user_email).filter(Boolean))] as string[];
+        if (accountEmails.length > 0) {
+          query = query.in('user_email', accountEmails);
+        } else {
+          return {
+            totalApplied: 0,
+            totalBlocked: 0,
+            topicRulesTriggered: 0,
+            bannedWordsFound: 0,
+          };
+        }
+      } else {
+        return {
+          totalApplied: 0,
+          totalBlocked: 0,
+          topicRulesTriggered: 0,
+          bannedWordsFound: 0,
+        };
+      }
+    } else {
+      // Personal account - filter by user email
+      query = query.eq('user_email', userEmail);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -259,11 +338,14 @@ export async function getGuardrailStats(
 
 /**
  * Get AI usage statistics
+ * For business accounts, includes all AI usage logs for the business
+ * For personal accounts, includes only logs for the user email
  */
 export async function getAIUsageStats(
   userEmail: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  businessId?: string | null
 ): Promise<{
   draftsGenerated: number;
   draftsRegenerated: number;
@@ -288,12 +370,52 @@ export async function getAIUsageStats(
     const endDateWithTime = new Date(endDate);
     endDateWithTime.setHours(23, 59, 59, 999);
     
-    const { data, error } = await supabase
+    let query = supabase
       .from('ai_usage_logs')
       .select('action, response_time_ms, knowledge_item_ids, was_edited, was_sent, user_id')
-      .eq('user_email', userEmail)
       .gte('created_at', startDate.toISOString())
       .lte('created_at', endDateWithTime.toISOString());
+
+    // For business accounts, get all logs for connected Gmail accounts in this business
+    // For personal accounts, filter by user_email
+    if (businessId) {
+      // Get all connected account emails from tokens table
+      const { data: tokens } = await supabase
+        .from('tokens')
+        .select('user_email')
+        .eq('business_id', businessId)
+        .not('user_email', 'is', null);
+      
+      if (tokens && tokens.length > 0) {
+        const accountEmails = [...new Set(tokens.map(t => t.user_email).filter(Boolean))] as string[];
+        if (accountEmails.length > 0) {
+          query = query.in('user_email', accountEmails);
+        } else {
+          return {
+            draftsGenerated: 0,
+            draftsRegenerated: 0,
+            draftsEdited: 0,
+            draftsSent: 0,
+            avgResponseTime: 0,
+            knowledgeItemsUsed: {},
+          };
+        }
+      } else {
+        return {
+          draftsGenerated: 0,
+          draftsRegenerated: 0,
+          draftsEdited: 0,
+          draftsSent: 0,
+          avgResponseTime: 0,
+          knowledgeItemsUsed: {},
+        };
+      }
+    } else {
+      // Personal account - filter by user email
+      query = query.eq('user_email', userEmail);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -353,11 +475,14 @@ export async function getAIUsageStats(
 /**
  * Get individual agent analytics from actual usage logs
  * This calculates real-time stats from ai_usage_logs and tickets tables
+ * For business accounts, includes all users in the business
+ * For personal accounts, includes only users with the same email
  */
 export async function getAgentAnalytics(
   userEmail: string,
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  businessId?: string | null
 ): Promise<
   Array<{
     userId: string;
@@ -381,11 +506,20 @@ export async function getAgentAnalytics(
     endDateWithTime.setHours(23, 59, 59, 999);
 
     // Get all users for this account
-    const { data: users } = await supabase
+    let usersQuery = supabase
       .from('users')
-      .select('id, name')
-      .eq('user_email', userEmail)
+      .select('id, name, user_email')
       .eq('is_active', true);
+
+    if (businessId) {
+      // Business account - get all users in the business
+      usersQuery = usersQuery.eq('business_id', businessId);
+    } else {
+      // Personal account - get users with same email
+      usersQuery = usersQuery.eq('user_email', userEmail);
+    }
+
+    const { data: users } = await usersQuery;
 
     if (!users || users.length === 0) {
       return [];
@@ -393,24 +527,63 @@ export async function getAgentAnalytics(
 
     const userIds = users.map(u => u.id);
     const userMap = new Map(users.map(u => [u.id, u.name]));
-
     // Get AI usage stats per user
-    const { data: aiLogs } = await supabase
+    let aiLogsQuery = supabase
       .from('ai_usage_logs')
       .select('user_id, action, was_edited, was_sent, response_time_ms')
-      .eq('user_email', userEmail)
       .in('user_id', userIds)
       .gte('created_at', startDate.toISOString())
       .lte('created_at', endDateWithTime.toISOString());
 
+    if (businessId) {
+      // Business account - get all connected account emails from tokens table
+      const { data: tokens } = await supabase
+        .from('tokens')
+        .select('user_email')
+        .eq('business_id', businessId)
+        .not('user_email', 'is', null);
+      
+      if (tokens && tokens.length > 0) {
+        const accountEmails = [...new Set(tokens.map(t => t.user_email).filter(Boolean))] as string[];
+        if (accountEmails.length > 0) {
+          aiLogsQuery = aiLogsQuery.in('user_email', accountEmails);
+        }
+      }
+    } else {
+      // Personal account - filter by user email
+      aiLogsQuery = aiLogsQuery.eq('user_email', userEmail);
+    }
+
+    const { data: aiLogs } = await aiLogsQuery;
+
     // Get ticket stats per user
-    const { data: tickets } = await supabase
+    let ticketsQuery = supabase
       .from('tickets')
       .select('assignee_user_id, status, last_customer_reply_at, last_agent_reply_at')
-      .eq('user_email', userEmail)
       .in('assignee_user_id', userIds)
       .gte('created_at', startDate.toISOString())
       .lte('created_at', endDateWithTime.toISOString());
+
+    if (businessId) {
+      // Business account - get all connected account emails from tokens table
+      const { data: tokens } = await supabase
+        .from('tokens')
+        .select('user_email')
+        .eq('business_id', businessId)
+        .not('user_email', 'is', null);
+      
+      if (tokens && tokens.length > 0) {
+        const accountEmails = [...new Set(tokens.map(t => t.user_email).filter(Boolean))] as string[];
+        if (accountEmails.length > 0) {
+          ticketsQuery = ticketsQuery.in('user_email', accountEmails);
+        }
+      }
+    } else {
+      // Personal account - filter by user email
+      ticketsQuery = ticketsQuery.eq('user_email', userEmail);
+    }
+
+    const { data: tickets } = await ticketsQuery;
 
     // Aggregate stats per user
     const agentStats = new Map<string, {

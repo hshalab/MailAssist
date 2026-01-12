@@ -20,6 +20,27 @@ function htmlToText(html: string): string {
 
   // Remove all remaining HTML tags
   text = text.replace(/<[^>]+>/g, '')
+  
+  // Remove CSS that appears as plain text at the start (before actual email content)
+  // This handles malformed emails where CSS leaks through without style tags
+  const cssAtStartMatch = text.match(/^([\s\n]*(?:\.[\w-]+\s*\{[^}]*\}|@media[^}]*\{[^}]*\}|[a-z-]+\s*:\s*[^;]+;)+[\s\n]*)+/i)
+  if (cssAtStartMatch && cssAtStartMatch[0]) {
+    const potentialCss = cssAtStartMatch[0]
+    const afterCss = text.substring(potentialCss.length).trim()
+    
+    // Only remove if it's clearly CSS followed by actual email content
+    const isCssBlock = potentialCss.includes('{') && 
+                       potentialCss.includes('}') &&
+                       (potentialCss.includes('.') || potentialCss.includes('@media'))
+    
+    const hasEmailContent = afterCss.length > 0 && 
+                           (/^[A-Z][a-z]+/.test(afterCss) || // Starts with capitalized word
+                            /placed order|order summary|view order|shipping|payment|delivery/i.test(afterCss))
+    
+    if (isCssBlock && hasEmailContent) {
+      text = afterCss
+    }
+  }
 
   // Decode common HTML entities
   text = text.replace(/&nbsp;/g, ' ')

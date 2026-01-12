@@ -17,6 +17,33 @@ export function htmlToText(html: string): string {
 
     // Remove all HTML tags
     text = text.replace(/<[^>]+>/g, '')
+    
+  // Remove CSS that appears as plain text at the start (before actual email content)
+  // This handles malformed emails where CSS leaks through without style tags
+  // Match CSS patterns more aggressively - look for CSS selectors and rules
+  const cssPattern = /^([\s\n]*(?:\.[\w-]+\s*\{[^}]*\}|@media[^}]*\{[^}]*\}|[a-z-]+\s*:\s*[^;]+;|@[^{]+\{[^}]*\})+[\s\n]*)+/i
+  const cssAtStartMatch = text.match(cssPattern)
+  
+  if (cssAtStartMatch && cssAtStartMatch[0]) {
+    const potentialCss = cssAtStartMatch[0]
+    const afterCss = text.substring(potentialCss.length).trim()
+    
+    // Only remove if it's clearly CSS (has CSS structure) followed by actual email content
+    const isCssBlock = potentialCss.includes('{') && 
+                       potentialCss.includes('}') &&
+                       (potentialCss.includes('.') || potentialCss.includes('@media') || potentialCss.includes('@'))
+    
+    // Check if what follows looks like email content (not more CSS)
+    const hasEmailContent = afterCss.length > 0 && 
+                           (!afterCss.match(/^[\s\n]*(?:\.[\w-]+\s*\{|@media|@[^{]+\{)/i) && // Not more CSS
+                            (/^[A-Z][a-z]+/.test(afterCss) || // Starts with capitalized word (name)
+                             /placed order|order summary|view order|shipping|payment|delivery|total|subtotal|address/i.test(afterCss) ||
+                             afterCss.length > 20)) // Or substantial content
+    
+    if (isCssBlock && hasEmailContent) {
+      text = afterCss
+    }
+  }
 
     // Decode HTML entities
     text = text.replace(/&nbsp;/g, ' ')

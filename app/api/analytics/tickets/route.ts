@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getTicketAnalytics } from '@/lib/analytics';
-import { getSessionUserEmailFromRequest } from '@/lib/session';
+import { getSessionUserEmailFromRequest, validateBusinessSession } from '@/lib/session';
 import { validatePagination, isValidDate } from '@/lib/validation';
 
 export async function GET(request: NextRequest) {
@@ -16,6 +16,10 @@ export async function GET(request: NextRequest) {
         { status: 401 }
       );
     }
+
+    // Get business context for team-wide analytics
+    const businessSession = await validateBusinessSession();
+    const businessId = businessSession?.businessId || null;
 
     const url = new URL(request.url);
     const startDateStr = url.searchParams.get('startDate') || '';
@@ -29,7 +33,7 @@ export async function GET(request: NextRequest) {
       ? new Date(startDateStr)
       : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
 
-    const analytics = await getTicketAnalytics(userEmail, startDate, endDate);
+    const analytics = await getTicketAnalytics(userEmail, startDate, endDate, businessId);
 
     return NextResponse.json({
       analytics,

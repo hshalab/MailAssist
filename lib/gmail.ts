@@ -546,6 +546,38 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
     bodyText = bodyResult.text;
     bodyHtml = bodyResult.html || '';
 
+    // Gmail/Outlook behavior: Strip CSS that appears as plain text (not in style tags)
+    // This prevents CSS from appearing as visible text in emails
+    if (bodyHtml) {
+      // Remove CSS patterns that appear as plain text at the start
+      const cssPattern = /^([\s\n]*(?:\.[\w-]+\s*\{[^}]*\}|@media[^}]*\{[^}]*\}|@[^{]+\{[^}]*\}|[a-z-]+\s*:\s*[^;]+;)+[\s\n]*)+/i
+      const cssMatch = bodyHtml.match(cssPattern)
+      if (cssMatch && cssMatch[0]) {
+        const potentialCss = cssMatch[0]
+        const afterCss = bodyHtml.substring(potentialCss.length).trim()
+        // Only remove if it's clearly CSS followed by actual content
+        if (potentialCss.includes('{') && potentialCss.includes('}') && 
+            (potentialCss.includes('.') || potentialCss.includes('@media') || potentialCss.includes('@')) &&
+            afterCss.length > 0 && !afterCss.match(/^[\s\n]*(?:\.[\w-]+\s*\{|@media)/i)) {
+          bodyHtml = afterCss
+        }
+      }
+    }
+    if (bodyText) {
+      // Also clean plain text body
+      const cssPattern = /^([\s\n]*(?:\.[\w-]+\s*\{[^}]*\}|@media[^}]*\{[^}]*\}|@[^{]+\{[^}]*\}|[a-z-]+\s*:\s*[^;]+;)+[\s\n]*)+/i
+      const cssMatch = bodyText.match(cssPattern)
+      if (cssMatch && cssMatch[0]) {
+        const potentialCss = cssMatch[0]
+        const afterCss = bodyText.substring(potentialCss.length).trim()
+        if (potentialCss.includes('{') && potentialCss.includes('}') && 
+            (potentialCss.includes('.') || potentialCss.includes('@media') || potentialCss.includes('@')) &&
+            afterCss.length > 0 && !afterCss.match(/^[\s\n]*(?:\.[\w-]+\s*\{|@media)/i)) {
+          bodyText = afterCss
+        }
+      }
+    }
+
     // Use HTML if no plain text, keep the HTML for proper rendering
     if (!bodyText && bodyHtml) {
       bodyText = bodyHtml;

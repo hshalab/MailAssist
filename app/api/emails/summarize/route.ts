@@ -37,6 +37,27 @@ export async function POST(request: NextRequest) {
             .replace(/<[^>]+>/g, ' ')
             .replace(/\s+/g, ' ')
             .trim()
+        
+        // Remove CSS that appears as plain text at the start (before actual email content)
+        // This handles malformed emails where CSS leaks through without style tags
+        const cssAtStartMatch = cleanedContent.match(/^([\s\n]*(?:\.[\w-]+\s*\{[^}]*\}|@media[^}]*\{[^}]*\}|[a-z-]+\s*:\s*[^;]+;)+[\s\n]*)+/i)
+        if (cssAtStartMatch && cssAtStartMatch[0]) {
+            const potentialCss = cssAtStartMatch[0]
+            const afterCss = cleanedContent.substring(potentialCss.length).trim()
+            
+            // Only remove if it's clearly CSS followed by actual email content
+            const isCssBlock = potentialCss.includes('{') && 
+                               potentialCss.includes('}') &&
+                               (potentialCss.includes('.') || potentialCss.includes('@media'))
+            
+            const hasEmailContent = afterCss.length > 0 && 
+                                   (/^[A-Z][a-z]+/.test(afterCss) || // Starts with capitalized word
+                                    /placed order|order summary|view order|shipping|payment|delivery/i.test(afterCss))
+            
+            if (isCssBlock && hasEmailContent) {
+                cleanedContent = afterCss
+            }
+        }
 
         // Limit content length to avoid token limits (approx 4000 chars = ~1000 tokens)
         if (cleanedContent.length > 4000) {

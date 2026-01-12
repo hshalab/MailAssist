@@ -14,6 +14,7 @@ interface EmailContentViewerProps {
 
 export function EmailContentViewer({ content, emailId, attachments, className }: EmailContentViewerProps) {
     const [processedContent, setProcessedContent] = useState("")
+    const [extractedStyles, setExtractedStyles] = useState<string[]>([])
     const [iframeHeight, setIframeHeight] = useState(200)
     const [loading, setLoading] = useState(false)
     const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(true)
@@ -32,6 +33,7 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
     useEffect(() => {
         if (!content) {
             setProcessedContent("")
+            setExtractedStyles([])
             setLoading(false)
             return
         }
@@ -41,6 +43,7 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
         const isNewEmail = emailId !== previousEmailIdRef.current
         if (isNewEmail) {
             setLoading(true)
+            setExtractedStyles([]) // Reset styles when switching emails
             previousEmailIdRef.current = emailId
         }
 
@@ -77,21 +80,102 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             normalizedContent = normalizedContent.replace(/\n/g, '<br>')
         }
 
+        // Extract style tags BEFORE sanitization to preserve their content
+        // Some emails have style tags in the body that get stripped by DOMPurify
+        // Use a more robust regex that handles various style tag formats
+        const styleTagRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi
+        const styles: string[] = []
+        let styleMatch
+        let lastIndex = 0
+        const tempContent = normalizedContent
+        
+        // Reset regex lastIndex to ensure we match all occurrences
+        styleTagRegex.lastIndex = 0
+        while ((styleMatch = styleTagRegex.exec(tempContent)) !== null) {
+            if (styleMatch[1]) {
+                styles.push(styleMatch[1].trim()) // Extract and trim the CSS content
+            }
+            lastIndex = styleTagRegex.lastIndex
+        }
+        
+        // Store extracted styles for injection into iframe head
+        setExtractedStyles(styles)
+        
+        // Remove style tags from content before sanitization (we'll add them back to iframe head)
+        // Use a more aggressive pattern that handles nested or malformed style tags
+        let contentWithoutStyles = normalizedContent
+        
+        // First pass: remove properly formatted style tags
+        contentWithoutStyles = contentWithoutStyles.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        
+        // Second pass: remove any remaining style tags that might be malformed
+        contentWithoutStyles = contentWithoutStyles.replace(/<style[^>]*>[\s\S]*?(?=<[^>]*>|$)/gi, '')
+        
+        // Third pass: remove any standalone style opening tags
+        contentWithoutStyles = contentWithoutStyles.replace(/<style[^>]*>/gi, '')
+        contentWithoutStyles = contentWithoutStyles.replace(/<\/style>/gi, '')
+
         // Configure DOMPurify to allow common email tags, attributes, and URI schemes
-        const clean = DOMPurify.sanitize(normalizedContent, {
+        const clean = DOMPurify.sanitize(contentWithoutStyles, {
             USE_PROFILES: { html: true },
-            // Allow common formatting tags plus style (many emails rely on inline <style>)
-            ADD_TAGS: ['style', 'center', 'font', 'table', 'tbody', 'thead', 'tfoot', 'tr', 'td', 'th', 'div', 'span', 'p', 'br', 'hr', 'img', 'a', 'ul', 'ol', 'li', 'blockquote', 'b', 'strong', 'i', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
+            // Allow common formatting tags (style tags are handled separately)
+            ADD_TAGS: ['center', 'font', 'table', 'tbody', 'thead', 'tfoot', 'tr', 'td', 'th', 'div', 'span', 'p', 'br', 'hr', 'img', 'a', 'ul', 'ol', 'li', 'blockquote', 'b', 'strong', 'i', 'em', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
             ADD_ATTR: ['style', 'target', 'href', 'src', 'width', 'height', 'align', 'valign', 'bgcolor', 'border', 'cellpadding', 'cellspacing', 'colspan', 'rowspan', 'class', 'id', 'alt', 'title'],
             ADD_URI_SAFE_ATTR: ['src', 'href'],
             ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|data|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
-            // Forbid active/unsafe embeds; allow <style> for email fidelity
-            FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button', 'svg', 'canvas', 'video', 'audio'],
+            // Forbid active/unsafe embeds
+            FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button', 'svg', 'canvas', 'video', 'audio', 'style'],
             FORBID_ATTR: ['onmouseover', 'onclick', 'onerror', 'onload', 'onmouseenter', 'onmouseleave']
         })
 
-        // Process the cleaned HTML to handle images
+        // Process the cleaned HTML - style tags have already been removed
         let processed = clean
+        
+        // Gmail/Outlook behavior: Strip any CSS that appears as plain text
+        // This handles malformed emails where CSS leaks through without style tags
+        // Be aggressive like Gmail - remove CSS patterns that appear as text
+        if (processed.trim()) {
+            // Pattern to match CSS rules at the start (before HTML or email content)
+            // Matches: .selector { }, @media { }, property: value;
+            const cssPattern = /^([\s\n]*(?:\.[\w-]+\s*\{[^}]*\}|@media[^}]*\{[^}]*\}|@[^{]+\{[^}]*\}|[a-z-]+\s*:\s*[^;]+;)+[\s\n]*)+/i
+            
+            // Try to match CSS at the start
+            let cssMatch = processed.match(cssPattern)
+            
+            // If no match at start, try to find CSS anywhere before the first substantial content
+            if (!cssMatch) {
+                // Look for CSS patterns followed by email-like content
+                const cssWithContentPattern = /([\s\n]*(?:\.[\w-]+\s*\{[^}]*\}|@media[^}]*\{[^}]*\}|@[^{]+\{[^}]*\}|[a-z-]+\s*:\s*[^;]+;)+[\s\n]*)+(?=[A-Z][a-z]+\s+(placed|order|view|shipping|payment|delivery|total|subtotal|address)|<[a-z])/i
+                cssMatch = processed.match(cssWithContentPattern)
+            }
+            
+            if (cssMatch && cssMatch[0]) {
+                const potentialCss = cssMatch[0]
+                const cssStartIndex = processed.indexOf(potentialCss)
+                const afterCss = processed.substring(cssStartIndex + potentialCss.length).trim()
+                
+                // Verify it's CSS (has CSS structure)
+                const isCssBlock = potentialCss.includes('{') && 
+                                   potentialCss.includes('}') &&
+                                   (potentialCss.includes('.') || potentialCss.includes('@media') || potentialCss.includes('@') || potentialCss.includes(':'))
+                
+                // Check if followed by actual email content (not more CSS)
+                const hasEmailContent = afterCss.length > 0 && 
+                                       (!afterCss.match(/^[\s\n]*(?:\.[\w-]+\s*\{|@media|@[^{]+\{)/i) && // Not more CSS
+                                        (afterCss.startsWith('<') || // HTML tags
+                                         /^[A-Z][a-z]+/.test(afterCss) || // Name/word
+                                         /placed order|order summary|view order|shipping|payment|delivery|total|subtotal|address/i.test(afterCss) ||
+                                         afterCss.length > 15)) // Substantial content
+                
+                if (isCssBlock && hasEmailContent) {
+                    // Remove the CSS block (like Gmail/Outlook do)
+                    processed = processed.substring(0, cssStartIndex) + processed.substring(cssStartIndex + potentialCss.length)
+                    processed = processed.trim()
+                }
+            }
+        }
+        
+        // Process the cleaned HTML to handle images
         let remoteImageCount = 0
 
         const transparentPixel = "data:image/gif;base64,R0lGODlhAQABAIAAAP///////ywAAAAAAQABAAACAUwAOw=="
@@ -315,12 +399,18 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
     const fallbackText = isDarkMode ? '#e2e8f0' : '#1f2937'  // slate-200 for dark, gray-800 for light
     const fallbackLink = isDarkMode ? '#60a5fa' : '#2563eb'  // blue-400 for dark, blue-600 for light
 
+    // Inject extracted email styles into iframe head
+    const emailStylesHtml = extractedStyles.length > 0
+        ? extractedStyles.map(css => `<style>${css}</style>`).join('\n')
+        : ''
+
     const iframeHtml = `
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            ${emailStylesHtml}
             <style>
                 :root { color-scheme: ${isDarkMode ? 'dark' : 'light'}; }
                 * { box-sizing: border-box; }
