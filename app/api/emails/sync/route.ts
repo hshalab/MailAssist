@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     // Cap maxResults at 600 to prevent processing too many emails
     // For business accounts, we distribute this across all connected accounts
     const requestedMax = parseInt(searchParams.get('maxResults') || '100');
-    const maxResults = Math.min(requestedMax, 600);
+    const maxResults = Math.min(requestedMax, 2000);
 
     // Check for business session first
     const { validateBusinessSession } = await import('@/lib/session');
@@ -45,20 +45,20 @@ export async function POST(request: NextRequest) {
       // Get account count first to calculate per-account limit
       const accounts = await loadBusinessTokens(businessSession.businessId, businessSession.email);
       const accountCount = Math.max(accounts.length, 1); // At least 1 to avoid division by zero
-      
+
       // Distribute limit evenly: each account gets maxResults / accountCount
       // Ensure minimum of 50 emails per account so smaller accounts aren't excluded
       const perAccountLimit = Math.max(Math.floor(maxResults / accountCount), 50);
-      
+
       console.log(`[SYNC] Distributing ${maxResults} emails across ${accountCount} accounts (${perAccountLimit} per account)`);
-      
+
       // Fetch from all accounts with fair distribution
       sentEmails = await fetchAllSentEmails(businessSession.businessId, perAccountLimit, businessSession.email);
-      
+
       // Also fetch inbox emails to create tickets from them
       console.log('[SYNC] Fetching inbox emails to create tickets...');
       inboxEmails = await fetchAllInboxEmails(businessSession.businessId, perAccountLimit, undefined, businessSession.email);
-      
+
       // Filter out spam/trash from inbox emails
       inboxEmails = inboxEmails.filter((email: any) => {
         const labels = email.labels || [];
@@ -84,12 +84,12 @@ export async function POST(request: NextRequest) {
       }
 
       sentEmails = await fetchSentEmails(tokens, maxResults);
-      
+
       // Also fetch inbox emails to create tickets
       console.log('[SYNC] Fetching inbox emails to create tickets...');
       const { fetchInboxEmails } = await import('@/lib/gmail');
       inboxEmails = await fetchInboxEmails(tokens, maxResults);
-      
+
       // Filter out spam/trash
       inboxEmails = inboxEmails.filter((email: any) => {
         const labels = email.labels || [];
@@ -97,14 +97,14 @@ export async function POST(request: NextRequest) {
         return !labels.some((label: string) => blockedLabels.includes(label));
       });
       console.log(`[SYNC] Found ${inboxEmails.length} inbox emails (after filtering spam/trash)`);
-      
+
       userEmail = await getCurrentUserEmail();
     }
 
     // Use explicit userEmail for sync state operations
     const currentSyncState = await loadSyncState(userEmail || undefined);
     const isContinuing = currentSyncState.status === 'running';
-    
+
     // Always process inbox emails for tickets, even when continuing (to catch any missed emails)
     // But only do full processing on first sync
     const shouldProcessInboxEmails = !isContinuing || inboxEmails.length > 0;
@@ -260,13 +260,13 @@ export async function POST(request: NextRequest) {
  */
 async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: string | null, userEmailForClassify?: string | null): Promise<void> {
   console.log(`[SYNC] processInboxEmailsForTickets called with ${inboxEmails.length} emails, businessId: ${businessId}, userEmail: ${userEmailForClassify}`);
-  
+
   // Filter emails by date - only process emails from the last 30-60 days
   // This prevents creating tickets for very old emails that are likely already resolved
   const DAYS_TO_SYNC = 60; // Configurable: 30 for more conservative, 60 for broader coverage
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - DAYS_TO_SYNC);
-  
+
   const recentEmails = inboxEmails.filter(email => {
     try {
       const emailDate = new Date(email.date);
@@ -276,15 +276,29 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
       return false; // Skip emails with invalid dates
     }
   });
-  
+
   console.log(`[SYNC] Filtered to ${recentEmails.length} recent emails (last ${DAYS_TO_SYNC} days) out of ${inboxEmails.length} total`);
-  
+
   // Count unique threads
-  const uniqueThreads = new Set(recentEmails.map(e => e.threadId || e.id));
-  console.log(`[SYNC] Found ${uniqueThreads.size} unique threads out of ${recentEmails.length} emails`);
-  
+  // DEDUPLICATION FIX: Only process the latest email for each thread in this batch
+  // This prevents race conditions where multiple emails for the same thread try to create a ticket simultaneously
+  const latestEmailByThread = new Map();
+  recentEmails.forEach(email => {
+    const threadId = email.threadId || email.id;
+    const existing = latestEmailByThread.get(threadId);
+    if (!existing || new Date(email.date) > new Date(existing.date)) {
+      latestEmailByThread.set(threadId, email);
+    }
+  });
+
+  // Use the deduplicated list for processing
+  const uniqueEmails = Array.from(latestEmailByThread.values());
+  console.log(`[SYNC] Found ${latestEmailByThread.size} unique threads to process (deduplicated from ${recentEmails.length} emails)`);
+
+  const uniqueThreads = new Set(uniqueEmails.map(e => e.threadId || e.id));
+
   const { ensureTicketForEmail } = await import('@/lib/tickets');
-  
+
   // Get list of connected account emails to determine if email is from agent
   let agentEmails: string[] = [];
   try {
@@ -293,7 +307,7 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
     if (userEmail) {
       agentEmails.push(userEmail);
     }
-    
+
     // For business accounts, also check all connected accounts
     if (businessId) {
       const { loadBusinessTokens } = await import('@/lib/storage');
@@ -305,19 +319,19 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
   } catch (error) {
     console.warn('[SYNC] Error loading agent emails, using current user only:', error);
   }
-  
+
   console.log(`[SYNC] Agent emails list: ${agentEmails.join(', ')}`);
-  
+
   // Process in batches to avoid overwhelming the database
   const BATCH_SIZE = 20;
   let ticketsCreated = 0;
   let ticketsUpdated = 0;
   let ticketsSkipped = 0;
-  
+
   // Get businessId and userEmail for auto-classify (needed for each batch)
   const businessIdForClassify = businessId || null;
   let emailForAutoClassify: string | null = userEmailForClassify || null;
-  
+
   // If no email provided, try to get it from current user context
   if (!emailForAutoClassify) {
     try {
@@ -326,7 +340,7 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
       console.warn('[SYNC] Could not get user email for auto-classify:', err);
     }
   }
-  
+
   // For business accounts, try to get email from business session if still not available
   if (!emailForAutoClassify && businessId) {
     const { validateBusinessSession } = await import('@/lib/session');
@@ -335,19 +349,19 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
       emailForAutoClassify = session.email;
     }
   }
-  
+
   if (!emailForAutoClassify) {
     console.warn('[SYNC] No user email available for auto-classify, skipping classification');
   } else {
     console.log(`[SYNC] Auto-classify will use email: ${emailForAutoClassify} (businessId: ${businessIdForClassify || 'personal'})`);
   }
-  
-  for (let i = 0; i < recentEmails.length; i += BATCH_SIZE) {
-    const batch = recentEmails.slice(i, i + BATCH_SIZE);
+
+  for (let i = 0; i < uniqueEmails.length; i += BATCH_SIZE) {
+    const batch = uniqueEmails.slice(i, i + BATCH_SIZE);
     const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
-    const totalBatches = Math.ceil(recentEmails.length / BATCH_SIZE);
+    const totalBatches = Math.ceil(uniqueEmails.length / BATCH_SIZE);
     console.log(`[SYNC] Processing batch ${batchNumber}/${totalBatches} (${batch.length} emails)`);
-    
+
     // Process batch in parallel
     const results = await Promise.allSettled(
       batch.map(async (email) => {
@@ -358,15 +372,15 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
             const match = emailStr?.match(/<([^>]+)>/) || emailStr?.match(/([^\s<>]+@[^\s<>]+)/);
             return match ? match[1].toLowerCase() : emailStr?.toLowerCase();
           };
-          
+
           const emailFrom = extractEmail(email.from || '');
           const isFromAgent = agentEmails.some(agentEmail => {
             const agentEmailLower = agentEmail.toLowerCase();
             return emailFrom === agentEmailLower || emailFrom.includes(agentEmailLower) || email.from?.toLowerCase().includes(agentEmailLower);
           });
-          
+
           console.log(`[SYNC] Email ${email.id}: from="${email.from}", isFromAgent=${isFromAgent}`);
-          
+
           const ticket = await ensureTicketForEmail(
             {
               id: email.id,
@@ -378,7 +392,7 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
             },
             isFromAgent
           );
-          
+
           if (ticket) {
             // Check if this was a new ticket or existing one by checking if it was just created
             // (We can't easily tell, so we'll count all as created/updated)
@@ -391,30 +405,30 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
         }
       })
     );
-    
+
     // Count successful ticket creations/updates
     const successful = results.filter(r => r.status === 'fulfilled' && r.value?.created).length;
     const failed = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value?.created)).length;
     ticketsCreated += successful;
     ticketsSkipped += failed;
-    
+
     console.log(`[SYNC] Batch ${batchNumber}/${totalBatches}: ${successful} tickets created/updated, ${failed} skipped/failed`);
-    
+
     // Trigger auto-classification after each batch (runs during sync, works in production)
     if (successful > 0) {
       try {
         console.log(`[SYNC] Triggering auto-classification for batch ${batchNumber} (${successful} new tickets)...`);
         const { runAutoClassify } = await import('@/lib/auto-classify');
-        
+
         // Run classification synchronously (await it) so it happens during sync
         // This ensures tickets are classified as they're created, not just at the end
         // Works for both business and personal accounts
-        const classifyResult = await runAutoClassify({ 
+        const classifyResult = await runAutoClassify({
           limit: Math.min(successful, 30), // Smaller batch size per sync batch
           businessId: businessIdForClassify,
           userEmail: emailForAutoClassify
         });
-        
+
         console.log(`[SYNC] Batch ${batchNumber} auto-classification completed: ${classifyResult.processed} processed, ${classifyResult.success} successful, ${classifyResult.failed} failed`);
       } catch (error) {
         console.error(`[SYNC] Auto-classification error for batch ${batchNumber} (non-blocking):`, error);
@@ -422,15 +436,15 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
         // Don't throw - continue processing batches even if classification fails
       }
     }
-    
+
     // Small delay between batches to avoid rate limits
-    if (i + BATCH_SIZE < recentEmails.length) {
+    if (i + BATCH_SIZE < uniqueEmails.length) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   }
-  
+
   const skippedOld = inboxEmails.length - recentEmails.length;
-  console.log(`[SYNC] Ticket creation summary: ${ticketsCreated} tickets created/updated, ${ticketsSkipped} skipped/failed out of ${recentEmails.length} recent emails (${skippedOld} old emails filtered out)`);
+  console.log(`[SYNC] Ticket creation summary: ${ticketsCreated} tickets created/updated, ${ticketsSkipped} skipped/failed out of ${uniqueEmails.length} unique threads processed`);
 }
 
 /**

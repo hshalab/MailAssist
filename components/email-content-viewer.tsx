@@ -60,14 +60,14 @@ function processEmailContent(
     const styleTagRegex = /<style[^>]*>([\s\S]*?)<\/style>/gi
     const styles: string[] = []
     let styleMatch
-    
+
     styleTagRegex.lastIndex = 0
     while ((styleMatch = styleTagRegex.exec(normalizedContent)) !== null) {
         if (styleMatch[1]) {
             styles.push(styleMatch[1].trim())
         }
     }
-    
+
     // Remove style tags from content before sanitization
     let contentWithoutStyles = normalizedContent
     contentWithoutStyles = contentWithoutStyles.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -99,11 +99,11 @@ function processEmailContent(
                 `cid:${att.id}`, `cid:${contentId}`, `cid:${att.filename}`, `cid:${nameWithoutExt}`,
                 `<${att.id}>`, `<${contentId}>`, `<${att.filename}>`, `<${nameWithoutExt}>`
             ].filter(Boolean).map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-            
-            const replacementSrc = att.data 
+
+            const replacementSrc = att.data
                 ? `data:${att.mimeType || 'application/octet-stream'};base64,${att.data}`
                 : `/api/emails/${emailId}/attachments/${att.id}`
-            
+
             const cidRegex = new RegExp(`src=["'](?:${patterns.join('|')})["']`, 'gi')
             processed = processed.replace(cidRegex, `src="${replacementSrc}"`)
         })
@@ -150,9 +150,27 @@ function processEmailContent(
         }
     )
 
-    // Collapse quoted text
+    // Collapse quoted text - wrap blockquotes
     processed = processed.replace(/(<blockquote[^>]*>[\s\S]*?<\/blockquote>)/gi, '<div class="gmail-quote" data-collapsed="true">$1</div>')
-    processed = processed.replace(/(On\s+.+\s+wrote:?\s*<br\s*\/?>)/gi, '<div class="quote-header" data-collapsed="true">$1<button class="expand-quote" onclick="this.parentElement.classList.toggle(\'expanded\')">[...]</button></div><div class="quoted-content">')
+
+    // Collapse "On ... wrote:" quoted sections
+    // Match the FIRST "On ... wrote:" pattern and assume everything after is quoted history.
+    // We allow for HTML tags inside the "On ... wrote" line (e.g. email links).
+    // OPTIMIZED REGEX: Avoid unbounded [^>]+ inside repetition. simpler match.
+    // We typically expect "On <date>, <someone> wrote:"
+    // Matches "On " followed by up to 500 chars of anything until "wrote:", but lazy.
+    // Using [\s\S] to match newlines too.
+    const quoteRegex = /(On\s+[\s\S]{10,500}?\s+wrote:?:?)(?:<br\s*\/?>)?([\s\S]*)$/i
+
+    // Only apply if we haven't already wrapped a blockquote that covers most of the content
+    // And to avoid ReDoS on huge strings, we can check if the match exists in the first 2000 chars roughly?
+    // Or just rely on the fixed length quantifier {10,500} which prevents catastrophic scanning
+    if (!processed.includes('class="gmail-quote"') && quoteRegex.test(processed)) {
+        processed = processed.replace(
+            quoteRegex,
+            '<div class="quote-header"><span class="quote-info">$1</span><button class="expand-quote" type="button" aria-label="Toggle quote"></button></div><div class="quoted-content">$2</div>'
+        )
+    }
 
     return { processedContent: processed, extractedStyles: styles, blockedRemoteCount: remoteImageCount }
 }
@@ -409,27 +427,54 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     color: ${isDarkMode ? '#a0aec0' : '#718096'};
                     font-size: 0.9em;
                     margin-top: 1em;
+                    padding: 8px 12px;
+                    background: ${isDarkMode ? '#1e293b' : '#f1f5f9'};
+                    border-radius: 6px;
+                    border: 1px solid ${isDarkMode ? '#334155' : '#e2e8f0'};
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+                .quote-header .quote-info {
+                    flex: 1;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
                 }
                 .quote-header .expand-quote {
-                    background: ${isDarkMode ? '#374151' : '#e5e7eb'};
+                    background: ${isDarkMode ? '#3b82f6' : '#2563eb'};
                     border: none;
                     border-radius: 4px;
-                    padding: 2px 8px;
-                    margin-left: 8px;
+                    padding: 4px 10px;
                     cursor: pointer;
                     font-size: 0.85em;
-                    color: ${isDarkMode ? '#93c5fd' : '#0b57d0'};
+                    color: white;
+                    font-weight: 500;
+                    transition: background 0.15s ease;
+                    flex-shrink: 0;
                 }
                 .quote-header .expand-quote:hover {
-                    background: ${isDarkMode ? '#4b5563' : '#d1d5db'};
+                    background: ${isDarkMode ? '#2563eb' : '#1d4ed8'};
                 }
-                .quote-header:not(.expanded) + .quoted-content {
+                .quote-header.expanded .expand-quote {
+                    background: ${isDarkMode ? '#475569' : '#64748b'};
+                }
+                .quote-header.expanded .expand-quote::after {
+                    content: ' Hide';
+                }
+                .quote-header:not(.expanded) .expand-quote::after {
+                    content: ' Show';
+                }
+                .quoted-content {
                     display: none;
                 }
                 .quote-header.expanded + .quoted-content {
                     display: block;
-                    padding-left: 12px;
+                    padding: 12px;
+                    margin-top: 4px;
                     border-left: 3px solid ${isDarkMode ? '#4a5568' : '#cbd5e0'};
+                    background: ${isDarkMode ? '#1e293b50' : '#f8fafc'};
+                    border-radius: 0 6px 6px 0;
                     color: ${isDarkMode ? '#a0aec0' : '#718096'};
                 }
                 /* Print-friendly styles */
@@ -446,6 +491,18 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             <div class="email-body">
                 ${processedContent}
             </div>
+            <script>
+                // Set up click handlers for quote expansion buttons
+                document.querySelectorAll('.expand-quote').forEach(function(btn) {
+                    btn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        var header = this.parentElement;
+                        if (header) {
+                            header.classList.toggle('expanded');
+                        }
+                    });
+                });
+            </script>
         </body>
         </html>
     `
@@ -471,7 +528,7 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 )}
                 <iframe
                     ref={iframeRef}
-                    sandbox="allow-same-origin"
+                    sandbox="allow-same-origin allow-scripts"
                     srcDoc={iframeHtml}
                     className={cn(
                         "w-full border-0 block transition-opacity rounded-lg",

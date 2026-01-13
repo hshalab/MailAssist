@@ -20,23 +20,23 @@ function htmlToText(html: string): string {
 
   // Remove all remaining HTML tags
   text = text.replace(/<[^>]+>/g, '')
-  
+
   // Remove CSS that appears as plain text at the start (before actual email content)
   // This handles malformed emails where CSS leaks through without style tags
   const cssAtStartMatch = text.match(/^([\s\n]*(?:\.[\w-]+\s*\{[^}]*\}|@media[^}]*\{[^}]*\}|[a-z-]+\s*:\s*[^;]+;)+[\s\n]*)+/i)
   if (cssAtStartMatch && cssAtStartMatch[0]) {
     const potentialCss = cssAtStartMatch[0]
     const afterCss = text.substring(potentialCss.length).trim()
-    
+
     // Only remove if it's clearly CSS followed by actual email content
-    const isCssBlock = potentialCss.includes('{') && 
-                       potentialCss.includes('}') &&
-                       (potentialCss.includes('.') || potentialCss.includes('@media'))
-    
-    const hasEmailContent = afterCss.length > 0 && 
-                           (/^[A-Z][a-z]+/.test(afterCss) || // Starts with capitalized word
-                            /placed order|order summary|view order|shipping|payment|delivery/i.test(afterCss))
-    
+    const isCssBlock = potentialCss.includes('{') &&
+      potentialCss.includes('}') &&
+      (potentialCss.includes('.') || potentialCss.includes('@media'))
+
+    const hasEmailContent = afterCss.length > 0 &&
+      (/^[A-Z][a-z]+/.test(afterCss) || // Starts with capitalized word
+        /placed order|order summary|view order|shipping|payment|delivery/i.test(afterCss))
+
     if (isCssBlock && hasEmailContent) {
       text = afterCss
     }
@@ -70,11 +70,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const apiKey = process.env.GROQ_API_KEY
+    const apiKey = process.env.OPENAI_API_KEY
 
     if (!apiKey) {
       return NextResponse.json(
-        { error: "GROQ_API_KEY not configured" },
+        { error: "OPENAI_API_KEY not configured" },
         { status: 500 }
       )
     }
@@ -82,33 +82,33 @@ export async function POST(request: NextRequest) {
     // Convert HTML to plain text for better AI processing
     const plainTextConversation = htmlToText(conversation)
 
-    // Call Groq API to generate summary
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    // Call OpenAI API to generate summary
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model: 'gpt-5.2',
         messages: [
           {
             role: 'system',
-            content: 'You are a helpful assistant that generates concise email conversation summaries. Provide a brief 2-3 sentence summary of what the conversation is about. Be direct and factual.',
+            content: 'You are a helpful assistant that generates concise email conversation summaries. Provide a brief 2-3 sentence summary of what the conversation is about. Be direct and factual, but write in a natural, human-like manner. Use paragraphs instead of bullet points. Avoid robotic formatting.',
           },
           {
             role: 'user',
             content: `Summarize this email conversation in 2-3 sentences:\n\n${plainTextConversation}`,
           },
         ],
-        temperature: 0.3,
-        max_tokens: 150,
+        temperature: 1,
+        max_completion_tokens: 150,
       }),
     })
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
-      console.error('Groq API error:', errorData)
+      console.error('OpenAI API error:', errorData)
       return NextResponse.json(
         { error: "Failed to generate summary" },
         { status: 500 }

@@ -20,12 +20,12 @@ export async function POST(request: NextRequest) {
             )
         }
 
-        // Get GROQ API key from environment
-        const groqApiKey = process.env.GROQ_API_KEY
+        // Get OpenAI API key from environment
+        const openaiApiKey = process.env.OPENAI_API_KEY
 
-        if (!groqApiKey) {
+        if (!openaiApiKey) {
             return NextResponse.json(
-                { error: 'GROQ_API_KEY is not configured' },
+                { error: 'OPENAI_API_KEY is not configured' },
                 { status: 500 }
             )
         }
@@ -37,23 +37,23 @@ export async function POST(request: NextRequest) {
             .replace(/<[^>]+>/g, ' ')
             .replace(/\s+/g, ' ')
             .trim()
-        
+
         // Remove CSS that appears as plain text at the start (before actual email content)
         // This handles malformed emails where CSS leaks through without style tags
         const cssAtStartMatch = cleanedContent.match(/^([\s\n]*(?:\.[\w-]+\s*\{[^}]*\}|@media[^}]*\{[^}]*\}|[a-z-]+\s*:\s*[^;]+;)+[\s\n]*)+/i)
         if (cssAtStartMatch && cssAtStartMatch[0]) {
             const potentialCss = cssAtStartMatch[0]
             const afterCss = cleanedContent.substring(potentialCss.length).trim()
-            
+
             // Only remove if it's clearly CSS followed by actual email content
-            const isCssBlock = potentialCss.includes('{') && 
-                               potentialCss.includes('}') &&
-                               (potentialCss.includes('.') || potentialCss.includes('@media'))
-            
-            const hasEmailContent = afterCss.length > 0 && 
-                                   (/^[A-Z][a-z]+/.test(afterCss) || // Starts with capitalized word
-                                    /placed order|order summary|view order|shipping|payment|delivery/i.test(afterCss))
-            
+            const isCssBlock = potentialCss.includes('{') &&
+                potentialCss.includes('}') &&
+                (potentialCss.includes('.') || potentialCss.includes('@media'))
+
+            const hasEmailContent = afterCss.length > 0 &&
+                (/^[A-Z][a-z]+/.test(afterCss) || // Starts with capitalized word
+                    /placed order|order summary|view order|shipping|payment|delivery/i.test(afterCss))
+
             if (isCssBlock && hasEmailContent) {
                 cleanedContent = afterCss
             }
@@ -64,41 +64,41 @@ export async function POST(request: NextRequest) {
             cleanedContent = cleanedContent.substring(0, 4000) + '...'
         }
 
-        // Call GROQ API for summarization
-        const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        // Call OpenAI API for summarization
+        const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${groqApiKey}`,
+                'Authorization': `Bearer ${openaiApiKey}`,
             },
             body: JSON.stringify({
-                model: 'llama-3.3-70b-versatile', // Fast and capable model
+                model: 'gpt-5.2', // Fast and capable model
                 messages: [
                     {
                         role: 'system',
-                        content: 'You are a helpful assistant. Extract the core message and meaning while ignoring technical metadata, CSS, or formatting tags. Provide a brief 2-3 sentence summary that captures the main points and any action items.'
+                        content: 'You are a helpful assistant. Extract the core message and meaning while ignoring technical metadata, CSS, or formatting tags. Provide a brief 2-3 sentence summary that captures the main points and any action items. Write in a natural, human-like manner. Use paragraphs instead of bullet points. Avoid robotic formatting.'
                     },
                     {
                         role: 'user',
                         content: `Summarize this email conversation (which may contain raw HTML):\n\n${cleanedContent}`
                     }
                 ],
-                temperature: 0.3,
-                max_tokens: 200,
+                temperature: 1,
+                max_completion_tokens: 200,
             }),
         })
 
-        if (!groqResponse.ok) {
-            const errorText = await groqResponse.text()
-            console.error('GROQ API error:', groqResponse.status, errorText)
+        if (!openaiResponse.ok) {
+            const errorText = await openaiResponse.text()
+            console.error('OpenAI API error:', openaiResponse.status, errorText)
             return NextResponse.json(
-                { error: `GROQ API error: ${groqResponse.status} ${groqResponse.statusText}` },
-                { status: groqResponse.status }
+                { error: `OpenAI API error: ${openaiResponse.status} ${openaiResponse.statusText}` },
+                { status: openaiResponse.status }
             )
         }
 
-        const groqData = await groqResponse.json()
-        const summary = groqData.choices?.[0]?.message?.content?.trim()
+        const openaiData = await openaiResponse.json()
+        const summary = openaiData.choices?.[0]?.message?.content?.trim()
 
         if (!summary) {
             return NextResponse.json(

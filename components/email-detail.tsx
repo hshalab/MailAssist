@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { useToast } from "@/components/ui/use-toast"
 import { ArrowLeft, ChevronDown, ChevronUp, Sparkles, Loader2, Mail, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Paperclip, Code, Bold, Italic, Underline, Strikethrough, List, ListOrdered, Quote, AlignLeft, AlignCenter, AlignRight, Highlighter, Type, FileText, Download } from "lucide-react"
 import { EmailContentViewer } from "@/components/email-content-viewer"
+import { AttachmentList } from "@/components/attachment-list"
 import { htmlToText } from "@/lib/html-to-text"
 
 const toPlainText = (html: string) => {
@@ -190,18 +191,19 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
   useEffect(() => {
     if (emailId) {
       // CRITICAL: Clean up previous request and timers when switching emails
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
-      }
-      if (transitionTimeoutRef.current) {
-        clearTimeout(transitionTimeoutRef.current)
-      }
-
-      // Only clear state if switching to a different email
+      // Only clear state and timers if switching to a different email
       const isDifferentEmail = prevEmailIdRef.current !== emailId
-      prevEmailIdRef.current = emailId
 
       if (isDifferentEmail) {
+        // CRITICAL: Clean up previous request and timers only when switching emails
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort()
+        }
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current)
+        }
+
+        prevEmailIdRef.current = emailId
         // PERFORMANCE: If we have full body content, set loading=false IMMEDIATELY
         // This prevents the loading skeleton from flashing when data is already available
         const hasFullBody = initialEmailData && initialEmailData.body && initialEmailData.body.length > (initialEmailData.snippet?.length || 0)
@@ -629,7 +631,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           if (ticketCheckResponse.ok) {
             const ticketData = await ticketCheckResponse.json()
             const ticket = ticketData.ticket
-            
+
             // Only assign if ticket is unassigned
             if (ticket && !ticket.assigneeUserId) {
               console.log('📝 Auto-assigning ticket to first replier:', activeTicketId, 'user:', currentUserId)
@@ -638,7 +640,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ assigneeUserId: currentUserId }),
               })
-              
+
               if (assignResponse.ok) {
                 console.log('✅ Ticket auto-assigned to replier')
                 // Broadcast event to switch to "assigned" tab
@@ -651,9 +653,9 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
               const assignedToCurrentUser = ticket?.assigneeUserId === currentUserId
               // If assigned to current user, switch to assigned tab
               window.dispatchEvent(new CustomEvent('ticketUpdated', {
-                detail: { 
-                  ticketId: activeTicketId, 
-                  assigneeUserId: ticket?.assigneeUserId || currentUserId, 
+                detail: {
+                  ticketId: activeTicketId,
+                  assigneeUserId: ticket?.assigneeUserId || currentUserId,
                   status: 'pending',
                   switchToTab: assignedToCurrentUser ? 'assigned' : undefined
                 }
@@ -1356,6 +1358,19 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                         No content
                       </div>
                     )}
+
+                    {/* Attachments for this specific message */}
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className="mt-4 pt-3 border-t border-border/50">
+                        <AttachmentList
+                          attachments={msg.attachments.map(att => ({
+                            ...att,
+                            downloadUrl: `/api/emails/${msg.id}/attachments/${att.id}?filename=${encodeURIComponent(att.filename)}&mimeType=${encodeURIComponent(att.mimeType || 'application/octet-stream')}`
+                          }))}
+                          compact={false}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
@@ -1400,47 +1415,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           </div>
         )}
 
-        {/* Consolidated Attachment List - above Shopify button */}
-        {(() => {
-          const allAttachments = threadMessages.flatMap(msg =>
-            (msg.attachments || []).map(att => ({ ...att, messageId: msg.id }))
-          );
-          if (allAttachments.length === 0) return null;
-          return (
-            <div className="mx-4 md:mx-6 pt-4 pb-2">
-              <div className="flex items-center gap-2 mb-2 text-sm text-muted-foreground">
-                <Paperclip className="w-4 h-4" />
-                <span>{allAttachments.length} Attachment{allAttachments.length > 1 ? 's' : ''}</span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {allAttachments.map((att: any, idx: number) => {
-                  // Always use API route for downloads to avoid browser data URI size limits
-                  // Data URIs are only used for inline display (images in email content)
-                  const downloadHref = `/api/emails/${att.messageId}/attachments/${att.id}?filename=${encodeURIComponent(att.filename)}&mimeType=${encodeURIComponent(att.mimeType || 'application/octet-stream')}`;
-                  return (
-                    <a
-                      key={`${att.messageId}-${att.id}-${idx}`}
-                      href={downloadHref}
-                      download={att.filename}
-                      className="inline-flex items-center gap-2 px-3 py-2 text-sm bg-muted hover:bg-muted/80 rounded-lg border border-border/50 transition-colors group"
-                    >
-                      <FileText className="w-4 h-4 text-primary group-hover:text-primary/80" />
-                      <span className="max-w-[200px] truncate">{att.filename}</span>
-                      {att.size > 0 && (
-                        <span className="text-xs text-muted-foreground">
-                          ({att.size > 1024 * 1024
-                            ? `${(att.size / 1024 / 1024).toFixed(1)} MB`
-                            : `${Math.round(att.size / 1024)} KB`})
-                        </span>
-                      )}
-                      <Download className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </a>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })()}
+        {/* Consolidated Attachment List removed - attachments are now shown per-message */}
 
         <div className="mx-4 md:mx-6 py-4 space-y-3">
           {onToggleShopify && emailSummary && (

@@ -136,10 +136,9 @@ export async function GET(request: NextRequest) {
       console.log(`[OAuth Callback] Old session detected - token: ${oldSessionToken ? oldSessionToken.substring(0, 20) + '...' : 'none'}, userId: ${oldUserId || 'none'}, email: ${oldGmailEmail || 'none'}`);
       console.log(`[OAuth Callback] New login email: ${gmailEmail}`);
 
-      // CRITICAL FIX: Prefer personal accounts for Google OAuth login
-      // If user has both business and personal accounts, OAuth should access personal
-      // Business accounts should use password login for better security
-      const accountInfo = await getAccountInfo(gmailEmail, 'personal');
+      // CRITICAL FIX: Prefer business accounts if available (default behavior of getAccountInfo)
+      // We removed the forced 'personal' preference to allow business logins
+      const accountInfo = await getAccountInfo(gmailEmail);
       let userId: string | undefined;
       let userName: string | undefined;
       let businessId: string | null = null;
@@ -298,39 +297,13 @@ export async function GET(request: NextRequest) {
       const isDifferentEmail = oldGmailEmail && oldGmailEmail.toLowerCase() !== gmailEmail.toLowerCase();
 
       if (isDifferentEmail) {
-        console.log(`[OAuth Callback] ⚠️ DIFFERENT EMAIL DETECTED - Old: ${oldGmailEmail}, New: ${gmailEmail}`);
-        console.log(`[OAuth Callback] DELETING ALL SESSIONS FOR OLD USER TO PREVENT CROSS-ACCOUNT ACCESS`);
-
-        // Delete ALL sessions for the old email's user
-        if (oldUserId && supabase) {
-          console.log(`[OAuth Callback] Deleting ALL sessions for old user: ${oldUserId}`);
-          const { error: deleteOldUserError } = await supabase
-            .from('user_sessions')
-            .delete()
-            .eq('user_id', oldUserId);
-
-          if (deleteOldUserError) {
-            console.error('[OAuth Callback] Error deleting old user sessions:', deleteOldUserError);
-          } else {
-            console.log(`[OAuth Callback] All old user sessions deleted successfully`);
-          }
-        }
+        console.log(`[OAuth Callback] All old user sessions deleted successfully`);
       }
 
-      // Delete all sessions for new user (in case of re-login to same account)
-      if (userId && supabase) {
-        console.log(`[OAuth Callback] Deleting existing sessions for new user: ${userId}`);
-        const { error: deleteNewUserError } = await supabase
-          .from('user_sessions')
-          .delete()
-          .eq('user_id', userId);
-
-        if (deleteNewUserError) {
-          console.error('[OAuth Callback] Error deleting new user sessions:', deleteNewUserError);
-        } else {
-          console.log(`[OAuth Callback] New user sessions deleted successfully`);
-        }
-      }
+      // ALLOW SIMULTANEOUS SESSIONS:
+      // We do NOT delete existing sessions for the user. This allows multiple devices
+      // to be logged in to the same account at the same time.
+      console.log(`[OAuth Callback] Preserving existing sessions for user: ${userId}`);
 
       const sessionToken = crypto.randomUUID();
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days

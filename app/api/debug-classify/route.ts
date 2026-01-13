@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     // 1. Get 10 unclassified tickets
     const { data: tickets, error } = await supabase
         .from('tickets')
-        .select('id, subject, user_email, department_id')
+        .select('id, subject, user_email, customer_email, thread_id, department_id')
         .is('department_id', null)
         .limit(10);
 
@@ -52,12 +52,14 @@ export async function GET(request: Request) {
             }
         }
 
-        // Run classification
+        // Run classification with enhanced context
         await classifyTicketToDepartmentAsync(
             ticket.id,
             ticket.subject,
             bodyText,
-            ticket.user_email || null
+            ticket.user_email || null,
+            ticket.customer_email || null, // Customer email for history lookup
+            ticket.thread_id || null // Thread ID for context
         );
 
         results.push({ id: ticket.id, subject: ticket.subject, status: 'Triggered Classification' });

@@ -35,7 +35,7 @@ export async function POST(
       );
     }
 
-    const groqApiKey = process.env.GROQ_API_KEY;
+    const openaiApiKey = process.env.OPENAI_API_KEY;
 
     // CRITICAL FIX: For invited users (agents) who don't have their own Gmail connected,
     // allow them to use business-connected email accounts for draft generation
@@ -64,9 +64,9 @@ export async function POST(
       );
     }
 
-    if (!groqApiKey) {
+    if (!openaiApiKey) {
       return NextResponse.json(
-        { error: 'GROQ_API_KEY not configured' },
+        { error: 'OPENAI_API_KEY not configured' },
         { status: 500 }
       );
     }
@@ -288,7 +288,7 @@ IMPORTANT: Use this information to personalize your response. Reference their or
       draft = await generateDraftReply(
         incomingEmail,
         pastEmails,
-        groqApiKey,
+        openaiApiKey,
         conversationMessages,
         knowledgeItems || [],
         guardrails,
@@ -305,13 +305,13 @@ IMPORTANT: Use this information to personalize your response. Reference their or
       console.error('[Draft] Error in generateDraftReply:', draftError);
       const errorMessage = draftError instanceof Error ? draftError.message : String(draftError);
 
-      // If it's a Groq API error, provide more details
-      if (errorMessage.includes('Groq API') || errorMessage.includes('401') || errorMessage.includes('403')) {
+      // If it's an OpenAI API error, provide more details
+      if (errorMessage.includes('OpenAI API') || errorMessage.includes('401') || errorMessage.includes('403')) {
         return NextResponse.json(
           {
             error: 'Failed to generate draft',
             details: errorMessage,
-            hint: 'Please check your GROQ_API_KEY environment variable'
+            hint: 'Please check your OPENAI_API_KEY environment variable'
           },
           { status: 500 }
         );

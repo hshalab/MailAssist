@@ -10,6 +10,10 @@ import { getFeedbackExamples } from './feedback-cache';
 export interface EmailContent {
     subject: string;
     body: string;
+    senderEmail?: string;  // Full sender email address
+    senderDomain?: string; // Extracted domain (e.g., "amazon.com")
+    threadContext?: string; // Summary of previous messages in thread
+    customerHistory?: { departmentId: string; departmentName: string; count: number }[]; // Previous department assignments for this customer
 }
 
 export interface ClassificationResult {
@@ -19,16 +23,16 @@ export interface ClassificationResult {
     departmentName?: string;
 }
 
-const CONFIDENCE_THRESHOLD = 30; // Minimum confidence to auto-assign (lowered to 30% to catch more emails)
+const CONFIDENCE_THRESHOLD = 60; // Minimum confidence to auto-assign (increased to 60% to avoid false positives)
 
 /**
  * Classify an email to the most appropriate department using AI
- * Uses Groq API with llama model for fast classification
+ * Uses OpenAI API with gpt-5.2 for fast classification
  */
 export async function classifyEmailToDepartment(
     emailContent: EmailContent,
     departments: Department[],
-    groqApiKey: string,
+    openaiApiKey: string,
     userEmail?: string | null,
     businessId?: string | null
 ): Promise<ClassificationResult> {
@@ -78,104 +82,61 @@ export async function classifyEmailToDepartment(
         }
     }
 
-    const prompt = `You are an expert email classification assistant. Analyze the email carefully and classify it into ONE of these categories:
+    // Build sender info section
+    let senderSection = '';
+    if (emailContent.senderEmail || emailContent.senderDomain) {
+        senderSection = `\n=== SENDER INFORMATION ===
+Sender Email: ${emailContent.senderEmail || 'Unknown'}
+Sender Domain: ${emailContent.senderDomain || 'Unknown'}
+Use this to identify the sender's organization or type of email.\n`;
+    }
 
-=== SPAM ===
-Unsolicited, unwanted, or malicious emails. Classify as SPAM if the email contains ANY of these:
-- Phishing attempts or security threats
-- Suspicious links or requests for personal information
-- Get-rich-quick schemes, lottery/prize notifications, or inheritance scams
-- Cryptocurrency/forex/investment scams
-- Requests for urgent action on fake account issues
-- Generic mass emails from unknown senders
-- Dating sites or illegal offers
-- Pills, medications, or health scams
-- Fake package delivery notifications
-- Emails with excessive urgency ("ACT NOW!", "LIMITED TIME!", "URGENT!")
-- Poor grammar, spelling errors, or suspicious formatting
-- Requests for wire transfers or gift cards
+    // Build customer history section
+    let customerHistorySection = '';
+    if (emailContent.customerHistory && emailContent.customerHistory.length > 0) {
+        customerHistorySection = `\n=== CUSTOMER HISTORY ===
+This customer has previously contacted us and was assigned to these departments:
+${emailContent.customerHistory.map(h => `- ${h.departmentName}: ${h.count} ticket(s)`).join('\n')}
+IMPORTANT: If the current email topic is similar to previous interactions, consider routing to the same department for continuity.\n`;
+    }
 
-Examples of SPAM:
-- "Congratulations! You've won $1,000,000 - claim now!"
-- "Your account has been locked - verify immediately"
-- "Make money from home - no experience needed"
-- "Single women in your area want to meet you"
-- "You have inherited money from a distant relative"
-- "Urgent: Your package is waiting - click here"
-- "Buy Viagra/Cialis at lowest prices"
-- "Invest in Bitcoin now - guaranteed returns"
-- "IRS: You owe back taxes - pay immediately"
-- "Your Amazon order #123456 has been cancelled - click to review"
+    // Build thread context section
+    let threadContextSection = '';
+    if (emailContent.threadContext && emailContent.threadContext.trim()) {
+        threadContextSection = `\n=== CONVERSATION THREAD CONTEXT ===
+Previous messages in this thread:
+${emailContent.threadContext}
+Use this context to understand the ongoing conversation and classify appropriately.\n`;
+    }
 
-=== PROMOTIONS ===
-Legitimate marketing emails from recognizable brands or services. Classify as PROMOTIONS if:
-- From known companies (Netflix, Amazon, Uber, Google, Microsoft, Apple, airlines, retailers, etc.)
-- Social media notifications (Facebook, Instagram, Twitter, LinkedIn, TikTok)
-- Streaming services (Netflix, Spotify, YouTube, Disney+, Hulu)
-- E-commerce (Amazon, eBay, Etsy, Shopify stores)
-- Tech companies (GitHub, GitLab, Stack Overflow, Medium)
-- Food delivery (Uber Eats, DoorDash, Grubhub)
-- Travel (Airbnb, Booking.com, Expedia, airlines)
-- Newsletters you likely subscribed to
-- Product announcements, sales, or special offers
-- Event invitations from businesses
-- Marketing emails with unsubscribe links
-- Promotional codes, discounts, or deals
-- Company updates or new feature announcements
-- App notifications and updates
+    const prompt = `You are an expert email classification assistant for a business. Your job is to route incoming emails to the correct department/workstream.
 
-Examples of PROMOTIONS:
-- "Netflix: New releases this week you'll love"
-- "Amazon: Your order has shipped + recommendations for you"
-- "Uber: 20% off your next 3 rides"
-- "Spotify: Discover your personalized playlist"
-- "LinkedIn: You have 5 new connection requests"
-- "Airbnb: Explore destinations for your next trip"
-- "GitHub: Your weekly digest of activity"
-- "Instagram: See what your friends are up to"
-- "Medium: Top stories picked for you"
-- "Grammarly: Your weekly writing insights"
-- "Duolingo: Don't lose your streak!"
-- "Slack: You have 10 unread messages"
-
-=== CLASSIFICATION RULES ===
-1. Be AGGRESSIVE in classifying emails as SPAM or PROMOTIONS. Most emails fall into one of these categories.
-
-2. If unsure between SPAM and PROMOTIONS, check for:
-   - Recognizable brand name → PROMOTIONS
-   - Unknown sender with urgency → SPAM
-   - Unsubscribe link present → PROMOTIONS
-   - Suspicious grammar/spelling → SPAM
-   - ANY marketing content → PROMOTIONS
-   - ANY unsolicited content → SPAM
-   - Professional formatting → PROMOTIONS
-   - Poor formatting/grammar → SPAM
-
-3. ONLY return 0 (Unclassified) if the email is clearly:
-   - Personal correspondence from friends/family
-   - Work-related business emails (invoices, contracts, meetings)
-   - Transactional emails (receipts, order confirmations, password resets)
-   - Support tickets or customer service
-   
-4. When in doubt between SPAM and PROMOTIONS, prefer PROMOTIONS for recognizable senders, SPAM for unknown senders
-${feedbackSection}
-Here are the available departments:
+=== AVAILABLE DEPARTMENTS ===
 ${departmentList}
 
-**Task:** Read the email's subject and body (provided below). Respond with ONLY valid JSON containing EXACTLY these fields:
+${senderSection}${customerHistorySection}${threadContextSection}${feedbackSection}
+
+=== CLASSIFICATION GUIDELINES ===
+1. Analyze the email content, sender, and any customer history to determine the best department match.
+2. If the customer has previous tickets in a specific department and the current email is related, prefer that department.
+3. Use thread context to understand if this is part of an ongoing conversation.
+4. **DO NOT GUESS**. If the email does not clearly match any department's description (e.g., general inquiry, spam, or unrelated topic), return 0 for Unclassified.
+5. Base your confidence on how well the email matches the department's description.
+
+=== EMAIL TO CLASSIFY ===
+Subject: "${emailContent.subject}"
+Body: "${emailContent.body.substring(0, 3000)}"
+
+Respond with ONLY valid JSON:
 {
   "departmentNumber": <integer from 1 to ${departments.length}, or 0 for Unclassified>,
   "confidence": <integer from 0-100>,
-  "reasoning": "<brief reason string>"
-}
-
-**Email:**
-Subject: "${emailContent.subject}"
-Body: "${emailContent.body.substring(0, 1000)}"`;
+  "reasoning": "<brief explanation>"
+}`;
 
 
     try {
-        const result = await callGroqForClassification(prompt, groqApiKey);
+        const result = await callOpenAIForClassification(prompt, openaiApiKey);
 
         // Parse AI response
         const parsed = JSON.parse(result);
@@ -206,7 +167,7 @@ Body: "${emailContent.body.substring(0, 1000)}"`;
         return {
             departmentId: null,
             confidence: 0,
-            reasoning: `Classification failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            reasoning: `Classification failed: ${error instanceof Error ? error.message : 'Unknown error'} `,
         };
     }
 }
@@ -214,19 +175,20 @@ Body: "${emailContent.body.substring(0, 1000)}"`;
 /**
  * Call Groq API for classification
  */
-async function callGroqForClassification(prompt: string, apiKey: string): Promise<string> {
+// Cal OpenAI API for classification
+async function callOpenAIForClassification(prompt: string, apiKey: string): Promise<string> {
     const REQUEST_TIMEOUT = 10000; // 10 seconds for faster classification
-    const model = 'llama-3.1-8b-instant'; // Smaller, faster model for classification
+    const model = 'gpt-5.2'; // Faster model for classification
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
 
     try {
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
+                'Authorization': `Bearer ${apiKey} `,
             },
             body: JSON.stringify({
                 model: model,
@@ -240,8 +202,8 @@ async function callGroqForClassification(prompt: string, apiKey: string): Promis
                         content: prompt,
                     },
                 ],
-                temperature: 0.1, // Very low temperature for consistent classification
-                max_tokens: 150, // Short response expected
+                temperature: 1, // Default value required for gpt-5.2
+                max_completion_tokens: 150, // Short response expected
             }),
             signal: controller.signal,
         });
@@ -249,7 +211,7 @@ async function callGroqForClassification(prompt: string, apiKey: string): Promis
         clearTimeout(timeoutId);
 
         if (!response.ok) {
-            let errorMessage = `Groq API error: ${response.status} ${response.statusText}`;
+            let errorMessage = `OpenAI API error: ${response.status} ${response.statusText} `;
             try {
                 const errorData = await response.json();
                 errorMessage = errorData.error?.message || errorData.message || errorMessage;
@@ -262,13 +224,13 @@ async function callGroqForClassification(prompt: string, apiKey: string): Promis
         const data = await response.json();
 
         if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
-            throw new Error('Invalid response format from Groq API');
+            throw new Error('Invalid response format from OpenAI API');
         }
 
         const content = data.choices[0]?.message?.content?.trim();
 
         if (!content) {
-            throw new Error('No content in Groq API response');
+            throw new Error('No content in OpenAI API response');
         }
 
         console.log('[Department Classifier] AI response:', content);
@@ -276,17 +238,17 @@ async function callGroqForClassification(prompt: string, apiKey: string): Promis
     } catch (fetchError: any) {
         clearTimeout(timeoutId);
         if (fetchError.name === 'AbortError') {
-            throw new Error('Classification timeout: Groq API took too long to respond');
+            throw new Error('Classification timeout: OpenAI API took too long to respond');
         }
         throw fetchError;
     }
 }
 
 /**
- * Get Groq API key from environment
+ * Get OpenAI API key from environment
  */
-export function getGroqApiKey(): string | null {
-    return process.env.GROQ_API_KEY || null;
+export function getOpenAIApiKey(): string | null {
+    return process.env.OPENAI_API_KEY || null;
 }
 
 /**
@@ -295,17 +257,17 @@ export function getGroqApiKey(): string | null {
 export async function classifyEmailWithFallback(
     emailContent: EmailContent,
     departments: Department[],
-    groqApiKey: string | null,
+    openaiApiKey: string | null,
     userEmail?: string | null,
     businessId?: string | null
 ): Promise<ClassificationResult> {
     // Try AI classification first
-    if (groqApiKey) {
+    if (openaiApiKey) {
         try {
             const result = await classifyEmailToDepartment(
                 emailContent,
                 departments,
-                groqApiKey,
+                openaiApiKey,
                 userEmail,
                 businessId
             );
@@ -334,7 +296,7 @@ function keywordBasedClassification(
         return { departmentId: null, confidence: 0, reasoning: 'No departments available' };
     }
 
-    const emailText = `${emailContent.subject} ${emailContent.body}`.toLowerCase();
+    const emailText = `${emailContent.subject} ${emailContent.body} `.toLowerCase();
 
     // Score each department based on keyword matches
     const scored = departments.map(dept => {
@@ -363,7 +325,7 @@ function keywordBasedClassification(
         return {
             departmentId: best.department.id,
             confidence: best.confidence,
-            reasoning: `Keyword-based match (${best.matches} keywords matched)`,
+            reasoning: `Keyword - based match(${best.matches} keywords matched)`,
             departmentName: best.department.name,
         };
     }

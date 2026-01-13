@@ -1,5 +1,5 @@
 /**
- * AI draft generation using Groq API
+ * AI draft generation using OpenAI API
  * Generates email drafts based on user's past email style and tone
  */
 
@@ -30,7 +30,7 @@ interface StoredEmail extends Email {
 export async function generateDraftReply(
   incomingEmail: Email,
   pastEmails: StoredEmail[],
-  groqApiKey: string,
+  openaiApiKey: string,
   conversationMessages?: Email[],
   knowledgeItems: KnowledgeItem[] = [],
   guardrails?: Guardrails | null,
@@ -116,7 +116,7 @@ export async function generateDraftReply(
     }
   }
 
-  // Create prompt for Groq, including optional conversation history, internal chat context, and Shopify data
+  // Create prompt for OpenAI, including optional conversation history, internal chat context, and Shopify data
   const relevantKnowledge = selectKnowledge(incomingEmail, knowledgeItems);
   const prompt = createDraftPrompt(
     incomingEmail,
@@ -129,9 +129,9 @@ export async function generateDraftReply(
     options?.shopifyContext
   );
 
-  // Call Groq API and measure response time
+  // Call OpenAI API and measure response time
   const startTime = Date.now();
-  let draft = await callGroqAPI(prompt, groqApiKey);
+  let draft = await callOpenAIAPI(prompt, openaiApiKey);
   const responseTimeMs = Date.now() - startTime;
 
   // Track knowledge items used
@@ -176,7 +176,7 @@ export async function generateNewEmailDraft(
   subject: string,
   context: string,
   pastEmails: StoredEmail[],
-  groqApiKey: string,
+  openaiApiKey: string,
   knowledgeItems: KnowledgeItem[] = [],
   guardrails?: Guardrails | null,
   options?: {
@@ -232,13 +232,13 @@ export async function generateNewEmailDraft(
     )
     .join('\n\n---\n\n');
 
-  // Create prompt for Groq, including relevant knowledge
+  // Create prompt for OpenAI, including relevant knowledge
   const relevantKnowledge = selectKnowledgeForNewEmail(subject, context, knowledgeItems);
   const prompt = createNewEmailPrompt(recipientEmail, recipientName, subject, context, styleExamples, relevantKnowledge, guardrails);
 
-  // Call Groq API and measure response time
+  // Call OpenAI API and measure response time
   const startTime = Date.now();
-  let draft = await callGroqAPI(prompt, groqApiKey);
+  let draft = await callOpenAIAPI(prompt, openaiApiKey);
   const responseTimeMs = Date.now() - startTime;
 
   // Track knowledge items used
@@ -338,6 +338,7 @@ INSTRUCTIONS:
 7. Do not include placeholders like [Your Name] - write as if the user is writing directly.
 8. Respect all guardrails and avoid banned words/phrases.
 9. Apply topic-specific rules when relevant to the email content or context.
+10. CRITICAL: Write in a natural, human-like, conversational manner. Use paragraphs rather than bullet points unless you are explicitly listing data items. Avoid robotic or overly structured formatting.
 
 Generate the new email now:`;
 }
@@ -464,8 +465,9 @@ INSTRUCTIONS:
    - Is professional and appropriate for the context
    - References previous messages in the conversation when relevant (e.g., "As mentioned earlier...", "Following up on...")
    - ${shopifyContext ? 'PERSONALIZES the response using Shopify customer information when available (order history, total spent, recent orders) - this builds rapport and shows understanding of their relationship with the business. ' : ''}Asks clarifying questions if the incoming email is unclear or needs more information
-   - Is concise but complete - don't repeat information already covered in the conversation
+   - Is concise but complete
    - Maintains continuity with the conversation flow
+   - CRITICAL: Write in a natural, human-like, conversational manner. Use paragraphs rather than bullet points unless you are explicitly listing data items. Avoid robotic or overly structured formatting. Prioritize warmth and flow.
 5. Output ONLY the draft email body text (no subject line, no metadata, just the reply text).
 6. Do not include placeholders like [Your Name] - write as if the user is writing directly.
 7. If the incoming email requires action or has questions, address them directly and reference any previous discussion about them.
@@ -547,136 +549,97 @@ function enforceGuardrailsOutput(
 }
 
 /**
- * Get Groq API key from environment
+ * Get OpenAI API key from environment
  */
-export function getGroqApiKey(): string | null {
-  return process.env.GROQ_API_KEY || null;
+export function getOpenAIApiKey(): string | null {
+  return process.env.OPENAI_API_KEY || null;
 }
 
 /**
- * Call Groq API to generate draft
+ * Call OpenAI API to generate draft
  */
-async function callGroqAPI(prompt: string, apiKey: string, temperature?: number): Promise<string> {
-  const REQUEST_TIMEOUT = 30000; // 30 seconds timeout for Groq API
-  const models = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'llama-3-70b-8192']; // Try models in order
+async function callOpenAIAPI(prompt: string, apiKey: string, temperature?: number): Promise<string> {
+  const REQUEST_TIMEOUT = 30000; // 30 seconds timeout
+  const model = 'gpt-5.2';
 
   let lastError: Error | null = null;
 
-  for (const model of models) {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a helpful assistant that generates email drafts matching the user\'s writing style.',
+            },
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+          temperature: 1,
+        }),
+        signal: controller.signal,
+      });
 
-      try {
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: model,
-            messages: [
-              {
-                role: 'system',
-                content: 'You are a helpful assistant that generates email drafts matching the user\'s writing style.',
-              },
-              {
-                role: 'user',
-                content: prompt,
-              },
-            ],
-            temperature: temperature || 0.7,
-            max_tokens: 1000,
-          }),
-          signal: controller.signal,
-        });
+      clearTimeout(timeoutId);
 
-        clearTimeout(timeoutId);
+      if (!response.ok) {
+        let errorMessage = `OpenAI API error: ${response.status} ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error?.message || errorData.message || errorMessage;
 
-        if (!response.ok) {
-          let errorMessage = `Groq API error (${model}): ${response.status} ${response.statusText}`;
-          try {
-            const errorData = await response.json();
-            errorMessage = errorData.error?.message || errorData.message || errorMessage;
-
-            // If model not found (404), try next model
-            if (response.status === 404 && models.indexOf(model) < models.length - 1) {
-              console.warn(`[Groq API] Model ${model} not found, trying next model...`);
-              continue; // Try next model
-            }
-
-            // Provide helpful hints for common errors
-            if (response.status === 401 || response.status === 403) {
-              errorMessage += ' (Check your GROQ_API_KEY)';
-              throw new Error(errorMessage); // Don't retry on auth errors
-            } else if (response.status === 429) {
-              errorMessage += ' (Rate limit exceeded, please try again later)';
-              throw new Error(errorMessage); // Don't retry on rate limits
-            }
-          } catch (parseError) {
-            // If JSON parsing fails, use the status text
-            if (parseError instanceof Error && parseError.message.includes('Check your GROQ_API_KEY')) {
-              throw parseError; // Re-throw auth errors
-            }
+          // Provide helpful hints
+          if (response.status === 401 || response.status === 403) {
+            errorMessage += ' (Check your OPENAI_API_KEY)';
+            throw new Error(errorMessage);
+          } else if (response.status === 429) {
+            errorMessage += ' (Rate limit exceeded, please try again later)';
+            throw new Error(errorMessage);
           }
-
-          // If it's not the last model, try the next one
-          if (models.indexOf(model) < models.length - 1) {
-            lastError = new Error(errorMessage);
-            continue;
+        } catch (parseError) {
+          if (parseError instanceof Error && parseError.message.includes('Check your OPENAI_API_KEY')) {
+            throw parseError;
           }
-
-          throw new Error(errorMessage);
         }
-
-        const data = await response.json();
-
-        if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
-          throw new Error('Invalid response format from Groq API: no choices returned');
-        }
-
-        const draft = data.choices[0]?.message?.content?.trim();
-
-        if (!draft) {
-          throw new Error('No draft content in Groq API response');
-        }
-
-        console.log(`[Groq API] Successfully generated draft using model: ${model}`);
-        return draft;
-      } catch (fetchError: any) {
-        clearTimeout(timeoutId);
-        if (fetchError.name === 'AbortError') {
-          // Timeout - don't retry with other models
-          throw new Error('Request timeout: Groq API took too long to respond');
-        }
-
-        // If it's an auth/rate limit error, don't try other models
-        if (fetchError.message?.includes('Check your GROQ_API_KEY') ||
-          fetchError.message?.includes('Rate limit')) {
-          throw fetchError;
-        }
-
-        // Otherwise, try next model
-        lastError = fetchError;
-        if (models.indexOf(model) < models.length - 1) {
-          continue;
-        }
-        throw fetchError;
+        throw new Error(errorMessage);
       }
-    } catch (modelError) {
-      lastError = modelError instanceof Error ? modelError : new Error(String(modelError));
-      // If it's the last model, throw the error
-      if (models.indexOf(model) === models.length - 1) {
-        throw lastError;
+
+      const data = await response.json();
+
+      if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
+        throw new Error('Invalid response format from OpenAI API: no choices returned');
       }
-      // Otherwise continue to next model
-      continue;
+
+      const draft = data.choices[0]?.message?.content?.trim();
+
+      if (!draft) {
+        throw new Error('No draft content in OpenAI API response');
+      }
+
+      console.log(`[OpenAI API] Successfully generated draft using model: ${model}`);
+      return draft;
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      if (fetchError.name === 'AbortError') {
+        throw new Error('Request timeout: OpenAI API took too long to respond');
+      }
+      throw fetchError;
     }
+  } catch (modelError) {
+    throw modelError instanceof Error ? modelError : new Error(String(modelError));
   }
-
-  // If we get here, all models failed
-  throw lastError || new Error('All Groq API models failed');
 }
 
 

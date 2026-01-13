@@ -764,7 +764,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             console.log('✨ Tickets updated, new count:', updated.length)
             return updated
           })
-          
+
           // Switch to the appropriate tab if specified
           if (detail.switchToTab && ['assigned', 'closed', 'unassigned', 'open'].includes(detail.switchToTab)) {
             console.log('🎯 Switching to tab:', detail.switchToTab)
@@ -1766,7 +1766,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           if (ticketCheckResponse.ok) {
             const ticketData = await ticketCheckResponse.json()
             const ticket = ticketData.ticket
-            
+
             // Only assign if ticket is unassigned
             if (ticket && !ticket.assigneeUserId) {
               console.log('📝 Auto-assigning ticket to first replier:', activeTicketId, 'user:', currentUserId)
@@ -1775,7 +1775,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ assigneeUserId: currentUserId }),
               })
-              
+
               if (assignResponse.ok) {
                 console.log('✅ Ticket auto-assigned to replier')
                 // Broadcast event to switch to "assigned" tab
@@ -1788,9 +1788,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               const assignedToCurrentUser = ticket?.assigneeUserId === currentUserId
               // If assigned to current user, switch to assigned tab
               window.dispatchEvent(new CustomEvent('ticketUpdated', {
-                detail: { 
-                  ticketId: activeTicketId, 
-                  assigneeUserId: ticket?.assigneeUserId || currentUserId, 
+                detail: {
+                  ticketId: activeTicketId,
+                  assigneeUserId: ticket?.assigneeUserId || currentUserId,
                   status: 'pending',
                   switchToTab: assignedToCurrentUser ? 'assigned' : undefined
                 }
@@ -2360,11 +2360,13 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                             <SelectContent>
                               <SelectItem value="all">All</SelectItem>
                               <SelectItem value="unassigned">Unassigned</SelectItem>
-                              {users.map((user) => (
-                                <SelectItem key={user.id} value={user.id}>
-                                  {user.name}
-                                </SelectItem>
-                              ))}
+                              {users
+                                .filter(u => u.id !== currentUserId)
+                                .map((user) => (
+                                  <SelectItem key={user.id} value={user.id}>
+                                    {user.name}
+                                  </SelectItem>
+                                ))}
                               {currentUserId && (
                                 <SelectItem value={currentUserId}>Me</SelectItem>
                               )}
@@ -2540,11 +2542,13 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="unassigned">Unassign</SelectItem>
-                      {users.map((user) => (
-                        <SelectItem key={user.id} value={user.id}>
-                          {user.name}
-                        </SelectItem>
-                      ))}
+                      {users
+                        .filter(u => u.id !== currentUserId)
+                        .map((user) => (
+                          <SelectItem key={user.id} value={user.id}>
+                            {user.name}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                   {bulkProgress.length > 0 && (

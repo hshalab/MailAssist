@@ -160,10 +160,17 @@ export async function getOrCreateTicketForThread(
   const ticket = mapRowToTicket(data);
 
   // 2) Classify ticket to department (async, non-blocking)
-  // 2) Classify ticket to department (async, non-blocking)
+  // Pass customer email and thread ID for enhanced classification context
 
   if (emailBody) {
-    classifyTicketToDepartmentAsync(ticket.id, seed.subject, emailBody, userEmail).catch(err => {
+    classifyTicketToDepartmentAsync(
+      ticket.id,
+      seed.subject,
+      emailBody,
+      userEmail,
+      seed.customerEmail, // Customer email for history lookup
+      threadId // Thread ID for context
+    ).catch(err => {
       console.error('[Ticket] Department classification failed (non-blocking):', err);
     });
   }
@@ -175,12 +182,15 @@ export async function getOrCreateTicketForThread(
 /**
  * Classify a ticket to a department using AI (async, non-blocking)
  * This runs in the background and updates the ticket after classification
+ * Now includes: sender domain, customer history, and thread context for better accuracy
  */
 export async function classifyTicketToDepartmentAsync(
   ticketId: string,
   subject: string,
   body: string,
-  userEmail: string | null
+  userEmail: string | null,
+  customerEmail?: string | null,
+  threadId?: string | null
 ): Promise<void> {
   try {
     // Determine account scope
@@ -198,20 +208,82 @@ export async function classifyTicketToDepartmentAsync(
       return;
     }
 
-    // Get Groq API key for classification
-    const { getGroqApiKey, classifyEmailWithFallback } = await import('./department-classifier');
-    const groqApiKey = getGroqApiKey();
+    // Get OpenAI API key for classification
+    const { getOpenAIApiKey, classifyEmailWithFallback } = await import('./department-classifier');
+    const openaiApiKey = getOpenAIApiKey();
 
-    if (!groqApiKey) {
-      console.warn('[Ticket] GROQ_API_KEY not configured, skipping AI classification');
+    if (!openaiApiKey) {
+      console.warn('[Ticket] OPENAI_API_KEY not configured, skipping AI classification');
       return;
     }
 
-    // Perform classification
+    // === ENHANCED CONTEXT: Sender Domain ===
+    let senderDomain: string | undefined;
+    if (customerEmail) {
+      const emailMatch = customerEmail.match(/@([a-zA-Z0-9.-]+)/);
+      if (emailMatch) {
+        senderDomain = emailMatch[1].toLowerCase();
+      }
+    }
+
+    // === ENHANCED CONTEXT: Customer History ===
+    // Find previous tickets from this customer and see which departments they were assigned to
+    let customerHistory: { departmentId: string; departmentName: string; count: number }[] = [];
+    if (customerEmail && supabase) {
+      try {
+        const { data: historyData } = await supabase
+          .from('tickets')
+          .select('department_id')
+          .eq('customer_email', customerEmail)
+          .not('department_id', 'is', null)
+          .limit(50);
+
+        if (historyData && historyData.length > 0) {
+          // Count tickets per department
+          const deptCounts = new Map<string, number>();
+          historyData.forEach((t: any) => {
+            if (t.department_id) {
+              deptCounts.set(t.department_id, (deptCounts.get(t.department_id) || 0) + 1);
+            }
+          });
+
+          // Map department IDs to names
+          customerHistory = Array.from(deptCounts.entries()).map(([deptId, count]) => {
+            const dept = departments.find(d => d.id === deptId);
+            return {
+              departmentId: deptId,
+              departmentName: dept?.name || 'Unknown',
+              count
+            };
+          }).sort((a, b) => b.count - a.count); // Most frequent first
+        }
+      } catch (historyError) {
+        console.warn('[Ticket] Could not fetch customer history:', historyError);
+      }
+    }
+
+    // === ENHANCED CONTEXT: Thread Context ===
+    // Note: Thread context would require loading the thread messages, which we don't have here
+    // This can be passed from the caller if available in the future
+    const threadContext = undefined; // Placeholder for future enhancement
+
+    console.log(`[Ticket] Classification context - Sender: ${customerEmail}, Domain: ${senderDomain}, History: ${customerHistory.length} depts`);
+
+    // Build enriched email content for classification
+    const enrichedEmailContent = {
+      subject,
+      body,
+      senderEmail: customerEmail || undefined,
+      senderDomain,
+      customerHistory: customerHistory.length > 0 ? customerHistory : undefined,
+      threadContext
+    };
+
+    // Perform classification with enriched context
     const result = await classifyEmailWithFallback(
-      { subject, body },
+      enrichedEmailContent,
       departments,
-      groqApiKey,
+      openaiApiKey,
       scopeEmail,
       businessId
     );
@@ -247,6 +319,7 @@ export async function classifyTicketToDepartmentAsync(
     // Don't throw - this is a background task and shouldn't break ticket creation
   }
 }
+
 
 
 /**
@@ -456,9 +529,8 @@ export async function getTickets(
   // Tickets with null last_customer_reply_at go to the end
   query = query.order('last_customer_reply_at', { ascending: true, nullsFirst: false });
 
-  // OPTIMIZED: Add limit to prevent fetching too many tickets at once
-  // Most users won't need more than 500 tickets in their view
-  query = query.limit(500);
+  // OPTIMIZED: Removed limit to prevent hiding new tickets
+  // query = query.limit(500);
 
   const { data, error } = await query;
 
@@ -524,7 +596,7 @@ async function getTicketsFallback(
     query = query.or(`assignee_user_id.eq.${currentUserId},assignee_user_id.is.null`);
   }
 
-  query = query.order('last_customer_reply_at', { ascending: true, nullsFirst: false }).limit(500);
+  query = query.order('last_customer_reply_at', { ascending: true, nullsFirst: false });
 
   const { data, error } = await query;
 

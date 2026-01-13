@@ -66,7 +66,7 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
         // Build query based on account type
         let ticketsQuery = supabase
             .from('tickets')
-            .select('id, subject, user_email, created_at')
+            .select('id, subject, user_email, customer_email, thread_id, created_at')
             .is('department_id', null)
             .neq('status', 'closed')
             .gte('created_at', cutoffDate.toISOString());
@@ -84,9 +84,9 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
             if (tokens && tokens.length > 0) {
                 // Get unique user emails from connected accounts
                 const accountEmails = [...new Set(tokens.map(t => t.user_email).filter(Boolean))];
-                
+
                 console.log(`[Auto-Classify] Business account: Found ${accountEmails.length} connected accounts: ${accountEmails.join(', ')}`);
-                
+
                 if (accountEmails.length > 0) {
                     // Filter tickets by user_email matching any connected account
                     ticketsQuery = ticketsQuery.in('user_email', accountEmails);
@@ -162,7 +162,9 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
                     t.id,
                     t.subject,
                     bodyContent,
-                    t.user_email || userEmail || null
+                    t.user_email || userEmail || null,
+                    t.customer_email || null, // Customer email for history lookup
+                    t.thread_id || null // Thread ID for context
                 );
             })
         );

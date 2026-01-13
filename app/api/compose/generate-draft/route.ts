@@ -9,7 +9,7 @@ import { getCurrentUserEmail } from '@/lib/storage';
 import { loadStoredEmails } from '@/lib/storage';
 import { listKnowledge } from '@/lib/knowledge';
 import { getGuardrails } from '@/lib/guardrails';
-import { getGroqApiKey } from '@/lib/ai-draft';
+import { getOpenAIApiKey } from '@/lib/ai-draft';
 
 export async function POST(request: NextRequest) {
   try {
@@ -40,16 +40,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Load required data
-    const [pastEmails, knowledgeItems, guardrails, groqApiKey] = await Promise.all([
-      loadStoredEmails(userId),
+    const [pastEmails, knowledgeItems, guardrails, openaiApiKey] = await Promise.all([
+      loadStoredEmails({ limit: 100 }),
       listKnowledge(userEmail),
       getGuardrails(userEmail),
-      getGroqApiKey(),
+      getOpenAIApiKey(),
     ]);
 
-    if (!groqApiKey) {
+    if (!openaiApiKey) {
       return NextResponse.json(
-        { error: 'Groq API key not configured' },
+        { error: 'OpenAI API key not configured' },
         { status: 500 }
       );
     }
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
       subject,
       context,
       pastEmails,
-      groqApiKey,
+      openaiApiKey,
       knowledgeItems,
       guardrails,
       {
