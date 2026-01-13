@@ -232,20 +232,30 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
       return null
     }
 
-    if (!supabase) {
-      console.error('[Session] Supabase client not initialized')
-      return null
+    // CRITICAL FIX: Use a dedicated Service Role client for session validation
+    // The shared 'supabase' client might be initialized with Anon key, which can fail RLS checks for sessions
+    // or return 0 rows if RLS is strict. Session validation happens on server, so we can use Service Role.
+    let validationClient = supabase;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+
+    if (serviceRoleKey && supabaseUrl) {
+      const { createClient } = await import('@supabase/supabase-js');
+      validationClient = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { persistSession: false }
+      });
+      // console.log('[Session] Created dedicated Service Role client for validation');
     }
 
     // Check if session exists and is not expired
-    const { data: session, error: sessionError } = await supabase
+    const { data: session, error: sessionError } = await validationClient
       .from('user_sessions')
       .select('user_id, expires_at')
       .eq('session_token', sessionToken)
       .single()
 
     if (sessionError || !session) {
-      console.log('[Session] Invalid or missing session')
+      console.log('[Session] Invalid or missing session. Error:', sessionError, 'TokenPrefix:', sessionToken?.substring(0, 5));
       return null
     }
 

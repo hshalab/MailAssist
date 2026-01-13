@@ -50,20 +50,40 @@ export async function POST(req: NextRequest) {
     let targetUser = null
     let targetBusiness = null
 
-    // If multiple users found, prioritize business accounts over personal
+    // If multiple users found, prioritize active business accounts
     if (users && users.length > 0) {
-      // Prefer business accounts
-      const businessUser = users.find(u => u.business_id !== null)
-      targetUser = businessUser || users[0]
-      targetBusiness = targetUser?.businesses
+      // 1. First priority: Active users with a business ID
+      let bestMatch = users.find(u => u.business_id !== null && u.is_active === true);
 
-      // CRITICAL: Check if user is inactive (removed from business)
+      // 2. Second priority: Any active user
+      if (!bestMatch) {
+        bestMatch = users.find(u => u.is_active === true);
+      }
+
+      // 3. Fallback: Any user with business ID (likely inactive/removed)
+      if (!bestMatch) {
+        bestMatch = users.find(u => u.business_id !== null);
+      }
+
+      // 4. Default: First found user
+      if (!bestMatch) {
+        bestMatch = users[0];
+      }
+
+      targetUser = bestMatch;
+      // Handle potential array response for businesses
+      const rawBusiness = targetUser?.businesses;
+      targetBusiness = Array.isArray(rawBusiness) ? rawBusiness[0] : rawBusiness;
+
+      console.log('[Login] Selected user:', targetUser?.id, 'Active:', targetUser?.is_active, 'BusinessId:', targetBusiness?.id);
+
+      // CRITICAL: Check if the SELECTED user is inactive
       if (targetUser && !targetUser.is_active) {
-        console.error('[Login] Inactive user attempting login:', normalizedEmail)
+        console.error('[Login] Inactive user attempting login:', normalizedEmail);
         return NextResponse.json(
           { error: 'You have been removed from this team by an administrator. If you believe this is a mistake, please contact your team administrator.' },
           { status: 403 }
-        )
+        );
       }
     }
 
