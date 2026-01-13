@@ -4,6 +4,7 @@
  */
 
 import { supabase } from './supabase';
+import { loadBusinessTokens } from './storage';
 
 export interface GuardrailLog {
   userEmail: string;
@@ -117,15 +118,11 @@ export async function getTicketAnalytics(
     // For business accounts, get all tickets for connected Gmail accounts in this business
     // For personal accounts, filter by user_email
     if (businessId) {
-      // Get all connected account emails from tokens table
-      const { data: tokens } = await supabase
-        .from('tokens')
-        .select('user_email')
-        .eq('business_id', businessId)
-        .not('user_email', 'is', null);
-      
-      if (tokens && tokens.length > 0) {
-        const accountEmails = [...new Set(tokens.map(t => t.user_email).filter(Boolean))] as string[];
+      // Get all connected account emails using robust loader (uses Admin client)
+      const connectedAccounts = await loadBusinessTokens(businessId);
+
+      if (connectedAccounts && connectedAccounts.length > 0) {
+        const accountEmails = [...new Set(connectedAccounts.map(t => t.email).filter(Boolean))];
         if (accountEmails.length > 0) {
           query = query.in('user_email', accountEmails);
         } else {
@@ -164,8 +161,9 @@ export async function getTicketAnalytics(
     let resolutionTimeCount = 0;
 
     tickets?.forEach((ticket) => {
-      // Count by status
-      const status = ticket.status || 'open';
+      // Count by status - group open/pending/on_hold together as "open" to match Tickets page
+      const rawStatus = ticket.status || 'open';
+      const status = rawStatus === 'closed' ? 'closed' : 'open';
       byStatus[status] = (byStatus[status] || 0) + 1;
       totalTickets++;
 
@@ -184,11 +182,11 @@ export async function getTicketAnalytics(
       if (status === 'closed' && ticket.created_at) {
         const createdTime = new Date(ticket.created_at).getTime();
         // Use updated_at as approximation for when ticket was closed
-        const closeTime = ticket.updated_at 
+        const closeTime = ticket.updated_at
           ? new Date(ticket.updated_at).getTime()
           : ticket.last_agent_reply_at
-          ? new Date(ticket.last_agent_reply_at).getTime()
-          : new Date().getTime();
+            ? new Date(ticket.last_agent_reply_at).getTime()
+            : new Date().getTime();
         const resolutionTimeMinutes = (closeTime - createdTime) / (1000 * 60);
         if (resolutionTimeMinutes > 0) {
           totalResolutionTime += resolutionTimeMinutes;
@@ -243,7 +241,7 @@ export async function getGuardrailStats(
     // Set end date to end of day to include the full day
     const endDateWithTime = new Date(endDate);
     endDateWithTime.setHours(23, 59, 59, 999);
-    
+
     let query = supabase
       .from('guardrail_logs')
       .select('action, guardrail_type, details')
@@ -253,15 +251,11 @@ export async function getGuardrailStats(
     // For business accounts, get all logs for connected Gmail accounts in this business
     // For personal accounts, filter by user_email
     if (businessId) {
-      // Get all connected account emails from tokens table
-      const { data: tokens } = await supabase
-        .from('tokens')
-        .select('user_email')
-        .eq('business_id', businessId)
-        .not('user_email', 'is', null);
-      
-      if (tokens && tokens.length > 0) {
-        const accountEmails = [...new Set(tokens.map(t => t.user_email).filter(Boolean))] as string[];
+      // Get all connected account emails using robust loader
+      const connectedAccounts = await loadBusinessTokens(businessId);
+
+      if (connectedAccounts && connectedAccounts.length > 0) {
+        const accountEmails = [...new Set(connectedAccounts.map(t => t.email).filter(Boolean))];
         if (accountEmails.length > 0) {
           query = query.in('user_email', accountEmails);
         } else {
@@ -369,7 +363,7 @@ export async function getAIUsageStats(
     // Set end date to end of day to include the full day
     const endDateWithTime = new Date(endDate);
     endDateWithTime.setHours(23, 59, 59, 999);
-    
+
     let query = supabase
       .from('ai_usage_logs')
       .select('action, response_time_ms, knowledge_item_ids, was_edited, was_sent, user_id')
@@ -379,15 +373,11 @@ export async function getAIUsageStats(
     // For business accounts, get all logs for connected Gmail accounts in this business
     // For personal accounts, filter by user_email
     if (businessId) {
-      // Get all connected account emails from tokens table
-      const { data: tokens } = await supabase
-        .from('tokens')
-        .select('user_email')
-        .eq('business_id', businessId)
-        .not('user_email', 'is', null);
-      
-      if (tokens && tokens.length > 0) {
-        const accountEmails = [...new Set(tokens.map(t => t.user_email).filter(Boolean))] as string[];
+      // Get all connected account emails using robust loader
+      const connectedAccounts = await loadBusinessTokens(businessId);
+
+      if (connectedAccounts && connectedAccounts.length > 0) {
+        const accountEmails = [...new Set(connectedAccounts.map(t => t.email).filter(Boolean))];
         if (accountEmails.length > 0) {
           query = query.in('user_email', accountEmails);
         } else {
@@ -430,7 +420,7 @@ export async function getAIUsageStats(
     data?.forEach((row: any) => {
       if (row.action === 'draft_generated') draftsGenerated++;
       if (row.action === 'draft_regenerated') draftsRegenerated++;
-      
+
       // FIXED: Use was_edited and was_sent flags from draft_sent action
       // Don't count draft_edited as separate action - it's tracked via was_edited flag
       if (row.action === 'draft_sent' && row.was_sent) {
@@ -439,7 +429,7 @@ export async function getAIUsageStats(
           draftsEdited++; // Draft was edited before sending
         }
       }
-      
+
       if (row.response_time_ms) {
         totalResponseTime += row.response_time_ms;
         responseTimeCount++;
@@ -536,15 +526,11 @@ export async function getAgentAnalytics(
       .lte('created_at', endDateWithTime.toISOString());
 
     if (businessId) {
-      // Business account - get all connected account emails from tokens table
-      const { data: tokens } = await supabase
-        .from('tokens')
-        .select('user_email')
-        .eq('business_id', businessId)
-        .not('user_email', 'is', null);
-      
-      if (tokens && tokens.length > 0) {
-        const accountEmails = [...new Set(tokens.map(t => t.user_email).filter(Boolean))] as string[];
+      // Get all connected account emails using robust loader
+      const connectedAccounts = await loadBusinessTokens(businessId);
+
+      if (connectedAccounts && connectedAccounts.length > 0) {
+        const accountEmails = [...new Set(connectedAccounts.map(t => t.email).filter(Boolean))];
         if (accountEmails.length > 0) {
           aiLogsQuery = aiLogsQuery.in('user_email', accountEmails);
         }
@@ -565,15 +551,11 @@ export async function getAgentAnalytics(
       .lte('created_at', endDateWithTime.toISOString());
 
     if (businessId) {
-      // Business account - get all connected account emails from tokens table
-      const { data: tokens } = await supabase
-        .from('tokens')
-        .select('user_email')
-        .eq('business_id', businessId)
-        .not('user_email', 'is', null);
-      
-      if (tokens && tokens.length > 0) {
-        const accountEmails = [...new Set(tokens.map(t => t.user_email).filter(Boolean))] as string[];
+      // Business account - get all connected account emails using robust loader
+      const connectedAccounts = await loadBusinessTokens(businessId);
+
+      if (connectedAccounts && connectedAccounts.length > 0) {
+        const accountEmails = [...new Set(connectedAccounts.map(t => t.email).filter(Boolean))];
         if (accountEmails.length > 0) {
           ticketsQuery = ticketsQuery.in('user_email', accountEmails);
         }
@@ -596,6 +578,7 @@ export async function getAgentAnalytics(
       draftsGenerated: number;
       draftsSent: number;
       draftsEdited: number;
+      directSends: number;
     }>();
 
     // Initialize stats for all users
@@ -610,6 +593,7 @@ export async function getAgentAnalytics(
         draftsGenerated: 0,
         draftsSent: 0,
         draftsEdited: 0,
+        directSends: 0, // FIXED: Added missing property
       });
     });
 
@@ -652,8 +636,8 @@ export async function getAgentAnalytics(
       userName: stats.userName,
       ticketsAssigned: stats.ticketsAssigned,
       ticketsClosed: stats.ticketsClosed,
-      avgResponseTime: stats.responseTimeCount > 0 
-        ? stats.totalResponseTime / stats.responseTimeCount 
+      avgResponseTime: stats.responseTimeCount > 0
+        ? stats.totalResponseTime / stats.responseTimeCount
         : 0,
       draftsGenerated: stats.draftsGenerated,
       draftsSent: stats.draftsSent,
@@ -731,4 +715,3 @@ export async function getAgentPerformance(
     return [];
   }
 }
-

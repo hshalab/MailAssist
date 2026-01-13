@@ -2327,10 +2327,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="all">All</SelectItem>
-                              <SelectItem value="open">Open</SelectItem>
                               <SelectItem value="pending">Pending</SelectItem>
                               <SelectItem value="on_hold">On Hold</SelectItem>
-                              <SelectItem value="closed">Closed</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>

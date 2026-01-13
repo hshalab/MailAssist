@@ -4,9 +4,9 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs"
 import { Skeleton } from "./ui/skeleton"
-import { 
-  BarChart3, Shield, Sparkles, Users, TrendingUp, TrendingDown, Clock, 
-  FileText, CheckCircle2, AlertCircle, Activity, Zap, Target, 
+import {
+  BarChart3, Shield, Sparkles, Users, TrendingUp, TrendingDown, Clock,
+  FileText, CheckCircle2, AlertCircle, Activity, Zap, Target,
   ArrowUpRight, ArrowDownRight, Minus
 } from "lucide-react"
 import {
@@ -86,8 +86,8 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
     }
 
     const endDate = new Date()
-    const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-    
+    const startDate = new Date('2000-01-01') // All-time view to match Tickets page (no date filtering)
+
     setDateRange({
       startDate: startDate.toISOString().split('T')[0],
       endDate: endDate.toISOString().split('T')[0],
@@ -211,12 +211,12 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
     closed: "var(--status-success)",
   }
 
-  const ticketStatusData = ticketAnalytics 
+  const ticketStatusData = ticketAnalytics
     ? Object.entries(ticketAnalytics.byStatus).map(([status, count]) => ({
-        status: status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' '),
-        count,
-        fill: statusColors[status] || "#6b7280",
-      }))
+      status: status.charAt(0).toUpperCase() + status.slice(1).replace('_', ' '),
+      count,
+      fill: statusColors[status] || "#6b7280",
+    }))
     : []
 
   const agentPerformanceData = agentAnalytics
@@ -357,32 +357,32 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
 
       <Tabs defaultValue="overview" className="space-y-4">
         <TabsList className="grid w-full grid-cols-5 bg-muted/50 p-1 rounded-xl">
-          <TabsTrigger 
-            value="overview" 
+          <TabsTrigger
+            value="overview"
             className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md font-medium transition-all data-[state=inactive]:text-muted-foreground"
           >
             Overview
           </TabsTrigger>
-          <TabsTrigger 
-            value="tickets" 
+          <TabsTrigger
+            value="tickets"
             className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md font-medium transition-all data-[state=inactive]:text-muted-foreground"
           >
             Tickets
           </TabsTrigger>
-          <TabsTrigger 
-            value="ai" 
+          <TabsTrigger
+            value="ai"
             className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md font-medium transition-all data-[state=inactive]:text-muted-foreground"
           >
             AI Usage
           </TabsTrigger>
-          <TabsTrigger 
-            value="agents" 
+          <TabsTrigger
+            value="agents"
             className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md font-medium transition-all data-[state=inactive]:text-muted-foreground"
           >
             Agents
           </TabsTrigger>
-          <TabsTrigger 
-            value="guardrails" 
+          <TabsTrigger
+            value="guardrails"
             className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md font-medium transition-all data-[state=inactive]:text-muted-foreground"
           >
             Guardrails
@@ -394,126 +394,126 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
           <div className="grid gap-4 md:grid-cols-2">
             {/* Ticket Status Distribution */}
             {ticketStatusData.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">Ticket Status Distribution</CardTitle>
-                    <CardDescription className="text-xs">Breakdown of tickets by status</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ChartContainer
-                      config={{
-                        count: { label: "Tickets" },
-                      }}
-                      className="h-[280px]"
-                    >
-                      <PieChart>
-                        <ChartTooltip content={<ChartTooltipContent />} />
-                        <Pie
-                          data={ticketStatusData}
-                          dataKey="count"
-                          nameKey="status"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={90}
-                          innerRadius={40}
-                          label={({ status, count }) => `${status}: ${count}`}
-                          labelLine={false}
-                        >
-                          {ticketStatusData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.fill} stroke="hsl(var(--background))" strokeWidth={2} />
-                          ))}
-                        </Pie>
-                      </PieChart>
-                    </ChartContainer>
-                  </CardContent>
-                </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Ticket Status Distribution</CardTitle>
+                  <CardDescription className="text-xs">Breakdown of tickets by status</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ChartContainer
+                    config={{
+                      count: { label: "Tickets" },
+                    }}
+                    className="h-[280px]"
+                  >
+                    <PieChart>
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Pie
+                        data={ticketStatusData}
+                        dataKey="count"
+                        nameKey="status"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={90}
+                        innerRadius={40}
+                        label={({ status, count }) => `${status}: ${count}`}
+                        labelLine={false}
+                      >
+                        {ticketStatusData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.fill} stroke="hsl(var(--background))" strokeWidth={2} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ChartContainer>
+                </CardContent>
+              </Card>
             )}
 
             {/* AI Workflow */}
             {aiUsageStats && aiUsageStats.draftsGenerated > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">AI Draft Workflow</CardTitle>
-                    <CardDescription className="text-xs">Draft generation and usage metrics</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <ChartContainer
-                      config={{
-                        Generated: { label: "Generated", color: "#3b82f6" },
-                        Sent: { label: "Sent", color: "#10b981" },
-                        Edited: { label: "Edited", color: "#f59e0b" },
-                      }}
-                      className="h-[280px]"
-                    >
-                      <BarChart data={aiWorkflowData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                        <XAxis 
-                          dataKey="name" 
-                          tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-                          axisLine={{ stroke: "hsl(var(--border))" }}
-                        />
-                        <YAxis 
-                          tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-                          axisLine={{ stroke: "hsl(var(--border))" }}
-                        />
-                        <ChartTooltip 
-                          content={<ChartTooltipContent />}
-                          cursor={{ fill: "hsl(var(--muted))", opacity: 0.1 }}
-                        />
-                        <Bar dataKey="value" radius={[6, 6, 0, 0]} fill="#8884d8">
-                          {aiWorkflowData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.fill} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ChartContainer>
-                  </CardContent>
-                </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">AI Draft Workflow</CardTitle>
+                  <CardDescription className="text-xs">Draft generation and usage metrics</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ChartContainer
+                    config={{
+                      Generated: { label: "Generated", color: "#3b82f6" },
+                      Sent: { label: "Sent", color: "#10b981" },
+                      Edited: { label: "Edited", color: "#f59e0b" },
+                    }}
+                    className="h-[280px]"
+                  >
+                    <BarChart data={aiWorkflowData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+                      <XAxis
+                        dataKey="name"
+                        tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+                        axisLine={{ stroke: "hsl(var(--border))" }}
+                      />
+                      <YAxis
+                        tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+                        axisLine={{ stroke: "hsl(var(--border))" }}
+                      />
+                      <ChartTooltip
+                        content={<ChartTooltipContent />}
+                        cursor={{ fill: "hsl(var(--muted))", opacity: 0.1 }}
+                      />
+                      <Bar dataKey="value" radius={[6, 6, 0, 0]} fill="#8884d8">
+                        {aiWorkflowData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.fill} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ChartContainer>
+                </CardContent>
+              </Card>
             )}
           </div>
 
           {/* Agent Performance Chart */}
           {agentPerformanceData.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Top Agent Performance</CardTitle>
-                  <CardDescription className="text-xs">Top 10 agents by ticket volume</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ChartContainer
-                    config={{
-                      tickets: { label: "Tickets Assigned", color: "#3b82f6" },
-                      closed: { label: "Tickets Closed", color: "#10b981" },
-                      drafts: { label: "Drafts Sent", color: "#8b5cf6" },
-                    }}
-                    className="h-[320px]"
-                  >
-                    <BarChart data={agentPerformanceData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
-                      <XAxis 
-                        dataKey="name" 
-                        angle={-45} 
-                        textAnchor="end" 
-                        height={100}
-                        tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
-                        axisLine={{ stroke: "hsl(var(--border))" }}
-                      />
-                      <YAxis 
-                        tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-                        axisLine={{ stroke: "hsl(var(--border))" }}
-                      />
-                      <ChartTooltip 
-                        content={<ChartTooltipContent />}
-                        cursor={{ fill: "hsl(var(--muted))", opacity: 0.1 }}
-                      />
-                      <ChartLegend content={<ChartLegendContent />} />
-                      <Bar dataKey="tickets" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="closed" fill="#10b981" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="drafts" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ChartContainer>
-                </CardContent>
-              </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Top Agent Performance</CardTitle>
+                <CardDescription className="text-xs">Top 10 agents by ticket volume</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ChartContainer
+                  config={{
+                    tickets: { label: "Tickets Assigned", color: "#3b82f6" },
+                    closed: { label: "Tickets Closed", color: "#10b981" },
+                    drafts: { label: "Drafts Sent", color: "#8b5cf6" },
+                  }}
+                  className="h-[320px]"
+                >
+                  <BarChart data={agentPerformanceData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
+                    <XAxis
+                      dataKey="name"
+                      angle={-45}
+                      textAnchor="end"
+                      height={100}
+                      tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }}
+                      axisLine={{ stroke: "hsl(var(--border))" }}
+                    />
+                    <YAxis
+                      tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+                      axisLine={{ stroke: "hsl(var(--border))" }}
+                    />
+                    <ChartTooltip
+                      content={<ChartTooltipContent />}
+                      cursor={{ fill: "hsl(var(--muted))", opacity: 0.1 }}
+                    />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    <Bar dataKey="tickets" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="closed" fill="#10b981" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="drafts" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ChartContainer>
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
 
@@ -599,12 +599,12 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
                             </span>
                             <span className="font-bold">{count} ({Math.round(percentage)}%)</span>
                           </div>
-                        <div className="w-full bg-muted rounded-full h-2">
-                          <div
-                            className="h-2 rounded-full bg-foreground"
-                            style={{ width: `${percentage}%` }}
-                          />
-                        </div>
+                          <div className="w-full bg-muted rounded-full h-2">
+                            <div
+                              className="h-2 rounded-full bg-foreground"
+                              style={{ width: `${percentage}%` }}
+                            />
+                          </div>
                         </div>
                       )
                     })}
@@ -1028,8 +1028,8 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
                         <div className="w-full bg-muted rounded-full h-2">
                           <div
                             className="bg-foreground h-2 rounded-full"
-                            style={{ 
-                              width: `${(guardrailStats.totalBlocked / guardrailStats.totalApplied) * 100}%` 
+                            style={{
+                              width: `${(guardrailStats.totalBlocked / guardrailStats.totalApplied) * 100}%`
                             }}
                           />
                         </div>

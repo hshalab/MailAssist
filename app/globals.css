@@ -455,3 +455,10 @@ button, a, [role="button"] {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Hide native password reveal button in Edge/IE */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+

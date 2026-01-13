@@ -248,7 +248,7 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
           )}
 
           {step === "email" && (
-            <form onSubmit={handleEmailSubmit} className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+            <form onSubmit={handleEmailSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-sm font-medium">
                   Email Address
@@ -328,7 +328,7 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
           )}
 
           {step === "password" && (
-            <form onSubmit={handlePasswordSubmit} className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
+            <form onSubmit={handlePasswordSubmit} className="space-y-4">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full">
                   <Mail className="w-3 h-3" />
@@ -427,7 +427,7 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
           )}
 
           {step === "google" && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+            <div className="space-y-6">
               <div className="text-center space-y-2">
                 <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Mail className="w-8 h-8 text-blue-500" />
@@ -489,7 +489,7 @@ export default function LoginForm({ onSuccess, onRegisterClick, onPersonalRegist
           )}
 
           {step === "personal-invite" && (
-            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+            <div className="space-y-6">
               <div className="text-center space-y-2">
                 <div className="w-16 h-16 bg-purple-50 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Sparkles className="w-8 h-8 text-purple-500" />
