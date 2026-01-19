@@ -159,23 +159,35 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
         credentials: 'include'
       })
 
-      // CRITICAL FIX: Handle 401 with retry logic for race conditions on initial login
-      // When user first logs in, cookies might not be ready yet, so retry with exponential backoff
+      // PERFORMANCE: Removed retry logic - cookies should be ready before redirect
+      // If 401 occurs, it's a real auth issue, not a race condition
       if (!response.ok) {
+        console.error(`[EmailList] API error: ${response.status} ${response.statusText}`);
+
         if (response.status === 401) {
-          // If this is initial load (not silent) and we haven't retried too many times, retry
-          const maxRetries = 3;
-          if (!silent && retryCount < maxRetries) {
-            const delay = Math.min(1000 * Math.pow(2, retryCount), 3000); // Exponential backoff: 1s, 2s, 3s max
-            console.log(`[EmailList] Auth not ready yet (attempt ${retryCount + 1}/${maxRetries}), retrying in ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            return fetchEmails(newLimit, isLoadMore, silent, retryCount + 1);
-          }
-          // After max retries, show auth error
-          setError('Not authenticated')
+          setError('Not authenticated - please log in again')
           return
         }
-        throw new Error('Failed to fetch emails')
+
+        if (response.status === 400) {
+          // Check if this is a "no accounts connected" or "token expired" error
+          try {
+            const errorData = await response.json()
+            console.log('[EmailList] 400 error details:', errorData)
+            if (errorData.code === 'GMAIL_NOT_CONNECTED') {
+              setError('No email accounts connected. Please connect your Gmail account.')
+              return
+            }
+            if (errorData.code === 'TOKEN_EXPIRED') {
+              setError('Gmail connection expired. Please reconnect your account in Settings.')
+              return
+            }
+          } catch (e) {
+            // Failed to parse error, fall through to generic error
+          }
+        }
+
+        throw new Error(`Failed to fetch emails: ${response.status} ${response.statusText}`)
       }
 
       const data = await response.json()
@@ -226,7 +238,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       })
       if (response.ok) {
         const data = await response.json()
-        
+
         // PERFORMANCE: Limit cache size - remove oldest entries if cache is full
         if (emailCacheRef.current.size >= MAX_CACHE_SIZE) {
           // Remove first (oldest) entry
@@ -235,7 +247,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
             emailCacheRef.current.delete(firstKey)
           }
         }
-        
+
         emailCacheRef.current.set(emailId, data.email)
       }
     } catch (err) {
@@ -272,7 +284,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   useEffect(() => {
     // Don't poll if user is viewing an email (reduces unnecessary requests)
     if (selectedEmail) {
-      return () => {} // Return empty cleanup function to keep dependency array consistent
+      return () => { } // Return empty cleanup function to keep dependency array consistent
     }
 
     const pollInterval = setInterval(() => {
@@ -485,6 +497,34 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   }
 
   if (error && !loadingMore) {
+    // Special handling for token expiration - show reconnect UI
+    if (error.includes('expired') || error.includes('reconnect')) {
+      return (
+        <div className="flex items-center justify-center p-12 animate-in fade-in duration-300">
+          <div className="text-center space-y-5 max-w-md">
+            <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-yellow-500/15 via-orange-500/10 to-yellow-500/5 flex items-center justify-center mx-auto shadow-lg border-2 border-yellow-500/20">
+              <svg className="w-12 h-12 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            </div>
+            <div className="space-y-3">
+              <div className="text-base font-bold text-foreground">Gmail Connection Expired</div>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Your Gmail access token has expired or been revoked. This can happen if you changed your password, manually revoked access, or the token hasn't been used in 6 months.
+              </p>
+              <div className="pt-2">
+                <Button onClick={handleConnectGmail} className="w-full">
+                  <Mail className="mr-2 h-4 w-4" />
+                  Reconnect Gmail Account
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    // Generic error display
     return (
       <div className="flex items-center justify-center p-12 animate-in fade-in duration-300">
         <div className="text-center space-y-5 max-w-sm">

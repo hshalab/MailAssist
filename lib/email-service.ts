@@ -6,6 +6,11 @@ import { Resend } from 'resend';
 // Initialize Resend with API key (safe to be undefined, will just fail gracefully)
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// PERFORMANCE: Cache token refresh status to avoid redundant refresh attempts
+// Key: email address, Value: timestamp of last successful refresh
+const tokenRefreshCache = new Map<string, number>();
+const REFRESH_CACHE_TTL = 4 * 60 * 1000; // 4 minutes (tokens expire in 5 min, so refresh at 4 min)
+
 export const sendEmail = {
   /**
    * Send OTP verification email
@@ -178,36 +183,60 @@ export async function fetchAllInboxEmails(
         let currentTokens = tokens;
         const providerType = (tokens.provider as any) || 'gmail';
 
-        // Check for Gmail token expiry and refresh if needed
-        if (providerType === 'gmail' && tokens.expiry_date && tokens.refresh_token) {
-          const now = Date.now();
-          if (now >= tokens.expiry_date - 5 * 60 * 1000) { // 5 min buffer
-            console.log(`[EmailService] Refreshing expired Gmail token for ${email}`);
-            try {
-              const { getOAuth2Client } = await import('./gmail');
-              const { saveTokens } = await import('./storage');
+        // PERFORMANCE: Check cache before attempting token refresh
+        // This prevents redundant refresh attempts when tokens were recently refreshed
+        const lastRefresh = tokenRefreshCache.get(email);
+        const now = Date.now();
+        const needsRefresh = providerType === 'gmail' &&
+          tokens.expiry_date &&
+          tokens.refresh_token &&
+          now >= tokens.expiry_date - 5 * 60 * 1000 && // 5 min buffer
+          (!lastRefresh || now - lastRefresh > REFRESH_CACHE_TTL);
 
-              const oauth2Client = getOAuth2Client();
-              oauth2Client.setCredentials({
-                refresh_token: tokens.refresh_token,
-              });
+        if (needsRefresh) {
+          console.log(`[EmailService] Refreshing expired Gmail token for ${email}`);
+          try {
+            const { getOAuth2Client } = await import('./gmail');
+            const { saveTokens } = await import('./storage');
 
-              const { credentials } = await oauth2Client.refreshAccessToken();
+            const oauth2Client = getOAuth2Client();
+            oauth2Client.setCredentials({
+              refresh_token: tokens.refresh_token,
+            });
 
-              currentTokens = {
-                ...tokens,
-                access_token: credentials.access_token,
-                expiry_date: credentials.expiry_date,
-              };
+            const { credentials } = await oauth2Client.refreshAccessToken();
 
-              // Save refreshed tokens, preserving business association
-              await saveTokens(currentTokens, businessId);
-              console.log(`[EmailService] Token refreshed and saved for ${email}`);
-            } catch (refreshError) {
-              console.error(`[EmailService] Failed to refresh token for ${email}:`, refreshError);
-              // Continue with old tokens, might fail but worth a try or just return empty
+            currentTokens = {
+              ...tokens,
+              access_token: credentials.access_token,
+              expiry_date: credentials.expiry_date,
+            };
+
+            // Save refreshed tokens, preserving business association
+            await saveTokens(currentTokens, businessId);
+
+            // Cache the refresh timestamp to prevent redundant refreshes
+            tokenRefreshCache.set(email, now);
+
+            console.log(`[EmailService] Token refreshed and saved for ${email}`);
+          } catch (refreshError: any) {
+            console.error(`[EmailService] Failed to refresh token for ${email}:`, refreshError);
+
+            // Check if this is an invalid_grant error (token revoked/expired)
+            if (refreshError?.message?.includes('invalid_grant') ||
+              refreshError?.error === 'invalid_grant' ||
+              refreshError?.response?.data?.error === 'invalid_grant') {
+              console.error(`[EmailService] CRITICAL: Token for ${email} has been revoked or expired. User needs to reconnect.`);
+
+              // Return empty array for this account - the error will be caught at the API level
+              return [];
             }
+
+            // For other errors, continue with old tokens (might still work)
+            console.log(`[EmailService] Continuing with old tokens for ${email} despite refresh error`);
           }
+        } else if (lastRefresh && now - lastRefresh <= REFRESH_CACHE_TTL) {
+          console.log(`[EmailService] Skipping token refresh for ${email} - recently refreshed ${Math.round((now - lastRefresh) / 1000)}s ago`);
         }
 
         console.log(`[EmailService] Fetching inbox for ${email} (Provider: ${providerType}, Limit: ${perAccountLimit})`);

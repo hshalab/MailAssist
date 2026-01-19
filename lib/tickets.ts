@@ -523,11 +523,10 @@ export async function getTickets(
   }
   // Admin/Manager: see all (no additional filter)
 
-  // Order by last_customer_reply_at ascending (oldest customer-waiting first)
-  // Tickets that have been waiting longest (oldest last_customer_reply_at) are at the top
-  // When a customer replies, last_customer_reply_at updates to now, moving ticket down
+  // Order by last_customer_reply_at descending (newest customer emails first)
+  // Recent customer emails appear at the top for faster response
   // Tickets with null last_customer_reply_at go to the end
-  query = query.order('last_customer_reply_at', { ascending: true, nullsFirst: false });
+  query = query.order('last_customer_reply_at', { ascending: false, nullsFirst: false });
 
   // OPTIMIZED: Removed limit to prevent hiding new tickets
   // query = query.limit(500);
@@ -596,7 +595,7 @@ async function getTicketsFallback(
     query = query.or(`assignee_user_id.eq.${currentUserId},assignee_user_id.is.null`);
   }
 
-  query = query.order('last_customer_reply_at', { ascending: true, nullsFirst: false });
+  query = query.order('last_customer_reply_at', { ascending: false, nullsFirst: false });
 
   const { data, error } = await query;
 

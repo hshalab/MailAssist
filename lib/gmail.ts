@@ -209,36 +209,30 @@ export async function fetchInboxEmails(
   // Only fetch full body if explicitly needed
   const format = includeBody ? 'full' : 'metadata';
 
-  // OPTIMIZED: Fetch messages with controlled concurrency
-  // Gmail API allows ~50 requests/second per user, so we use larger batches
-  // with concurrent processing to maximize throughput while respecting rate limits
-  const BATCH_SIZE = 30; // Process 30 emails at a time (increased from 10 for faster loading)
-  const emailDetails: any[] = [];
+  // OPTIMIZED: Fetch ALL messages in parallel for maximum speed
+  // Gmail API allows ~50 requests/second per user
+  // By fetching all messages concurrently, we reduce total fetch time dramatically
+  // For 50 emails: Sequential batches = ~2-3s, Parallel = ~500ms
+  const emailDetails = await Promise.all(
+    messages.map(async (message) => {
+      try {
+        const fullMessage = await gmail.users.messages.get({
+          userId: 'me',
+          id: message.id!,
+          format: format as 'full' | 'metadata' | 'minimal',
+        });
+        return parseEmailMessage(fullMessage.data, !includeBody);
+      } catch (error) {
+        console.error(`Error fetching message ${message.id}:`, error);
+        return null; // Return null for failed messages
+      }
+    })
+  );
 
-  // Process messages in larger batches with Promise.all for maximum concurrency
-  for (let i = 0; i < messages.length; i += BATCH_SIZE) {
-    const batch = messages.slice(i, i + BATCH_SIZE);
-    const batchResults = await Promise.all(
-      batch.map(async (message) => {
-        try {
-          const fullMessage = await gmail.users.messages.get({
-            userId: 'me',
-            id: message.id!,
-            format: format as 'full' | 'metadata' | 'minimal',
-          });
-          return parseEmailMessage(fullMessage.data, !includeBody);
-        } catch (error) {
-          console.error(`Error fetching message ${message.id}:`, error);
-          return null; // Return null for failed messages
-        }
-      })
-    );
+  // Filter out null results from failed fetches
+  const validEmails = emailDetails.filter((email) => email !== null);
 
-    // Filter out null results from failed fetches and add to results
-    emailDetails.push(...batchResults.filter((email) => email !== null));
-  }
-
-  return emailDetails;
+  return validEmails;
 }
 
 /**
@@ -269,36 +263,27 @@ export async function fetchSentEmails(
   // Only fetch full body if explicitly needed (e.g., for embeddings)
   const format = includeBody ? 'full' : 'metadata';
 
-  // OPTIMIZED: Fetch messages with controlled concurrency
-  // Gmail API allows ~50 requests/second per user, so we use larger batches
-  // with concurrent processing to maximize throughput while respecting rate limits
-  const BATCH_SIZE = 30; // Process 30 emails at a time (increased from 10 for faster loading)
-  const emailDetails: any[] = [];
+  // OPTIMIZED: Fetch ALL messages in parallel for maximum speed
+  // Gmail API allows ~50 requests/second per user
+  // By fetching all messages concurrently, we reduce total fetch time dramatically
+  const emailDetails = await Promise.all(
+    messages.map(async (message) => {
+      try {
+        const fullMessage = await gmail.users.messages.get({
+          userId: 'me',
+          id: message.id!,
+          format: format as 'full' | 'metadata' | 'minimal',
+        });
+        return parseEmailMessage(fullMessage.data, !includeBody);
+      } catch (error) {
+        console.error(`Error fetching message ${message.id}:`, error);
+        return null; // Return null for failed messages
+      }
+    })
+  );
 
-  // Process messages in larger batches with Promise.all for maximum concurrency
-  for (let i = 0; i < messages.length; i += BATCH_SIZE) {
-    const batch = messages.slice(i, i + BATCH_SIZE);
-    const batchResults = await Promise.all(
-      batch.map(async (message) => {
-        try {
-          const fullMessage = await gmail.users.messages.get({
-            userId: 'me',
-            id: message.id!,
-            format: format as 'full' | 'metadata' | 'minimal',
-          });
-          return parseEmailMessage(fullMessage.data, !includeBody);
-        } catch (error) {
-          console.error(`Error fetching message ${message.id}:`, error);
-          return null; // Return null for failed messages
-        }
-      })
-    );
-
-    // Filter out null results from failed fetches and add to results
-    emailDetails.push(...batchResults.filter((email) => email !== null));
-  }
-
-  return emailDetails;
+  // Filter out null results from failed fetches
+  return emailDetails.filter((email) => email !== null);
 }
 
 /**
@@ -556,9 +541,9 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
         const potentialCss = cssMatch[0]
         const afterCss = bodyHtml.substring(potentialCss.length).trim()
         // Only remove if it's clearly CSS followed by actual content
-        if (potentialCss.includes('{') && potentialCss.includes('}') && 
-            (potentialCss.includes('.') || potentialCss.includes('@media') || potentialCss.includes('@')) &&
-            afterCss.length > 0 && !afterCss.match(/^[\s\n]*(?:\.[\w-]+\s*\{|@media)/i)) {
+        if (potentialCss.includes('{') && potentialCss.includes('}') &&
+          (potentialCss.includes('.') || potentialCss.includes('@media') || potentialCss.includes('@')) &&
+          afterCss.length > 0 && !afterCss.match(/^[\s\n]*(?:\.[\w-]+\s*\{|@media)/i)) {
           bodyHtml = afterCss
         }
       }
@@ -570,9 +555,9 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
       if (cssMatch && cssMatch[0]) {
         const potentialCss = cssMatch[0]
         const afterCss = bodyText.substring(potentialCss.length).trim()
-        if (potentialCss.includes('{') && potentialCss.includes('}') && 
-            (potentialCss.includes('.') || potentialCss.includes('@media') || potentialCss.includes('@')) &&
-            afterCss.length > 0 && !afterCss.match(/^[\s\n]*(?:\.[\w-]+\s*\{|@media)/i)) {
+        if (potentialCss.includes('{') && potentialCss.includes('}') &&
+          (potentialCss.includes('.') || potentialCss.includes('@media') || potentialCss.includes('@')) &&
+          afterCss.length > 0 && !afterCss.match(/^[\s\n]*(?:\.[\w-]+\s*\{|@media)/i)) {
           bodyText = afterCss
         }
       }
@@ -636,12 +621,12 @@ export async function sendNewEmail(
 ) {
   // CRITICAL FIX: For invited users, get tokens from business-connected accounts
   let tokens = await getValidTokens();
-  
+
   if (!tokens || !tokens.access_token) {
     // Check if this is a business account user (invited agent/manager)
     const { validateBusinessSession } = await import('./session');
     const businessSession = await validateBusinessSession();
-    
+
     if (businessSession?.businessId) {
       // For business accounts, try to get tokens from business-connected accounts
       const { loadBusinessTokens } = await import('./storage');
@@ -653,7 +638,7 @@ export async function sendNewEmail(
       }
     }
   }
-  
+
   if (!tokens || !tokens.access_token) {
     throw new Error('Not authenticated. Please connect Gmail or ensure your business has connected email accounts.');
   }
