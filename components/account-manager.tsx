@@ -78,7 +78,7 @@ export function AccountManager() {
             console.log('[AccountManager] Accounts changed event received, refreshing accounts list')
             fetchAccounts()
         }
-        
+
         // Also listen for storage events (cross-tab communication)
         const handleStorageChange = (e: StorageEvent) => {
             if (e.key === 'accountsChanged') {
@@ -86,10 +86,10 @@ export function AccountManager() {
                 fetchAccounts()
             }
         }
-        
+
         window.addEventListener('accountsChanged', handleAccountsChanged)
         window.addEventListener('storage', handleStorageChange)
-        
+
         // Check on mount if accounts changed (e.g., after OAuth return)
         const checkAccountsChanged = () => {
             const accountsChanged = localStorage.getItem('accountsChanged')
@@ -99,7 +99,7 @@ export function AccountManager() {
             }
         }
         checkAccountsChanged()
-        
+
         // Also check URL params for OAuth return
         if (typeof window !== 'undefined') {
             const urlParams = new URLSearchParams(window.location.search)
@@ -110,7 +110,7 @@ export function AccountManager() {
                 }, 1000)
             }
         }
-        
+
         return () => {
             window.removeEventListener('accountsChanged', handleAccountsChanged)
             window.removeEventListener('storage', handleStorageChange)
@@ -126,7 +126,7 @@ export function AccountManager() {
 
         setIsDisconnecting(accountToDelete)
         const emailToDelete = accountToDelete // Store before clearing state
-        
+
         try {
             const res = await fetch('/api/auth/accounts/disconnect', {
                 method: 'POST',
@@ -141,18 +141,18 @@ export function AccountManager() {
                 // Update local state immediately
                 setAccounts(prev => prev.filter(a => a.email !== emailToDelete))
                 setAccountToDelete(null)
-                
+
                 // CRITICAL: Trigger refresh for ALL users in the business
                 // This ensures agents, managers, and admins all see the changes
                 window.dispatchEvent(new CustomEvent('accountsChanged'))
-                
+
                 // Broadcast to all tabs/windows that accounts changed
                 if (typeof window !== 'undefined' && window.localStorage) {
                     localStorage.setItem('accountsChanged', Date.now().toString())
                     // Also set a flag to prevent OAuth from recreating tokens
                     localStorage.setItem(`disconnected_${emailToDelete}`, Date.now().toString())
                 }
-                
+
                 // Wait longer to ensure database deletion completes and prevent race conditions
                 // Then reload the page to ensure clean state and reflect deletions
                 setTimeout(() => {
@@ -178,8 +178,10 @@ export function AccountManager() {
 
     const handleConnectGmail = async () => {
         try {
+            // CRITICAL FIX: Pass reconnect=true to force consent and get new refresh token
+            // This is important when reconnecting after token expiration
             // Use mode=connect to ensure it links to current session instead of logging in
-            const res = await fetch('/api/auth/gmail?mode=connect')
+            const res = await fetch('/api/auth/gmail?mode=connect&reconnect=true')
             if (!res.ok) throw new Error('Failed to get auth URL')
             const data = await res.json()
             if (data.authUrl) {

@@ -22,8 +22,12 @@ export function getOAuth2Client(): Auth.OAuth2Client {
 
 /**
  * Get OAuth2 authorization URL for Gmail authentication
+ * @param state - Optional state parameter for OAuth flow
+ * @param forceConsent - If true, forces consent screen to get new refresh token. 
+ *                       Use only for initial connection or explicit reconnection after token revocation.
+ *                       Default is false to preserve existing refresh tokens.
  */
-export function getAuthUrl(state?: string): string {
+export function getAuthUrl(state?: string, forceConsent: boolean = false): string {
   const oauth2Client = getOAuth2Client();
 
   const scopes = [
@@ -37,7 +41,12 @@ export function getAuthUrl(state?: string): string {
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: scopes,
-    prompt: 'consent', // Force consent to get refresh token
+    // CRITICAL FIX: Only force consent when explicitly needed
+    // 'consent' - Forces consent screen and issues NEW refresh token (can invalidate old ones)
+    // 'select_account' - Allows account selection, reuses existing refresh token
+    // This prevents Google from hitting the refresh token limit (50 per user per client)
+    // and keeps tokens valid indefinitely unless manually revoked
+    prompt: forceConsent ? 'consent' : 'select_account',
     state: state,
   });
 }

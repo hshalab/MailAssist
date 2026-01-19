@@ -417,8 +417,15 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
 
   const handleConnectGmail = async () => {
     try {
-      // CRITICAL: Pass mode=connect to allow business accounts to connect Gmail
-      const response = await fetch('/api/auth/gmail?mode=connect')
+      // CRITICAL FIX: Pass reconnect=true when reconnecting after token expiration
+      // This forces consent screen to get a new refresh token
+      // For normal connections, mode=connect is sufficient
+      const isReconnecting = error?.includes('expired') || error?.includes('reconnect')
+      const url = isReconnecting
+        ? '/api/auth/gmail?mode=connect&reconnect=true'
+        : '/api/auth/gmail?mode=connect'
+
+      const response = await fetch(url)
       if (!response.ok) throw new Error('Failed to get auth URL')
       const { authUrl } = await response.json()
       window.location.href = authUrl
