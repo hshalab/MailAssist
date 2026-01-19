@@ -2066,13 +2066,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       filtered = filtered.filter(t => hasNewCustomerReply(t))
     }
 
-    // Sort by last_customer_reply_at (oldest first, nulls last)
-    // Tickets that have been waiting longest (oldest last_customer_reply_at) are at the top
-    // When a customer replies, last_customer_reply_at updates to now, moving ticket down
+    // Sort by last_customer_reply_at (newest first, nulls last)
+    // Recent customer emails appear at the top for faster response
     filtered.sort((a, b) => {
-      const aDate = a.lastCustomerReplyAt ? new Date(a.lastCustomerReplyAt).getTime() : Infinity
-      const bDate = b.lastCustomerReplyAt ? new Date(b.lastCustomerReplyAt).getTime() : Infinity
-      return aDate - bDate // Ascending: oldest first
+      const aDate = a.lastCustomerReplyAt ? new Date(a.lastCustomerReplyAt).getTime() : -Infinity
+      const bDate = b.lastCustomerReplyAt ? new Date(b.lastCustomerReplyAt).getTime() : -Infinity
+      return bDate - aDate // Descending: newest first
     })
 
     // Debug logging for search issues

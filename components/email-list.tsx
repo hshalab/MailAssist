@@ -164,30 +164,36 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       if (!response.ok) {
         console.error(`[EmailList] API error: ${response.status} ${response.statusText}`);
 
+        // Try to parse error response first to check for specific error codes
+        let errorData: any = null;
+        try {
+          errorData = await response.json();
+          console.log('[EmailList] Error details:', errorData);
+        } catch (e) {
+          console.log('[EmailList] Could not parse error response');
+        }
+
+        // Check for TOKEN_EXPIRED first (can be 400 or 401)
+        if (errorData?.code === 'TOKEN_EXPIRED') {
+          setError('Gmail connection expired. Please reconnect your account in Settings.')
+          return
+        }
+
+        // Check for GMAIL_NOT_CONNECTED
+        if (errorData?.code === 'GMAIL_NOT_CONNECTED') {
+          setError('No email accounts connected. Please connect your Gmail account.')
+          return
+        }
+
+        // Generic 401 error
         if (response.status === 401) {
           setError('Not authenticated - please log in again')
           return
         }
 
-        if (response.status === 400) {
-          // Check if this is a "no accounts connected" or "token expired" error
-          try {
-            const errorData = await response.json()
-            console.log('[EmailList] 400 error details:', errorData)
-            if (errorData.code === 'GMAIL_NOT_CONNECTED') {
-              setError('No email accounts connected. Please connect your Gmail account.')
-              return
-            }
-            if (errorData.code === 'TOKEN_EXPIRED') {
-              setError('Gmail connection expired. Please reconnect your account in Settings.')
-              return
-            }
-          } catch (e) {
-            // Failed to parse error, fall through to generic error
-          }
-        }
-
-        throw new Error(`Failed to fetch emails: ${response.status} ${response.statusText}`)
+        // Generic error with message from server if available
+        const errorMessage = errorData?.error || `Failed to fetch emails: ${response.status} ${response.statusText}`;
+        throw new Error(errorMessage);
       }
 
       const data = await response.json()

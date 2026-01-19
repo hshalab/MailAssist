@@ -526,6 +526,7 @@ export async function getTickets(
   // Order by last_customer_reply_at descending (newest customer emails first)
   // Recent customer emails appear at the top for faster response
   // Tickets with null last_customer_reply_at go to the end
+  // FORCE RECOMPILE: 2026-01-19
   query = query.order('last_customer_reply_at', { ascending: false, nullsFirst: false });
 
   // OPTIMIZED: Removed limit to prevent hiding new tickets
@@ -542,6 +543,14 @@ export async function getTickets(
   }
 
   console.log(`[getTickets] Found ${data?.length || 0} tickets`);
+
+  // DEBUG: Log first 5 tickets to verify sort order
+  if (data && data.length > 0) {
+    console.log('[getTickets] First 5 tickets (should be newest first):');
+    data.slice(0, 5).forEach((t: any, i: number) => {
+      console.log(`  ${i + 1}. ${t.subject?.substring(0, 50)} - lastCustomerReplyAt: ${t.last_customer_reply_at}`);
+    });
+  }
 
   if (!data) return [];
 
