@@ -9,6 +9,7 @@ import { fetchInboxEmails, fetchSentEmails } from '@/lib/gmail';
 import { storeSentEmail, storeReceivedEmail } from '@/lib/storage';
 import { ensureTicketForEmail } from '@/lib/tickets';
 import { validateBusinessSession, isAuthenticated } from '@/lib/session';
+import { supabase } from '@/lib/supabase';
 
 // Force dynamic rendering for this route
 export const dynamic = 'force-dynamic';
@@ -176,11 +177,53 @@ export async function GET(request: NextRequest) {
     // 3. When receiving push notifications from Gmail
     // ============================================================
 
-    // PERFORMANCE: Department enrichment removed to speed up initial load
-    // Department info is now loaded lazily when viewing individual emails
-    // This eliminates 200-500ms from every inbox load
-    // If department badges are needed in the list view, they can be loaded
-    // via a separate lightweight API call after the email list renders
+    // CRITICAL FIX: Re-add department enrichment to sync labels between Tickets and Inbox
+    // Use efficient batch query to get department info for all emails at once
+    // This adds minimal overhead (~50ms) but keeps labels in sync
+    if (emails.length > 0 && supabase) {
+      try {
+        // Get thread IDs for all emails
+        const threadIds = emails
+          .map((email: any) => email.threadId || email.id)
+          .filter(Boolean);
+
+        if (threadIds.length > 0) {
+          // Batch query to get department info for all threads at once
+          const { data: tickets } = await supabase
+            .from('tickets')
+            .select(`
+              thread_id,
+              department:departments(name)
+            `)
+            .in('thread_id', threadIds);
+
+          if (tickets && tickets.length > 0) {
+            // Create a map of threadId -> departmentName for fast lookup
+            const deptMap = new Map<string, string>();
+            tickets.forEach((ticket: any) => {
+              if (ticket.department && ticket.department.name) {
+                deptMap.set(ticket.thread_id, ticket.department.name);
+              }
+            });
+
+            // Enrich emails with department names
+            emails = emails.map((email: any) => {
+              const threadId = email.threadId || email.id;
+              const departmentName = deptMap.get(threadId);
+              return {
+                ...email,
+                departmentName: departmentName || null
+              };
+            });
+
+            console.log(`[EMAILS] Enriched ${emails.length} emails with department info (${deptMap.size} have departments)`);
+          }
+        }
+      } catch (enrichError) {
+        // Non-blocking - if enrichment fails, still return emails without department info
+        console.error('[EMAILS] Department enrichment failed (non-blocking):', enrichError);
+      }
+    }
 
     // Return emails immediately - ticket creation happens in background
     console.log(`[EMAILS] Successfully fetched ${emails.length} emails`);
