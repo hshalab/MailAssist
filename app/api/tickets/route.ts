@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     // CRITICAL FIX: Check for userId in header first (from sessionStorage, per-tab)
     // This prevents cookie sharing issues when multiple users are logged in on different tabs
     const headerUserId = request.headers.get('x-user-id');
-    
+
     // Try getting userId from header (per-tab), then cookie, then business session
     let userId = headerUserId || getCurrentUserIdFromRequest(request);
     const businessSession = await validateBusinessSession();
@@ -80,8 +80,27 @@ export async function GET(request: NextRequest) {
     // Get account filter if specified
     const accountFilter = request.nextUrl.searchParams.get('account') || undefined;
 
+    const sortParam = request.nextUrl.searchParams.get('sort');
+
+    // Default sort order logic:
+    // If explicit sort param is provided, use it.
+    // Otherwise, let frontend decide or default to 'desc' if not specified.
+    // However, the USER request specifically asked for:
+    // - Open/Unassigned = Oldest to Newest (ASC)
+    // - Closed = Newest to Oldest (DESC)
+    // We'll let the frontend drive this by passing ?sort=asc or ?sort=desc based on the active tab.
+    const sortOrder = (sortParam === 'asc' || sortParam === 'desc') ? sortParam : 'desc';
+    console.log(`[Tickets API] Received sort param: ${sortParam}, using sortOrder: ${sortOrder}`);
+
     // Get tickets with role-based filtering and optional account scope
-    let tickets = await getTickets(userId, canViewAll, userEmail, accountFilter, businessId);
+    let tickets = await getTickets(
+      userId,
+      canViewAll,
+      userEmail,
+      accountFilter,
+      businessId,
+      sortOrder
+    );
 
     // CRITICAL FIX: Filter tickets to only show those from connected accounts
     // This ensures tickets from disconnected accounts don't show up
@@ -89,7 +108,7 @@ export async function GET(request: NextRequest) {
     const { loadBusinessTokens } = await import('@/lib/storage');
     const connectedAccounts = await loadBusinessTokens(businessId, userEmail);
     const connectedEmails = new Set(connectedAccounts.map(acc => acc.email));
-    
+
     if (connectedEmails.size > 0) {
       // Only show tickets from connected accounts
       tickets = tickets.filter((ticket: any) => {

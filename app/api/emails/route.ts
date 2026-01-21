@@ -13,8 +13,8 @@ import { supabase } from '@/lib/supabase';
 
 // Force dynamic rendering for this route
 export const dynamic = 'force-dynamic';
-// Cache configuration: revalidate every 30 seconds
-export const revalidate = 30;
+// Cache configuration: revalidate every 0 seconds (instant)
+export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
   try {
@@ -222,6 +222,44 @@ export async function GET(request: NextRequest) {
       } catch (enrichError) {
         // Non-blocking - if enrichment fails, still return emails without department info
         console.error('[EMAILS] Department enrichment failed (non-blocking):', enrichError);
+      }
+    }
+
+    // ============================================================
+    // SMART SYNC: Immediate Ticket Creation
+    // ============================================================
+    // Check top 5 newest emails. If they don't have department info (meaning no ticket),
+    // create one immediately to ensure instant responsiveness.
+    if (emails.length > 0) {
+      try {
+        const { ensureTicketForEmail } = await import('@/lib/tickets');
+        // Only check top 5 to keep response fast
+        const recentEmails = emails.slice(0, 5);
+
+        // Process in parallel
+        // usage of Promise.all allows this to be fast (concurrent)
+        await Promise.all(recentEmails.map(async (email: any) => {
+          // If we already found a department name, the ticket definitely exists and is classified
+          // If not, it might be missing OR just unclassified. 
+          // ensureTicketForEmail is safe to call (idempotent-ish) - it checks existence first.
+          if (!email.departmentName) {
+            // Heuristic: isFromAgent if sender matches owner
+            const isFromAgent = email.ownerEmail && email.from.includes(email.ownerEmail);
+
+            await ensureTicketForEmail({
+              id: email.id,
+              threadId: email.threadId || email.id,
+              subject: email.subject,
+              from: email.from,
+              to: email.to,
+              date: email.date,
+              ownerEmail: email.ownerEmail
+            }, !!isFromAgent);
+          }
+        }));
+      } catch (smartSyncError) {
+        // Non-blocking error handling
+        console.error('[EMAILS] Smart Sync failed:', smartSyncError);
       }
     }
 

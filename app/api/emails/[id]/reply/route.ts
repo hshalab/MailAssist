@@ -37,7 +37,7 @@ export async function POST(
       );
     }
 
-    let body: { draftText?: string; draftHtml?: string; draftId?: string; attachments?: { filename: string; mimeType: string; data?: string; dataUrl?: string }[] } | null = null;
+    let body: { draftText?: string; draftHtml?: string; draftId?: string; attachments?: { filename?: string; mimeType?: string; name?: string; type?: string; data?: string; dataUrl?: string }[] } | null = null;
     try {
       body = await request.json();
     } catch {
@@ -60,21 +60,41 @@ export async function POST(
     // Attachments validation (optional)
     const maxAttachmentSizeBytes = 8 * 1024 * 1024; // 8 MB per file cap
     const attachments = (body?.attachments || []).map((att) => {
-      if (!att?.filename || !att?.mimeType) {
-        throw new Error('Invalid attachment metadata');
+      // Support both field name formats:
+      // - Old format: { filename, mimeType, data }
+      // - RichTextEditor format: { id, name, type, size, data }
+      const filename = att?.filename || att?.name;
+      const mimeType = att?.mimeType || att?.type;
+
+      if (!filename || !mimeType) {
+        throw new Error('Invalid attachment metadata: filename and mimeType are required');
       }
-      const rawData = att.data || (att.dataUrl ? att.dataUrl.split(',')[1] : '');
+
+      let rawData = att.data || '';
+      if (!rawData && att.dataUrl) {
+        // If dataUrl is provided (e.g. "data:image/png;base64,....."), strip the prefix
+        const parts = att.dataUrl.split(',');
+        if (parts.length === 2) {
+          rawData = parts[1];
+        } else {
+          rawData = att.dataUrl; // Fallback or assume already base64
+        }
+      }
+
       if (!rawData) {
         throw new Error('Attachment data missing');
       }
+
       // Rough size check before decode
+      // Base64 size is ~1.33x original size. 
       const estimatedBytes = Math.ceil((rawData.length * 3) / 4);
       if (estimatedBytes > maxAttachmentSizeBytes) {
-        throw new Error(`Attachment ${att.filename} exceeds 8MB limit`);
+        throw new Error(`Attachment ${filename} exceeds 8MB limit`);
       }
+
       return {
-        filename: att.filename,
-        mimeType: att.mimeType,
+        filename,
+        mimeType,
         data: rawData,
       };
     });
@@ -94,6 +114,14 @@ export async function POST(
         if (connectedAccounts.length > 0) {
           userEmail = connectedAccounts[0].email;
           console.log(`[Reply API] Invited user, using business account email: ${userEmail}`);
+        }
+      } else if (businessSession?.email) {
+        // FALLBACK: Personal account using session auth (businessId is null)
+        const { loadBusinessTokens } = await import('@/lib/storage');
+        const connectedAccounts = await loadBusinessTokens(null, businessSession.email);
+        if (connectedAccounts.length > 0) {
+          userEmail = connectedAccounts[0].email;
+          console.log(`[Reply API] Personal account via session, using email: ${userEmail}`);
         }
       }
     }
@@ -133,6 +161,14 @@ export async function POST(
           // Use tokens from the first connected account
           tokens = connectedAccounts[0].tokens;
           console.log(`[Reply API] Using business account tokens for invited user`);
+        }
+      } else if (businessSession?.email) {
+        // FALLBACK: Personal account using session auth (businessId is null)
+        const { loadBusinessTokens } = await import('@/lib/storage');
+        const connectedAccounts = await loadBusinessTokens(null, businessSession.email);
+        if (connectedAccounts.length > 0) {
+          tokens = connectedAccounts[0].tokens;
+          console.log(`[Reply API] Using personal account tokens via session`);
         }
       }
     }

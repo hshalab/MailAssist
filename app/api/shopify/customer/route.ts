@@ -36,10 +36,29 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Determine the "config owner" email (handle Team Mode)
+    let configLookupEmail = userEmail;
+
+    const { getCurrentUser } = await import('@/lib/session');
+    const currentUser = await getCurrentUser();
+
+    if (currentUser && currentUser.businessId) {
+      // Look up business email
+      const { data: business } = await supabase
+        .from('businesses')
+        .select('business_email')
+        .eq('id', currentUser.businessId)
+        .single();
+
+      if (business && business.business_email) {
+        configLookupEmail = business.business_email;
+      }
+    }
+
     const { data: config, error: configError } = await supabase
       .from('shopify_config')
       .select('shop_domain, access_token')
-      .eq('user_email', userEmail)
+      .eq('user_email', configLookupEmail)
       .limit(1)
       .maybeSingle();
 
@@ -64,7 +83,7 @@ export async function GET(request: NextRequest) {
     console.log('[Shopify API] recentOrders:', JSON.stringify(customerData.recentOrders, null, 2));
     console.log('[Shopify API] First order:', customerData.recentOrders?.[0]);
     console.log('[Shopify API] First order totalPriceSet:', customerData.recentOrders?.[0]?.totalPriceSet);
-    
+
     if (customerData.recentOrders && customerData.recentOrders.length > 0) {
       currency = customerData.recentOrders[0].totalPriceSet?.shopMoney?.currencyCode || 'USD';
       console.log('[Shopify API] Detected currency from recentOrders:', currency);
@@ -84,9 +103,9 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Error fetching Shopify customer data:', error);
     return NextResponse.json(
-      { 
-        error: 'Failed to fetch customer data', 
-        details: error instanceof Error ? error.message : String(error) 
+      {
+        error: 'Failed to fetch customer data',
+        details: error instanceof Error ? error.message : String(error)
       },
       { status: 500 }
     );

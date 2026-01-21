@@ -31,7 +31,7 @@ export async function GET(
     }
 
     const userId = getCurrentUserIdFromRequest(request);
-    
+
     if (!userId) {
       return NextResponse.json(
         { error: 'Not authenticated' },
@@ -68,6 +68,26 @@ export async function GET(
       tokens = await getValidTokens(userEmail);
     }
 
+    // FALLBACK: For personal accounts using session auth (businessId is null)
+    if (!tokens || !tokens.access_token) {
+      const { validateBusinessSession } = await import('@/lib/session');
+      const businessSession = await validateBusinessSession();
+
+      if (!businessSession || !businessSession.businessId) {
+        console.log('[Thread] Trying loadBusinessTokens fallback for personal account...');
+        const { loadBusinessTokens } = await import('@/lib/storage');
+        const targetEmail = businessSession?.email || userEmail;
+
+        if (targetEmail) {
+          const connectedAccounts = await loadBusinessTokens(null, targetEmail);
+          if (connectedAccounts.length > 0) {
+            tokens = connectedAccounts[0].tokens;
+            console.log(`[Thread] Found tokens via loadBusinessTokens for: ${connectedAccounts[0].email}`);
+          }
+        }
+      }
+    }
+
     if (!tokens || !tokens.access_token) {
       return NextResponse.json(
         { error: `No valid Gmail tokens found. Please reconnect your Gmail account.` },
@@ -92,7 +112,7 @@ export async function GET(
         }
 
         console.log(`[Thread API] Fetching attachment data for message ${msg.id}`);
-        
+
         const attachmentResults = await Promise.allSettled(
           msg.attachments.map(async (att: any) => {
             try {
@@ -115,7 +135,7 @@ export async function GET(
             }
           })
         );
-        
+
         const attachmentsWithData = attachmentResults.map((result, idx) => {
           if (result.status === 'fulfilled') {
             return result.value;

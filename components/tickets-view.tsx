@@ -567,6 +567,18 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         url += `&account=${encodeURIComponent(selectedAccount)}`
       }
 
+      // Determine sort order based on active tab
+      // User request: Open/Unassigned = Oldest to Newest (ASC)
+      // Closed = Newest to Oldest (DESC)
+      // Note: activeTab isn't a dependency of fetchTickets usually to avoid excessive refetches, 
+      // but here we need it. We'll use the current state ref or pass it as arg if needed.
+      // Since fetchTickets is called in effects that don't track activeTab, we might need to 
+      // rely on the current state value when the specific fetch happens.
+      // Ideally, changing tabs should trigger a refetch or re-sort.
+      const sortOrder = activeTab === 'closed' ? 'desc' : 'asc';
+      console.log(`[Tickets] Fetching with activeTab=${activeTab}, sortOrder=${sortOrder}`);
+      url += `&sort=${sortOrder}`;
+
       // CRITICAL: Send user ID in header from sessionStorage (per-tab) to prevent cookie sharing issues
       // This ensures each tab uses its own user ID even when cookies are shared
       const headers: Record<string, string> = {
@@ -651,7 +663,29 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setIsCreatingTickets(false)
       if (!silent) setLoading(false)
     }
-  }, [selectedAccount, currentUserId, checkSyncStatus]) // Add checkSyncStatus dependency
+  }, [selectedAccount, currentUserId, checkSyncStatus, activeTab]) // Add checkSyncStatus and activeTab dependency
+
+  // Re-fetch when active tab changes to apply new sort order
+  useEffect(() => {
+    fetchTickets();
+  }, [activeTab]);
+
+  // Handle quick reply selection
+  const handleSelectQuickReply = (content: string) => {
+    // Append to existing content or replace? Usually append is safer.
+    // Actually user asked for "one click... automatically copies it to the chat box"
+    // We'll append it to the current reply text
+
+    // Check if we're using RichTextEditor (HTML) or simple textarea
+    setReplyHtml(prev => {
+      const toAdd = content.replace(/\n/g, '<br>');
+      return prev ? `${prev}<br>${toAdd}` : toAdd;
+    });
+    // Also update plain text version if needed, though RichTextEditor handles internal sync
+    setReplyText(prev => prev ? `${prev}\n${content}` : content);
+
+    // Focus logic would be handled by the editor receiving props update
+  }
 
   // Listen for account changes to refresh tickets and email list
   // This ensures ALL users (agents, managers, admins) see the changes
@@ -795,7 +829,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     const pollInterval = setInterval(() => {
       console.log('Auto-polling for ticket updates...')
       fetchTickets({ silent: true })
-    }, 60000) // 60 seconds instead of 30
+    }, 10000) // 10 seconds
 
     return () => clearInterval(pollInterval)
   }, [fetchTickets])
@@ -2066,12 +2100,19 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       filtered = filtered.filter(t => hasNewCustomerReply(t))
     }
 
-    // Sort by last_customer_reply_at (newest first, nulls last)
-    // Recent customer emails appear at the top for faster response
+    // Sort by last_customer_reply_at based on active tab
+    // User requirement:
+    // - Open/Unassigned/Assigned tabs: Oldest first (ASC) - respond to oldest emails first
+    // - Closed tab: Newest first (DESC) - see most recently closed
     filtered.sort((a, b) => {
       const aDate = a.lastCustomerReplyAt ? new Date(a.lastCustomerReplyAt).getTime() : -Infinity
       const bDate = b.lastCustomerReplyAt ? new Date(b.lastCustomerReplyAt).getTime() : -Infinity
-      return bDate - aDate // Descending: newest first
+
+      if (activeTab === 'closed') {
+        return bDate - aDate // Descending: newest first for closed
+      } else {
+        return aDate - bDate // Ascending: oldest first for open/unassigned/assigned
+      }
     })
 
     // Debug logging for search issues
@@ -3589,7 +3630,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               style={{ minWidth: 0, contain: 'layout size' }}
             >
               <QuickRepliesSidebar
-                onSelectReply={handleQuickReplySelect}
+                onSelectReply={handleSelectQuickReply}
                 currentUserId={currentUserId}
                 onQuickRepliesChange={fetchQuickReplies}
                 onClose={() => setShowQuickRepliesSidebar(false)}

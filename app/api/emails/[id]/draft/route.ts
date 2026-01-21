@@ -54,6 +54,15 @@ export async function POST(
           userEmail = connectedAccounts[0].email;
           console.log(`[Draft API] Invited user has no Gmail, using business account email: ${userEmail}`);
         }
+      } else if (businessSession?.email) {
+        // FALLBACK: Personal account using session auth (businessId is null)
+        // Try loading tokens using just the email
+        const { loadBusinessTokens } = await import('@/lib/storage');
+        const connectedAccounts = await loadBusinessTokens(null, businessSession.email);
+        if (connectedAccounts.length > 0) {
+          userEmail = connectedAccounts[0].email;
+          console.log(`[Draft API] Personal account via session, using email: ${userEmail}`);
+        }
       }
     }
 
@@ -88,6 +97,14 @@ export async function POST(
           // Use tokens from the first connected account
           tokens = connectedAccounts[0].tokens;
           console.log(`[Draft API] Using business account tokens for invited user`);
+        }
+      } else if (businessSession?.email) {
+        // FALLBACK: Personal account using session auth (businessId is null)
+        const { loadBusinessTokens } = await import('@/lib/storage');
+        const connectedAccounts = await loadBusinessTokens(null, businessSession.email);
+        if (connectedAccounts.length > 0) {
+          tokens = connectedAccounts[0].tokens;
+          console.log(`[Draft API] Using personal account tokens via session`);
         }
       }
     }

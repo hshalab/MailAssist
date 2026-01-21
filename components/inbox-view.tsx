@@ -84,7 +84,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
       }
     }
     fetchAccounts()
-    
+
     // Listen for account changes (e.g., after disconnecting)
     // This ensures ALL users (agents, managers, admins) see the changes
     const handleAccountsChanged = () => {
@@ -98,9 +98,9 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         localStorage.removeItem('accountsChanged')
       }
     }
-    
+
     window.addEventListener('accountsChanged', handleAccountsChanged)
-    
+
     // Also listen for storage events (cross-tab communication)
     const handleStorageChange = (e: StorageEvent) => {
       if (e.key === 'accountsChanged') {
@@ -108,9 +108,9 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         fetchAccounts()
       }
     }
-    
+
     window.addEventListener('storage', handleStorageChange)
-    
+
     // Check on mount if accounts changed
     const checkAccountsChanged = () => {
       const accountsChanged = localStorage.getItem('accountsChanged')
@@ -120,7 +120,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
       }
     }
     checkAccountsChanged()
-    
+
     return () => {
       window.removeEventListener('accountsChanged', handleAccountsChanged)
       window.removeEventListener('storage', handleStorageChange)
@@ -199,7 +199,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
   useEffect(() => {
     // Don't auto-refresh if user is viewing an email (reduces unnecessary requests)
     if (selectedEmail) {
-      return () => {} // Return empty cleanup function to keep dependency array consistent
+      return () => { } // Return empty cleanup function to keep dependency array consistent
     }
 
     const interval = setInterval(() => {
@@ -207,7 +207,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         emailListRefresh()
         setLastRefreshTime(Date.now())
       }
-    }, 30000) // 30 seconds
+    }, 5000) // 5 seconds
 
     return () => clearInterval(interval)
   }, [emailListRefresh, listLoading, selectedEmail])

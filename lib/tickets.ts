@@ -36,6 +36,7 @@ export interface TicketSeed {
   tags?: string[];
   lastCustomerReplyAt?: string;
   lastAgentReplyAt?: string;
+  ownerEmail?: string;
 }
 
 // Lightweight email shape used when creating/updating tickets
@@ -46,6 +47,7 @@ export interface TicketEmailLike {
   from: string;
   to: string;
   date: string;
+  ownerEmail?: string;
 }
 
 function mapRowToTicket(row: any): Ticket {
@@ -131,7 +133,7 @@ export async function getOrCreateTicketForThread(
     last_agent_reply_at: seed.lastAgentReplyAt ?? null,
     created_at: nowIso,
     updated_at: nowIso,
-    owner_email: userEmail, // Default to current user email as owner
+    owner_email: seed.ownerEmail || userEmail, // Use specific owner email if available, else default to user
   };
 
   if (userEmail) {
@@ -357,6 +359,7 @@ export async function ensureTicketForEmail(
       tags: [],
       lastCustomerReplyAt: isFromAgent ? undefined : dateIso,
       lastAgentReplyAt: isFromAgent ? dateIso : undefined,
+      ownerEmail: email.ownerEmail, // Pass owner email from source
     })!;
     if (ticket) {
       console.log(`[Ticket] Created ticket ${ticket.id} for email ${email.id}`, {
@@ -474,7 +477,8 @@ export async function getTickets(
   canViewAll: boolean,
   userEmail: string | null,
   accountFilter?: string,
-  businessId?: string | null
+  businessId?: string | null,
+  sortOrder: 'asc' | 'desc' = 'desc'
 ): Promise<Ticket[]> {
   if (!supabase) return [];
 
@@ -527,7 +531,11 @@ export async function getTickets(
   // Recent customer emails appear at the top for faster response
   // Tickets with null last_customer_reply_at go to the end
   // FORCE RECOMPILE: 2026-01-19
-  query = query.order('last_customer_reply_at', { ascending: false, nullsFirst: false });
+  // Order by last_customer_reply_at
+  // 'asc' = Oldest first (FIFO) - good for working through backlog
+  // 'desc' = Newest first (LIFO) - good for seeing latest activity
+  console.log(`[getTickets] Applying sort order: ${sortOrder}, ascending: ${sortOrder === 'asc'}`);
+  query = query.order('last_customer_reply_at', { ascending: sortOrder === 'asc', nullsFirst: false });
 
   // OPTIMIZED: Removed limit to prevent hiding new tickets
   // query = query.limit(500);

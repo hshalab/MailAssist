@@ -73,8 +73,24 @@ export async function POST(request: NextRequest) {
         userEmail = accounts[0].email;
       }
     } else {
-      // Legacy flow: Single account
-      const tokens = await getValidTokens();
+      // Legacy flow: Single account (or personal account using session auth)
+      let tokens = await getValidTokens();
+
+      // FALLBACK: For personal accounts using session auth
+      if (!tokens?.access_token) {
+        const { validateBusinessSession, getSessionUserEmail } = await import('@/lib/session');
+        const businessSession = await validateBusinessSession();
+
+        if (businessSession?.email && !businessSession.businessId) {
+          console.log('[SYNC] Personal account via session, trying loadBusinessTokens...');
+          const { loadBusinessTokens } = await import('@/lib/storage');
+          const connectedAccounts = await loadBusinessTokens(null, businessSession.email);
+          if (connectedAccounts.length > 0) {
+            tokens = connectedAccounts[0].tokens;
+            console.log(`[SYNC] Found tokens via loadBusinessTokens for: ${connectedAccounts[0].email}`);
+          }
+        }
+      }
 
       if (!tokens || !tokens.access_token) {
         return NextResponse.json(

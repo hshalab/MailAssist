@@ -22,24 +22,46 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Check if user is admin
-    const adminCheck = await checkPermission(userId, 'admin');
-    if (!adminCheck.allowed) {
-      return NextResponse.json(
-        { error: 'Forbidden - Admin access required' },
-        { status: 403 }
-      );
-    }
+    // Check if user is admin ONLY for write operations or sensitive data
+    // For simple config check (isConfigured), we allow all authenticated users
+    // const adminCheck = await checkPermission(userId, 'admin');
+    // if (!adminCheck.allowed) {
+    //   return NextResponse.json(
+    //     { error: 'Forbidden - Admin access required' },
+    //     { status: 403 }
+    //   );
+    // }
 
     // Get Shopify config for this account
     if (!supabase) {
       return NextResponse.json({ config: null });
     }
 
+    // Determine the "config owner" email
+    // If user is in a business, use the BUSINESS EMAIL to look up config
+    // This allows agents to see the config set up by the admin/business owner
+    let configLookupEmail = userEmail;
+
+    const { getCurrentUser } = await import('@/lib/session');
+    const currentUser = await getCurrentUser();
+
+    if (currentUser && currentUser.businessId) {
+      // Look up business email
+      const { data: business } = await supabase
+        .from('businesses')
+        .select('business_email')
+        .eq('id', currentUser.businessId)
+        .single();
+
+      if (business && business.business_email) {
+        configLookupEmail = business.business_email;
+      }
+    }
+
     const { data, error } = await supabase
       .from('shopify_config')
       .select('shop_domain, access_token')
-      .eq('user_email', userEmail)
+      .eq('user_email', configLookupEmail)
       .limit(1)
       .maybeSingle();
 

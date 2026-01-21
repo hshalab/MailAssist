@@ -16,15 +16,15 @@ export const dynamic = 'force-dynamic';
 function encodeFilename(filename: string): string {
     // Sanitize filename - remove any control characters and problematic characters
     let sanitized = filename.replace(/[\x00-\x1F\x7F]/g, '').trim();
-    
+
     // Ensure we have a valid filename
     if (!sanitized || sanitized.length === 0) {
         sanitized = 'attachment';
     }
-    
+
     // Check if filename contains non-ASCII characters
     const hasNonAscii = /[^\x00-\x7F]/.test(sanitized);
-    
+
     if (hasNonAscii) {
         // Use RFC 2231 encoding with UTF-8 for non-ASCII
         const encoded = encodeURIComponent(sanitized).replace(/'/g, "%27");
@@ -62,15 +62,32 @@ export async function GET(
 
         // If business session exists, use the business email (shared account)
         // Otherwise fallback to personal session email
-        const targetEmail = businessSession
+        let targetEmail = businessSession
             ? businessSession.email
             : await getSessionUserEmail();
 
         if (businessSession) {
             console.log(`[Attachment] Using business session tokens for: ${businessSession.email} (Agent: ${businessSession.name})`);
+        } else {
+            console.log(`[Attachment] Personal account mode, targetEmail: ${targetEmail || 'NOT SET'}`);
         }
 
-        const tokens = await getValidTokens(targetEmail, businessSession?.businessId || undefined);
+        let tokens = await getValidTokens(targetEmail, businessSession?.businessId || undefined);
+
+        // FALLBACK: If no tokens found for personal accounts
+        const needsFallback = !tokens?.access_token && (!businessSession || !businessSession.businessId);
+        if (needsFallback) {
+            console.log('[Attachment] No tokens via getValidTokens, trying fallback...');
+            if (targetEmail) {
+                const { loadBusinessTokens } = await import('@/lib/storage');
+                const connectedAccounts = await loadBusinessTokens(null, targetEmail);
+                if (connectedAccounts.length > 0) {
+                    tokens = connectedAccounts[0].tokens;
+                    console.log(`[Attachment] Found tokens via loadBusinessTokens for: ${connectedAccounts[0].email}`);
+                }
+            }
+        }
+
         if (!tokens || !tokens.access_token) {
             console.error('[Attachment] No valid tokens found');
             return new NextResponse('Not authenticated', { status: 401 });
@@ -103,13 +120,13 @@ export async function GET(
 
         // Decode base64url encoded data
         let base64 = attachmentData.replace(/-/g, '+').replace(/_/g, '/');
-        
+
         // Add padding if needed (base64 strings must be multiples of 4)
         const padding = base64.length % 4;
         if (padding) {
             base64 += '='.repeat(4 - padding);
         }
-        
+
         let buffer: Buffer;
         try {
             buffer = Buffer.from(base64, 'base64');
@@ -117,7 +134,7 @@ export async function GET(
             console.error('[Attachment] Base64 decode error:', decodeError);
             return new NextResponse('Failed to decode attachment data', { status: 500 });
         }
-        
+
         if (!buffer || buffer.length === 0) {
             return new NextResponse('Invalid attachment data', { status: 500 });
         }
