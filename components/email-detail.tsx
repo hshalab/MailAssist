@@ -343,16 +343,27 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     try {
       setError(null)
 
-      // PERFORMANCE: Use force-cache to leverage browser cache from prefetch
-      // This makes email loading instant if it was prefetched
-      const emailResponse = await fetch(`/api/emails/${emailId}`, {
+      // OPTIMIZATION: Use Promise.all to fetch in parallel if we have threadId
+      // This eliminates the waterfall of waiting for email -> then fetching thread
+      const threadIdToUse = initialEmailData?.threadId || (emailSummary?.threadId);
+
+      const emailPromise = fetch(`/api/emails/${emailId}`, {
         cache: 'force-cache',
         signal
-      })
+      });
 
-      // Check if request was aborted
+      let threadPromise: Promise<Response | Error> | null = null;
+      if (threadIdToUse) {
+        threadPromise = fetch(`/api/emails/threads/${encodeURIComponent(threadIdToUse)}`, {
+          signal
+        }).catch(e => e); // CRITICAL: Catch errors immediately to prevent unhandled rejection on Abort
+      }
+
+      // Check if request was aborted early
       if (signal?.aborted) return
 
+      // Await email response first (it's the primary source of truth)
+      const emailResponse = await emailPromise;
       if (!emailResponse.ok) {
         throw new Error('Failed to fetch email')
       }
@@ -367,21 +378,30 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       setEmailSummary(email)
       setLoading(false) // Content is ready to display
 
-      // Now fetch the thread using the threadId
-      const threadId = email.threadId || emailId
-      const threadResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`, {
-        signal
-      })
+      // Now handle thread response
+      let threadResponse: Response | Error;
+      if (threadPromise) {
+        threadResponse = await threadPromise;
+      } else {
+        const threadId = email.threadId || emailId
+        threadResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`, {
+          signal
+        }).catch(e => e);
+      }
+
+      if (threadResponse instanceof Error) {
+        if (threadResponse.name === 'AbortError') return;
+        throw threadResponse;
+      }
 
       // Check if request was aborted
       if (signal?.aborted) return
+      if (requestToken && requestToken !== latestRequestRef.current) return
 
       if (threadResponse.ok) {
         const threadData = await threadResponse.json()
         // Fix: thread data is nested under 'thread' key from API
         const thread: EmailMessage[] = threadData.thread?.messages || threadData.messages || []
-        if (requestToken && requestToken !== latestRequestRef.current) return
-        if (signal?.aborted) return
 
         if (thread.length > 0) {
           setThreadMessages(thread)
@@ -402,8 +422,6 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         }
       } else {
         // Thread fetch failed, show single email with attachments
-        if (requestToken && requestToken !== latestRequestRef.current) return
-        if (signal?.aborted) return
         setThreadMessages([{
           id: email.id,
           threadId: email.threadId,

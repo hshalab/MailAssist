@@ -200,6 +200,19 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       setEmails(data.emails || [])
       setLimit(newLimit)
 
+      // Cache the result if this is a fresh load (not load more)
+      if (!isLoadMore && data.emails?.length > 0) {
+        try {
+          const cacheKey = `email_list_${viewType}_${selectedAccount || 'all'}`
+          sessionStorage.setItem(cacheKey, JSON.stringify({
+            emails: data.emails,
+            timestamp: Date.now()
+          }))
+        } catch (e) {
+          // Ignore storage quota errors
+        }
+      }
+
       // PRODUCTION FIX: Clear skeleton AFTER emails are successfully loaded
       // This prevents the empty state from flashing before emails appear
       if (showSkeleton) {
@@ -304,7 +317,6 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   // Initial fetch on mount and when viewType or selectedAccount changes
   useEffect(() => {
     // CRITICAL FIX: Check for skeleton flag FIRST before any other logic
-    // This ensures skeleton shows immediately when returning from OAuth
     let hasSkeletonFlag = false
     if (typeof window !== 'undefined') {
       hasSkeletonFlag = sessionStorage.getItem('show_inbox_skeleton_on_return') === 'true'
@@ -315,30 +327,52 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
       }
     }
 
+    // CHECK CACHE FIRST
+    const cacheKey = `email_list_${viewType}_${selectedAccount || 'all'}`
+    let cachedData = null
+    try {
+      const cached = sessionStorage.getItem(cacheKey)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        // 1 minute cache validity
+        if (Date.now() - parsed.timestamp < 60000) {
+          cachedData = parsed.emails
+        }
+      }
+    } catch (e) {
+      console.error('Error reading email cache:', e)
+    }
+
+    if (cachedData && !hasSkeletonFlag) {
+      console.log('Using cached email list for', viewType)
+      setEmails(cachedData)
+      setLoading(false)
+      onLoadingChange?.(false)
+      setShowSkeleton(false)
+      setHasMore(true) // Assume there's more if we have cached data
+      // Silently refresh in background to ensure freshness
+      setTimeout(() => fetchEmails(50, false, true), 1000)
+      return
+    }
+
     // Ensure loading state is explicitly set to true before any async operations
-    // This is critical for production builds where hydration timing differs
     setLoading(true)
     onLoadingChange?.(true)
-    setEmails([])
+    // Only clear emails if we don't have cache (to avoid flash)
+    if (!cachedData) setEmails([])
     setError(null)
-    setLimit(50) // Reduced from 150 to 50 for faster initial load
+    setLimit(50)
     setHasMore(true)
 
     // Use requestAnimationFrame + setTimeout to ensure React has fully rendered
-    // the skeleton before fetch starts. This is especially important in production.
-    // If returning from OAuth, add a longer delay to ensure skeleton is visible
-    // In production, we need even more time for the skeleton to render
     let rafId: number
     let timeoutId: NodeJS.Timeout
 
     rafId = requestAnimationFrame(() => {
-      // Double RAF for production to ensure skeleton renders
       requestAnimationFrame(() => {
-        // CRITICAL: Start fetching immediately - no delay needed since skeleton is already showing
-        // The skeleton state is set synchronously, so it will render before fetch starts
         timeoutId = setTimeout(() => {
-          fetchEmails(50) // Reduced from 150 to 50 for faster initial load - skeleton clearing now happens inside fetchEmails after setEmails()
-        }, 0) // No delay - fetch immediately since skeleton is already showing
+          fetchEmails(50)
+        }, 0)
       })
     })
 

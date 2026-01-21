@@ -63,6 +63,36 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
   // Fetch connected accounts
   useEffect(() => {
     const fetchAccounts = async () => {
+      // Check cache first
+      try {
+        const cached = sessionStorage.getItem('connected_accounts_cache')
+        if (cached) {
+          const { accounts, timestamp } = JSON.parse(cached)
+          // 1 minute cache validity
+          if (Date.now() - timestamp < 60000) {
+            console.log('Using cached accounts')
+            setConnectedAccounts(accounts)
+            setAccountsLoading(false)
+            // Background refresh
+            fetch(`/api/auth/accounts?_=${Date.now()}`, { cache: 'no-store' })
+              .then(res => res.json())
+              .then(data => {
+                if (data.accounts) {
+                  setConnectedAccounts(data.accounts)
+                  sessionStorage.setItem('connected_accounts_cache', JSON.stringify({
+                    accounts: data.accounts,
+                    timestamp: Date.now()
+                  }))
+                }
+              })
+              .catch(err => console.error('Background account refresh failed', err))
+            return
+          }
+        }
+      } catch (e) {
+        // Ignore cache errors
+      }
+
       try {
         setAccountsLoading(true)
         // Add cache-busting and no-cache to prevent stale data after login/logout
@@ -76,6 +106,11 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         if (res.ok) {
           const data = await res.json()
           setConnectedAccounts(data.accounts || [])
+          // Cache the result
+          sessionStorage.setItem('connected_accounts_cache', JSON.stringify({
+            accounts: data.accounts || [],
+            timestamp: Date.now()
+          }))
         }
       } catch (error) {
         console.error('Failed to fetch accounts:', error)

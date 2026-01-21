@@ -628,48 +628,33 @@ export async function loadTokens(userEmail?: string | null, businessId?: string)
  * Load ALL stored OAuth tokens for a business
  */
 /* Existing code for loadBusinessTokens */
-export async function loadBusinessTokens(businessId: string | null, userEmail?: string | null): Promise<Array<{ email: string, tokens: StoredTokens }>> {
+// Helper to perform the actual query for business tokens
+async function fetchBusinessTokensFromDb(businessId: string | null, userEmail?: string | null) {
   if (!supabase || (!businessId && !userEmail)) {
-    console.log('[Storage] loadBusinessTokens: missing supabase or ids', { businessId, userEmail });
     return [];
   }
 
   try {
-    // Bypass RLS using Service Role Key if available (for agents to read admin tokens)
     let adminClient = supabase;
     if (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.NEXT_PUBLIC_SUPABASE_URL) {
       adminClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
         auth: { persistSession: false }
       });
-      console.log('[Storage] loadBusinessTokens: Using dedicated Service Role Client');
     }
 
     let query = adminClient
       .from('tokens')
       .select('*');
 
-    // CRITICAL FIX: For business accounts, always fetch ALL tokens for the business
-    // Ignore userEmail when businessId is provided - invited users (agents) need to see all business tokens
     if (businessId) {
-      // Business account - fetch ALL tokens for this business (ignoring userEmail)
       query = query.eq('business_id', businessId);
-      console.log(`[Storage] loadBusinessTokens: Loading ALL tokens for business ${businessId} (ignoring userEmail: ${userEmail})`);
     } else if (userEmail) {
-      // Personal account - only user email provided
       query = query.eq('user_email', userEmail).is('business_id', null);
     } else {
       return [];
     }
 
     const { data, error } = await query;
-
-    console.log(`[Storage] loadBusinessTokens query result:`, {
-      businessId,
-      userEmail,
-      count: data?.length,
-      error: error?.message,
-      usingAdmin: adminClient !== supabase
-    });
 
     if (error) {
       console.error('Error loading business tokens:', error);
@@ -695,6 +680,26 @@ export async function loadBusinessTokens(businessId: string | null, userEmail?: 
   }
 }
 
+export const loadBusinessTokens = async (businessId: string | null, userEmail?: string | null) => {
+  // Use dynamic import to avoid issues if next/cache is not available in some contexts
+  // or if this file is imported in client components (though it shouldn't be)
+  try {
+    const { unstable_cache } = await import('next/cache');
+    const getCachedTokens = unstable_cache(
+      async (bid: string | null, uemail?: string | null) => fetchBusinessTokensFromDb(bid, uemail),
+      ['business-tokens'],
+      {
+        revalidate: 30, // Cache for 30 seconds
+        tags: [`business-tokens-${businessId || 'personal'}-${userEmail || 'all'}`]
+      }
+    );
+    return getCachedTokens(businessId, userEmail);
+  } catch (e) {
+    // Fallback if unstable_cache is not available
+    return fetchBusinessTokensFromDb(businessId, userEmail);
+  }
+};
+
 /**
  * Save OAuth tokens for a specific user
  * CRITICAL: Only deletes tokens for this user, not all users (prevents cross-user data access)
@@ -716,12 +721,12 @@ export async function saveTokens(tokens: StoredTokens, businessId?: string | nul
 
   // Use provided email or try to get user email from Gmail profile
   let finalUserEmail: string | null = userEmail || null;
-  
+
   if (!finalUserEmail) {
-  try {
-    const profile = await getUserProfile(tokens);
+    try {
+      const profile = await getUserProfile(tokens);
       finalUserEmail = profile?.emailAddress || null;
-  } catch (error) {
+    } catch (error) {
       console.error('Error getting user profile in saveTokens:', error);
       // Continue to throw error below if we can't get email
     }

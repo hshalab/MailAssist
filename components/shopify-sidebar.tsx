@@ -4,8 +4,8 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card"
 import { Skeleton } from "./ui/skeleton"
 import { Button } from "./ui/button"
-import { 
-  ShoppingBag, Package, DollarSign, Calendar, MapPin, 
+import {
+  ShoppingBag, Package, DollarSign, Calendar, MapPin,
   CheckCircle2, XCircle, AlertCircle, Loader2, ExternalLink, X
 } from "lucide-react"
 import { Alert, AlertDescription } from "./ui/alert"
@@ -25,6 +25,14 @@ export default function ShopifySidebar({ customerEmail, shopDomain, onClose }: S
   const [error, setError] = useState<string | null>(null)
   const [isConfigured, setIsConfigured] = useState(false)
 
+  // State to store shopDomain if not passed as prop
+  const [internalShopDomain, setInternalShopDomain] = useState<string | undefined>(shopDomain)
+
+  // Update internal state if prop changes
+  useEffect(() => {
+    if (shopDomain) setInternalShopDomain(shopDomain)
+  }, [shopDomain])
+
   // Extract email from "Name <email@example.com>" format
   const extractedEmail = (() => {
     if (!customerEmail) return ''
@@ -41,6 +49,19 @@ export default function ShopifySidebar({ customerEmail, shopDomain, onClose }: S
       .then(data => {
         if (data.config && data.config.isConfigured) {
           setIsConfigured(true)
+
+          // If shopDomain prop was missing, try to get it from config
+          if (!shopDomain && data.config.shopDomain) {
+            let domain = data.config.shopDomain.replace(/^https?:\/\//, '')
+            if (domain.endsWith('/')) domain = domain.slice(0, -1)
+            setInternalShopDomain(domain)
+          } else if (!shopDomain && data.config.shopUrl) {
+            // Fallback for older API responses
+            let domain = data.config.shopUrl.replace(/^https?:\/\//, '')
+            if (domain.endsWith('/')) domain = domain.slice(0, -1)
+            setInternalShopDomain(domain)
+          }
+
           fetchCustomerData()
         } else {
           setLoading(false)
@@ -52,24 +73,21 @@ export default function ShopifySidebar({ customerEmail, shopDomain, onClose }: S
         setLoading(false)
         setIsConfigured(false)
       })
-  }, [extractedEmail])
+  }, [extractedEmail, shopDomain]) // Added shopDomain to dependencies
 
   const fetchCustomerData = async () => {
     try {
       setLoading(true)
       setError(null)
-
       const response = await fetch(`/api/shopify/customer?email=${encodeURIComponent(extractedEmail)}`)
-      
+
       if (!response.ok) {
         if (response.status === 404) {
-          // Check if it's a config error or customer not found
           const errorData = await response.json()
           if (errorData.error && errorData.error.includes('not configured')) {
             setError('Shopify integration not configured')
             setIsConfigured(false)
           } else {
-            // Customer exists but not found in Shopify
             setError('No customer found in Shopify')
           }
           return
@@ -78,16 +96,18 @@ export default function ShopifySidebar({ customerEmail, shopDomain, onClose }: S
       }
 
       const data = await response.json()
+      console.log('[ShopifySidebar] Data received:', {
+        customer: data.customer,
+        recentOrdersLength: data.recentOrders?.length
+      })
       setCustomer(data.customer)
-      setOrders(data.recentOrders || [])
+      // Fallback to recent_orders (snake_case) or orders if recentOrders is missing
+      const processedOrders = data.recentOrders || data.recent_orders || data.orders || []
+      setOrders(processedOrders)
       setTotalSpent(data.totalSpent || 0)
-      
-      // Use currency from API response
+
       if (data.currency) {
-        console.log('[Shopify] Detected currency:', data.currency)
         setCurrency(data.currency)
-      } else {
-        console.log('[Shopify] No currency in response, using default USD')
       }
     } catch (err) {
       console.error('Error fetching Shopify customer data:', err)
@@ -164,13 +184,14 @@ export default function ShopifySidebar({ customerEmail, shopDomain, onClose }: S
             </Button>
           )}
         </div>
-        {shopDomain && (
-          <p className="text-xs text-muted-foreground">{shopDomain}</p>
+        {internalShopDomain && (
+          <p className="text-xs text-muted-foreground">{internalShopDomain}</p>
         )}
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* ... (error/loading/empty states remain same) ... */}
         {error ? (
           <div className="text-sm text-muted-foreground text-center py-8">
             <AlertCircle className="w-12 h-12 mx-auto mb-4 text-destructive/50" />
@@ -184,19 +205,19 @@ export default function ShopifySidebar({ customerEmail, shopDomain, onClose }: S
               Retry
             </Button>
           </div>
-        ) : !isConfigured ? (
-          <div className="text-sm text-muted-foreground text-center py-8">
-            <ShoppingBag className="w-12 h-12 mx-auto mb-4 text-muted-foreground/50" />
-            <p>Shopify integration not configured</p>
-            <p className="text-xs mt-2">Configure in Settings to view customer data</p>
-          </div>
         ) : loading ? (
           <div className="space-y-3">
             <Skeleton className="h-20 w-full" />
             <Skeleton className="h-16 w-full" />
             <Skeleton className="h-32 w-full" />
           </div>
-        ) : !customer && orders.length === 0 ? (
+        ) : !isConfigured ? (
+          <div className="text-sm text-muted-foreground text-center py-8">
+            <ShoppingBag className="w-12 h-12 mx-auto mb-4 text-muted-foreground/50" />
+            <p>Shopify integration not configured</p>
+            <p className="text-xs mt-2">Configure in Settings to view customer data</p>
+          </div>
+        ) : (!customer) ? (
           <div className="text-sm text-muted-foreground text-center py-8">
             <ShoppingBag className="w-12 h-12 mx-auto mb-4 text-muted-foreground/50" />
             <p>No customer found in Shopify</p>
@@ -208,6 +229,7 @@ export default function ShopifySidebar({ customerEmail, shopDomain, onClose }: S
             {customer && (
               <Card>
                 <CardContent className="p-4 space-y-3">
+                  {/* ... (customer details remain same) ... */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <div className="text-xs text-muted-foreground">Total Spent</div>
@@ -257,8 +279,8 @@ export default function ShopifySidebar({ customerEmail, shopDomain, onClose }: S
                         Address
                       </div>
                       {customer.addresses
-                        .filter(addr => addr.isDefault)
-                        .map(addr => (
+                        .filter((addr: any) => addr.isDefault)
+                        .map((addr: any) => (
                           <div key={addr.id} className="text-xs">
                             {addr.address1}
                             {addr.address2 && `, ${addr.address2}`}
@@ -297,7 +319,12 @@ export default function ShopifySidebar({ customerEmail, shopDomain, onClose }: S
                   {orders.slice(0, 5).map((order) => (
                     <div
                       key={order.id}
-                      className="p-3 bg-muted/50 rounded-md text-xs space-y-2 border border-border/50 hover:border-border transition-colors"
+                      className={`p-3 bg-muted/50 rounded-md text-xs space-y-2 border border-border/50 hover:border-border transition-colors ${internalShopDomain ? 'cursor-pointer hover:bg-muted' : ''}`}
+                      onClick={() => {
+                        if (internalShopDomain) {
+                          window.open(`https://${internalShopDomain}/admin/orders/${order.id}`, '_blank')
+                        }
+                      }}
                     >
                       {/* Order header with number and total */}
                       <div className="flex items-center justify-between">
@@ -352,11 +379,9 @@ export default function ShopifySidebar({ customerEmail, shopDomain, onClose }: S
                       )}
 
                       {/* Order note if present */}
-                      {order.note && (
-                        <div className="text-xs text-muted-foreground italic border-l-2 border-amber-500/30 pl-2">
-                          "{order.note}"
-                        </div>
-                      )}
+                      <div className="mt-2 text-xs text-muted-foreground/80 bg-muted/30 p-2 rounded">
+                        Note: Order details available in Shopify Admin
+                      </div>
                     </div>
                   ))}
                 </CardContent>
@@ -364,14 +389,14 @@ export default function ShopifySidebar({ customerEmail, shopDomain, onClose }: S
             )}
 
             {/* View in Shopify Link */}
-            {customer && shopDomain && (
+            {customer && internalShopDomain && (
               <Button
                 variant="outline"
                 size="sm"
                 className="w-full"
                 onClick={() => {
                   window.open(
-                    `https://${shopDomain}/admin/customers/${customer.id}`,
+                    `https://${internalShopDomain}/admin/customers/${customer.id}`,
                     '_blank'
                   )
                 }}

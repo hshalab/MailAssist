@@ -17,6 +17,7 @@ interface ShopifyCustomer {
   phone?: string
   totalSpent: number
   ordersCount: number
+  orders_count?: number // potential snake_case from API
   tags: string[]
   createdAt: string
   verifiedEmail: boolean
@@ -29,6 +30,7 @@ interface ShopifyCustomer {
     zip?: string
     isDefault: boolean
   }>
+  total_spent?: string // potential snake_case from API
 }
 
 interface ShopifyOrder {
@@ -66,6 +68,14 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
   const [error, setError] = useState<string | null>(null)
   const [isConfigured, setIsConfigured] = useState(false)
 
+  // State to store shopDomain if not passed as prop
+  const [internalShopDomain, setInternalShopDomain] = useState<string | undefined>(shopDomain)
+
+  // Update internal state if prop changes
+  useEffect(() => {
+    if (shopDomain) setInternalShopDomain(shopDomain)
+  }, [shopDomain])
+
   // Extract email from "Name <email@example.com>" format
   const extractedEmail = (() => {
     if (!customerEmail) return ''
@@ -85,6 +95,15 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
       .then(data => {
         if (data.config && data.config.isConfigured) {
           setIsConfigured(true)
+          // If shopDomain prop was missing, try to get it from config
+          if (!shopDomain && data.config.shopDomain) {
+            // shopUrl might be "https://domain.myshopify.com" or just details
+            // Let's assume the API returns the domain or we can parse it
+            // API usually returns { config: { shopUrl: '...', ... } }
+            let domain = data.config.shopDomain.replace(/^https?:\/\//, '')
+            if (domain.endsWith('/')) domain = domain.slice(0, -1)
+            setInternalShopDomain(domain)
+          }
           fetchCustomerData()
         } else {
           setLoading(false)
@@ -96,7 +115,7 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
         setLoading(false)
         setIsConfigured(false)
       })
-  }, [extractedEmail])
+  }, [extractedEmail, shopDomain])
 
   const fetchCustomerData = async () => {
     try {
@@ -122,8 +141,16 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
       }
 
       const data = await response.json()
+      console.log('[ShopifyPanel] Data received:', {
+        customer: data.customer,
+        recentOrdersLength: data.recentOrders?.length,
+        recentOrdersSnake: data.recent_orders?.length,
+        ordersLength: data.orders?.length
+      })
       setCustomer(data.customer)
-      setOrders(data.recentOrders || [])
+      // Fallback to recent_orders (snake_case) or orders if recentOrders is missing
+      const processedOrders = data.recentOrders || data.recent_orders || data.orders || []
+      setOrders(processedOrders)
       setTotalSpent(data.totalSpent || 0)
 
       // Use currency from API response
@@ -263,7 +290,7 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
     )
   }
 
-  if (!customer && orders.length === 0) {
+  if ((!loading && isConfigured) && !customer && orders.length === 0) {
     return (
       <Card>
         <CardHeader>
@@ -351,13 +378,10 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
                 {customer.addresses
                   .filter(addr => addr.isDefault)
                   .map(addr => (
-                    <div key={addr.id} className="text-xs">
+                    <div key={addr.id} className="text-sm">
                       {addr.address1}
-                      {addr.address2 && `, ${addr.address2}`}
                       <br />
-                      {addr.city}, {addr.province} {addr.zip}
-                      <br />
-                      {addr.country}
+                      {addr.city}, {addr.province && `${addr.province}, `}{addr.country} {addr.zip}
                     </div>
                   ))}
               </div>
@@ -388,7 +412,12 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
               {orders.slice(0, 5).map((order) => (
                 <div
                   key={order.id}
-                  className="p-3 bg-muted/50 rounded-md text-xs space-y-2 border border-border/50 hover:border-border transition-colors"
+                  className={`p-3 bg-muted/50 rounded-md text-xs space-y-2 border border-border/50 hover:border-border transition-colors ${shopDomain ? 'cursor-pointer hover:bg-muted' : ''}`}
+                  onClick={() => {
+                    if (shopDomain) {
+                      window.open(`https://${shopDomain}/admin/orders/${order.id}`, '_blank')
+                    }
+                  }}
                 >
                   {/* Order header */}
                   <div className="flex items-center justify-between">
@@ -443,11 +472,9 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
                   )}
 
                   {/* Order note if present */}
-                  {order.note && (
-                    <div className="text-xs text-muted-foreground italic border-l-2 border-amber-500/30 pl-2">
-                      "{order.note}"
-                    </div>
-                  )}
+                  <div className="mt-2 text-xs text-muted-foreground/80 bg-muted/30 p-2 rounded">
+                    Note: Order details available in Shopify Admin
+                  </div>
                 </div>
               ))}
             </div>

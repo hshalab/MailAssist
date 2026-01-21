@@ -281,26 +281,13 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
     // This prevents old business sessions from being used when signing in with a new email
     // STRICT MODE: Always require current_user_id to match session user_id
     // If current_user_id doesn't exist, the session is invalid (new account creation)
+    // CRITICAL PRODUCTION FIX: Validate that session belongs to current user
+    // RELAXED MODE: checking current_user_id is helpful but shouldn't invalidate a valid session_token
+    // If current_user_id is missing (e.g. cookie cleared by browser/extension), we should trust the session_token
     if (!currentUserId) {
-      console.log(`[Session] No current_user_id cookie found - invalidating session (likely new account)`);
-      // Delete the orphaned session from database (non-blocking)
-      if (supabase) {
-        supabase
-          .from('user_sessions')
-          .delete()
-          .eq('session_token', sessionToken)
-          .then(({ error }) => {
-            if (error) {
-              console.error('[Session] Error deleting orphaned session:', error);
-            } else {
-              console.log('[Session] Deleted orphaned session from database');
-            }
-          });
-      }
-      return null;
-    }
-
-    if (session.user_id !== currentUserId) {
+      console.log(`[Session] No current_user_id cookie found - trusting session_token`);
+      // Do NOT delete the session. The session_token is HttpOnly and secure, so it's the source of truth.
+    } else if (session.user_id !== currentUserId) {
       console.log(`[Session] MISMATCH: Session user_id (${session.user_id}) does not match current_user_id (${currentUserId}) - DELETING INVALID SESSION`);
       // CRITICAL: Delete the invalid session from database immediately (blocking)
       // This prevents the old session from being reused
