@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card"
 import { Skeleton } from "./ui/skeleton"
-import { 
-  ShoppingBag, Package, DollarSign, Calendar, MapPin, 
+import {
+  ShoppingBag, Package, DollarSign, Calendar, MapPin,
   CheckCircle2, XCircle, AlertCircle, Loader2, ExternalLink
 } from "lucide-react"
 import { Button } from "./ui/button"
@@ -76,6 +76,9 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
   useEffect(() => {
     if (!extractedEmail) return
 
+    setLoading(true)
+    setError(null)
+
     // Check if Shopify is configured
     fetch('/api/shopify/config')
       .then(res => res.json())
@@ -101,7 +104,7 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
       setError(null)
 
       const response = await fetch(`/api/shopify/customer?email=${encodeURIComponent(extractedEmail)}`)
-      
+
       if (!response.ok) {
         if (response.status === 404) {
           // Check if it's a config error or customer not found
@@ -122,7 +125,7 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
       setCustomer(data.customer)
       setOrders(data.recentOrders || [])
       setTotalSpent(data.totalSpent || 0)
-      
+
       // Use currency from API response
       if (data.currency) {
         console.log('[Shopify] Detected currency:', data.currency)
@@ -182,6 +185,35 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
       default:
         return 'text-muted-foreground'
     }
+  }
+
+  if (loading) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <ShoppingBag className="h-4 w-4" />
+            Shopify Customer Info
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Skeleton className="h-3 w-16" />
+              <Skeleton className="h-6 w-24" />
+            </div>
+            <div className="space-y-2">
+              <Skeleton className="h-3 w-16" />
+              <Skeleton className="h-6 w-12" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        </CardContent>
+      </Card>
+    )
   }
 
   if (error) {
@@ -268,13 +300,13 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
         {/* Customer Summary */}
         {customer && (
           <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <div className="text-xs text-muted-foreground">Total Spent</div>
-                  <div className="text-lg font-semibold">
-                    {formatCurrency(customer.totalSpent.toString(), currency)}
-                  </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">Total Spent</div>
+                <div className="text-lg font-semibold">
+                  {formatCurrency(customer.totalSpent.toString(), currency)}
                 </div>
+              </div>
               <div className="space-y-1">
                 <div className="text-xs text-muted-foreground">Orders</div>
                 <div className="text-lg font-semibold flex items-center gap-1">
@@ -419,32 +451,30 @@ export default function ShopifyCustomerPanel({ customerEmail, shopDomain }: Shop
                 </div>
               ))}
             </div>
-                  )}
-                </div>
-              ))}
-            </div>
           </div>
         )}
 
         {/* View in Shopify Link */}
-        {customer && shopDomain && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={() => {
-              window.open(
-                `https://${shopDomain}/admin/customers/${customer.id}`,
-                '_blank'
-              )
-            }}
-          >
-            <ExternalLink className="h-3 w-3 mr-2" />
-            View in Shopify
-          </Button>
-        )}
-      </CardContent>
-    </Card>
+        {
+          customer && shopDomain && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() => {
+                window.open(
+                  `https://${shopDomain}/admin/customers/${customer.id}`,
+                  '_blank'
+                )
+              }}
+            >
+              <ExternalLink className="h-3 w-3 mr-2" />
+              View in Shopify
+            </Button>
+          )
+        }
+      </CardContent >
+    </Card >
   )
 }
 
