@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Sparkles, ChevronLeft, ChevronRight } from 'lucide-react'
+import Logo from "@/components/logo"
 
 export type SidebarView =
   | "inbox"
@@ -80,8 +81,11 @@ export default function Sidebar({ activeView, setActiveView, onLogout, currentUs
           ${isCollapsed ? "justify-center px-2" : "px-5 justify-between"}
         `}
       >
-        {!isCollapsed && (
+        {isCollapsed ? (
+          <Logo size="default" showText={false} />
+        ) : (
           <div className="flex items-center gap-2">
+            <Logo size="default" showText={false} />
             <span className="text-base font-bold text-foreground tracking-tight">MailAssist</span>
           </div>
         )}

@@ -217,9 +217,6 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
     <>
       <header className="bg-background/95 backdrop-blur-sm border-b border-border h-16 flex items-center justify-between px-4 md:px-6 gap-2 md:gap-4">
         <div className="flex items-center gap-2 md:gap-3 min-w-0">
-          <div className="flex-shrink-0 flex items-center gap-2">
-            <Logo size="small" />
-          </div>
           <div className="text-base font-bold text-foreground truncate block sm:hidden">MailAssist</div>
         </div>
 
