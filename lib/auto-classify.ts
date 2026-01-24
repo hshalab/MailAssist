@@ -147,16 +147,22 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
         // Process concurrently
         const results = await Promise.allSettled(
             tickets.map(async (t) => {
-                // Fetch the thread's first message to get body
-                const { data: messages } = await supabase
-                    .from('messages')
+                // Fetch the email body from emails table using thread_id
+                const { data: emailData, error: emailError } = await supabase
+                    .from('emails')
                     .select('body')
-                    .eq('ticket_id', t.id)
+                    .eq('thread_id', t.thread_id)
                     .order('date', { ascending: true })
                     .limit(1)
-                    .single();
+                    .maybeSingle();
 
-                const bodyContent = messages?.body || '';
+                if (emailError) {
+                    console.warn(`[Auto-Classify] No email found for ticket ${t.id} (thread: ${t.thread_id}): ${emailError.message}`);
+                }
+
+                const bodyContent = emailData?.body || '';
+                const bodyLength = bodyContent.length;
+                console.log(`[Auto-Classify] Ticket ${t.id} - Subject: "${t.subject?.substring(0, 40)}", Body length: ${bodyLength} chars`);
 
                 return classifyTicketToDepartmentAsync(
                     t.id,

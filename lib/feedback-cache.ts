@@ -68,17 +68,15 @@ async function fetchFeedbackFromDB(
             .select(`
                 ticket_id,
                 final_department_id,
-                tickets!inner(subject, user_email, business_id),
+                tickets!inner(subject, user_email, thread_id),
                 departments!department_feedback_final_department_id_fkey(name)
             `)
             .not('final_department_id', 'is', null)
             .order('created_at', { ascending: false })
             .limit(50);
 
-        // Filter by account
-        if (businessId) {
-            query = query.eq('tickets.business_id', businessId);
-        } else if (userEmail) {
+        // Filter by account (tickets table only has user_email, not business_id)
+        if (userEmail) {
             query = query.eq('tickets.user_email', userEmail);
         }
 
@@ -98,18 +96,25 @@ async function fetchFeedbackFromDB(
 
             if (!deptName || !ticketId) continue;
 
-            // Fetch message body for this ticket
-            const { data: messages } = await supabase
-                .from('messages')
-                .select('body')
-                .eq('ticket_id', ticketId)
-                .order('date', { ascending: true })
-                .limit(1)
-                .single();
+            // Fetch email body for this ticket using thread_id
+            const threadId = feedback.tickets?.thread_id;
+            let bodyContent = '';
+
+            if (threadId) {
+                const { data: emailData } = await supabase
+                    .from('emails')
+                    .select('body')
+                    .eq('thread_id', threadId)
+                    .order('date', { ascending: true })
+                    .limit(1)
+                    .maybeSingle();
+
+                bodyContent = emailData?.body?.substring(0, 500) || '';
+            }
 
             const example: FeedbackExample = {
                 subject: feedback.tickets?.subject || '',
-                body: messages?.body?.substring(0, 500) || '',
+                body: bodyContent,
                 departmentName: deptName,
             };
 

@@ -80,13 +80,45 @@ export async function PATCH(request: NextRequest) {
             settingsData.business_id = null;
         }
 
-        const { data, error } = await supabase
+        // Check if settings already exist
+        let existingQuery = supabase
             .from('user_settings')
-            .upsert(settingsData, {
-                onConflict: user.accountType === 'business' ? 'business_id' : 'user_email',
-            })
-            .select()
-            .single();
+            .select('id');
+
+        if (user.accountType === 'business' && user.businessId) {
+            existingQuery = existingQuery.eq('business_id', user.businessId);
+        } else {
+            existingQuery = existingQuery.eq('user_email', user.email);
+        }
+
+        const { data: existing } = await existingQuery.maybeSingle();
+
+        let data;
+        let error;
+
+        if (existing) {
+            // Update existing row
+            let updateQuery = supabase
+                .from('user_settings')
+                .update(settingsData)
+                .eq('id', existing.id)
+                .select()
+                .single();
+
+            const result = await updateQuery;
+            data = result.data;
+            error = result.error;
+        } else {
+            // Insert new row
+            const result = await supabase
+                .from('user_settings')
+                .insert(settingsData)
+                .select()
+                .single();
+
+            data = result.data;
+            error = result.error;
+        }
 
         if (error) {
             console.error('Error updating settings:', error);

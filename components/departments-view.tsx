@@ -197,10 +197,22 @@ export default function DepartmentsView({ currentUser }: DepartmentsViewProps) {
     const handleSmartBackfill = async () => {
         setBackfilling(true)
         try {
+            // First fetch the user's saved days setting
+            let days = 30
+            try {
+                const settingsRes = await fetch('/api/settings')
+                if (settingsRes.ok) {
+                    const settingsData = await settingsRes.json()
+                    days = settingsData.auto_classify_days || 30
+                }
+            } catch (e) {
+                console.warn('Could not fetch settings, using default 30 days')
+            }
+
             const response = await fetch('/api/departments/backfill', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ days: 30, limit: 20 })
+                body: JSON.stringify({ days })
             })
 
             const data = await response.json()
@@ -209,7 +221,7 @@ export default function DepartmentsView({ currentUser }: DepartmentsViewProps) {
 
             toast({
                 title: "Smart Backfill Complete",
-                description: data.message || `Processed ${data.processed} tickets`,
+                description: data.message || `Processed ${data.processed} tickets in ${data.batches} batch(es)`,
                 variant: "default"
             })
 

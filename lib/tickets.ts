@@ -163,6 +163,7 @@ export async function getOrCreateTicketForThread(
 
   // 2) Classify ticket to department (async, non-blocking)
   // Pass customer email and thread ID for enhanced classification context
+  // Note: Email body is stored in the emails table, not a separate messages table
 
   if (emailBody) {
     classifyTicketToDepartmentAsync(

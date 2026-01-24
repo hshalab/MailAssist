@@ -6,6 +6,7 @@
 import { Department } from './departments';
 import { supabase } from './supabase';
 import { getFeedbackExamples } from './feedback-cache';
+import { htmlToText } from './html-to-text';
 
 export interface EmailContent {
     subject: string;
@@ -109,30 +110,30 @@ ${emailContent.threadContext}
 Use this context to understand the ongoing conversation and classify appropriately.\n`;
     }
 
-    const prompt = `You are an expert email classification assistant for a business. Your job is to route incoming emails to the correct department/workstream.
-
-=== AVAILABLE DEPARTMENTS ===
-${departmentList}
-
-${senderSection}${customerHistorySection}${threadContextSection}${feedbackSection}
-
-=== CLASSIFICATION GUIDELINES ===
-1. Analyze the email content, sender, and any customer history to determine the best department match.
-2. If the customer has previous tickets in a specific department and the current email is related, prefer that department.
-3. Use thread context to understand if this is part of an ongoing conversation.
-4. **DO NOT GUESS**. If the email does not clearly match any department's description (e.g., general inquiry, spam, or unrelated topic), return 0 for Unclassified.
-5. Base your confidence on how well the email matches the department's description.
-
-=== EMAIL TO CLASSIFY ===
-Subject: "${emailContent.subject}"
-Body: "${emailContent.body.substring(0, 3000)}"
-
-Respond with ONLY valid JSON:
-{
-  "departmentNumber": <integer from 1 to ${departments.length}, or 0 for Unclassified>,
-  "confidence": <integer from 0-100>,
-  "reasoning": "<brief explanation>"
-}`;
+    // Generic system prompt - no hardcoded rules
+    const prompt = `You are an expert email classification assistant. Your goal is to map the email to the correct department based on its content and intent.
+    
+    === AVAILABLE DEPARTMENTS ===
+    ${departmentList}
+    
+    ${senderSection}${customerHistorySection}${threadContextSection}${feedbackSection}
+    
+    === GUIDELINES ===
+    1. **Analyze Intent**: Read the email body to understand the core request (e.g., "Where is my order?" -> Orders, "I want to return this" -> Returns).
+    2. **Consistency is Key**: Similar emails must ALWAYS go to the same department.
+    3. **Use Context**: If the customer has a history with a department, that is a strong signal.
+    4. **No Hallucinations**: If it doesn't match a department, return 0 (Unclassified).
+    
+    === EMAIL CONTENT ===
+    Subject: "${emailContent.subject}"
+    Body: "${htmlToText(emailContent.body)}"
+    
+    Respond with ONLY valid JSON in this exact format:
+    {
+      "departmentNumber": <integer from 1 to ${departments.length}, or 0 for Unclassified>,
+      "confidence": <integer from 0-100>,
+      "reasoning": "<brief explanation>"
+    }`;
 
 
     try {
@@ -188,7 +189,7 @@ async function callOpenAIForClassification(prompt: string, apiKey: string): Prom
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey} `,
+                'Authorization': `Bearer ${apiKey}`,
             },
             body: JSON.stringify({
                 model: model,
@@ -202,7 +203,7 @@ async function callOpenAIForClassification(prompt: string, apiKey: string): Prom
                         content: prompt,
                     },
                 ],
-                temperature: 1, // Default value required for gpt-5.2
+                temperature: 0.1, // Low temperature for consistent, deterministic results
                 max_completion_tokens: 150, // Short response expected
             }),
             signal: controller.signal,
@@ -296,7 +297,7 @@ function keywordBasedClassification(
         return { departmentId: null, confidence: 0, reasoning: 'No departments available' };
     }
 
-    const emailText = `${emailContent.subject} ${emailContent.body} `.toLowerCase();
+    const emailText = `${emailContent.subject} ${htmlToText(emailContent.body)}`.toLowerCase();
 
     // Score each department based on keyword matches
     const scored = departments.map(dept => {
