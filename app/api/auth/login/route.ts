@@ -225,9 +225,8 @@ export async function POST(req: NextRequest) {
       .eq('id', targetUser.id)
 
     // 7. Create session
-    // If rememberMe is true, use 30 days; otherwise use 24 hours (session expires when browser closes)
-    // Note: Cookies will be session-only (no maxAge) if rememberMe is false, so they expire when browser closes
-    const sessionDays = rememberMe ? 30 : 1 // 1 day for session-only, 30 days for remember me
+    // If rememberMe is true, use 90 days; otherwise use 7 days
+    const sessionDays = rememberMe ? 90 : 7 // 7 days default, 90 days for remember me
     const { token: sessionToken, expiresAt } = generateSession(sessionDays)
 
     const { error: sessionError } = await supabase
@@ -253,10 +252,10 @@ export async function POST(req: NextRequest) {
     const cookieStore = await cookies()
     const { getCookieOptions, getClientCookieOptions } = await import('@/lib/cookie-config')
 
-    // If rememberMe is true, use 30 days; otherwise use session-only cookies (no maxAge/expires)
+    // If rememberMe is true, use 90 days; otherwise use 7 days for cookie expiry
     const cookieOptions = rememberMe
-      ? { maxAge: 30 * 24 * 60 * 60 } // 30 days
-      : {} // Session-only (expires when browser closes)
+      ? { maxAge: 90 * 24 * 60 * 60 } // 90 days
+      : { maxAge: 7 * 24 * 60 * 60 } // 7 days
 
     // Set session token
     cookieStore.set('session_token', sessionToken, getCookieOptions({
