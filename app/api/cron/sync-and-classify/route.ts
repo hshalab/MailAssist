@@ -10,8 +10,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { createClient } from '@supabase/supabase-js';
 
-export const runtime = 'nodejs';
-export const maxDuration = 60; // 60 seconds max for cron jobs
+// Force dynamic to ensure this route is always built as a serverless function
+export const dynamic = 'force-dynamic';
+// Remove maxDuration to avoid potential plan limits causing 404s
+// export const maxDuration = 60; 
 
 export async function GET(request: NextRequest) {
     const startTime = Date.now();
