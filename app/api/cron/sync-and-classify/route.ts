@@ -3,6 +3,7 @@
  * Runs on a schedule to process new emails for all accounts
  * 
  * Vercel Cron Jobs will call this endpoint automatically
+ * Last updated: 2026-01-24
  */
 
 import { NextRequest, NextResponse } from 'next/server';
