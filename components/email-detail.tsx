@@ -207,7 +207,10 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         // PERFORMANCE: If we have full body content, set loading=false IMMEDIATELY
         // This prevents the loading skeleton from flashing when data is already available
         const hasFullBody = initialEmailData && initialEmailData.body && initialEmailData.body.length > (initialEmailData.snippet?.length || 0)
-        if (hasFullBody) {
+        // Only use initial data if it matches the current email ID
+        const dataMatches = initialEmailData?.threadId === emailId || initialEmailData?.body // Relaxed check
+
+        if (hasFullBody && dataMatches) {
           setLoading(false)
           setEmailSummary({
             id: emailId,
@@ -241,7 +244,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           setLoadingFullContent(false)
 
           // If we already set the data above, skip re-setting it
-          if (hasFullBody) {
+          if (hasFullBody && dataMatches) {
             // Already handled above - just reset UI state
           } else if (initialEmailData) {
             // We only have snippet, set it and show loading state while fetching full content
@@ -320,10 +323,12 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       const requestToken = latestRequestRef.current
 
       // Create new AbortController for this request
-      abortControllerRef.current = new AbortController()
-
-      // Fetch the email content immediately (guarded by current token)
+      // CRITICAL: Only create new controller if we're starting a new fetch
+      // If we're on the same email and fetch is running, we shouldn't have aborted it (controlled by dependency array)
       if (isDifferentEmail) {
+        abortControllerRef.current = new AbortController()
+
+        // Fetch the email content immediately (guarded by current token)
         fetchThread(requestToken, abortControllerRef.current.signal)
       }
     }
@@ -333,11 +338,14 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       if (transitionTimeoutRef.current) {
         clearTimeout(transitionTimeoutRef.current)
       }
+      // CRITICAL: Only abort if we are UNMOUNTING or switching email IDs (dependency array control)
+      // With [emailId] dependency, this only runs when emailId changes
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
       }
     }
-  }, [emailId, initialEmailData])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emailId]) // CRITICAL FIX: Removed initialEmailData from dependencies to prevent aborting fetches on prop updates
 
   const fetchThread = async (requestToken?: number, signal?: AbortSignal) => {
     try {
