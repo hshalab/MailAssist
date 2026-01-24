@@ -186,6 +186,7 @@ export async function GET(request: NextRequest) {
                     limit: 30,
                     businessId: businessId,
                     userEmail: emails[0],
+                    days: 1 // Only look at tickets created in the last 24 hours (newly arrived)
                 });
 
                 result.classified = classifyResult.success;

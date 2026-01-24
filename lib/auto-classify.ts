@@ -68,6 +68,7 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
             .from('tickets')
             .select('id, subject, user_email, customer_email, thread_id, created_at')
             .is('department_id', null)
+            .is('classification_confidence', null) // OPTIMIZATION: Skip tickets already attempted (even if failed)
             .neq('status', 'closed')
             .gte('created_at', cutoffDate.toISOString());
 

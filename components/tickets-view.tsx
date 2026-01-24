@@ -1516,6 +1516,72 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
 
+  const handleBulkClassify = async (departmentId: string | null) => {
+    const targetIds = Array.from(selectedTicketIds)
+    if (targetIds.length === 0) return
+
+    try {
+      setBulkUpdating(true)
+      setBulkProgress(targetIds.map(id => ({ id, status: 'pending' as const })))
+
+      // Process each ticket individually
+      const results = await Promise.allSettled(
+        targetIds.map(async (ticketId) => {
+          const response = await fetch(`/api/tickets/${ticketId}/department`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ departmentId }),
+          })
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Failed' }))
+            throw new Error(errorData.error || "Failed to classify")
+          }
+          return { ticketId, success: true }
+        })
+      )
+
+      // Count successes and failures
+      const successCount = results.filter(r => r.status === 'fulfilled').length
+      const failedCount = results.filter(r => r.status === 'rejected').length
+
+      // Update progress
+      setBulkProgress(targetIds.map((id, idx) => {
+        const result = results[idx]
+        return result.status === 'fulfilled'
+          ? { id, status: 'success' as const }
+          : { id, status: 'error' as const, message: 'Classification failed' }
+      }))
+
+      if (failedCount === 0) {
+        setSelectedTicketIds(new Set())
+        setIsSelectMode(false)
+      }
+
+      const deptName = departmentId === null
+        ? "Unclassified"
+        : (departments.find(d => d.id === departmentId)?.name || "Unknown")
+
+      toast({
+        title: failedCount ? "Bulk classify partially succeeded" : "Bulk classify successful",
+        description: failedCount
+          ? `Classified ${successCount}, failed ${failedCount}`
+          : `Classified ${successCount} ticket(s) to ${deptName}`,
+        variant: failedCount ? "destructive" : "default"
+      })
+
+      await fetchTickets({ silent: true })
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: err instanceof Error ? err.message : "Failed to classify tickets",
+        variant: "destructive"
+      })
+    } finally {
+      setBulkUpdating(false)
+    }
+  }
+
+
   const toggleTicketSelection = (ticketId: string) => {
     setSelectedTicketIds((prev) => {
       const next = new Set(prev)
@@ -2587,6 +2653,23 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                             {user.name}
                           </SelectItem>
                         ))}
+                    </SelectContent>
+                  </Select>
+                  {/* Bulk classify to department */}
+                  <Select
+                    onValueChange={(deptId) => handleBulkClassify(deptId === "unclassified" ? null : deptId)}
+                    disabled={bulkUpdating}
+                  >
+                    <SelectTrigger className="h-7 w-36 text-xs">
+                      <SelectValue placeholder="Classify to..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unclassified">Unclassified</SelectItem>
+                      {departments.map((dept) => (
+                        <SelectItem key={dept.id} value={dept.id}>
+                          {dept.name}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   {bulkProgress.length > 0 && (
