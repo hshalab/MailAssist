@@ -32,7 +32,7 @@ export default function WelcomePage() {
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('show_inbox_skeleton_on_return', 'true')
       }
-      
+
       const response = await fetch('/api/auth/gmail')
 
       if (!response.ok) {
@@ -293,7 +293,12 @@ export default function WelcomePage() {
                     { feature: "Team Members", personal: false, business: true },
                     { feature: "Role Management (Admin/Manager/Agent)", personal: false, business: true },
                     { feature: "Multiple Email Accounts", personal: false, business: true },
-                    { feature: "Approval Workflows & Guardrails", personal: false, business: true },
+                    { feature: "Shopify Integration", personal: false, business: true },
+                    { feature: "Smart Workstream Labeling (AI)", personal: false, business: true },
+                    { feature: "AI Guardrails & Rules", personal: false, business: true },
+                    { feature: "Approval Workflows", personal: false, business: true },
+                    { feature: "Ticket Notes & Mentions", personal: false, business: true },
+                    { feature: "Quick Replies", personal: false, business: true },
                     { feature: "Shared Knowledge Base", personal: false, business: true },
                     { feature: "Team Analytics & Reporting", personal: false, business: true },
                     { feature: "Agent Invitations", personal: false, business: true }
