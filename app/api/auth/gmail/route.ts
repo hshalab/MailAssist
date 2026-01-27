@@ -13,11 +13,13 @@ export async function GET(request: Request) {
     // Use 'connect' explicitly when adding Gmail to existing business account
     const mode = searchParams.get('mode') || 'login';
 
-    // CRITICAL FIX: Only force consent on initial connection or explicit reconnection
+    // CRITICAL FIX: Only force consent on explicit reconnection after token revocation
     // reconnect=true is passed when user clicks "Reconnect" after token expiration
-    // For normal logins, we use select_account to preserve existing refresh tokens
+    // For normal logins AND regular connections, we use select_account to preserve existing refresh tokens
+    // This prevents hitting Google's 50 refresh token limit per user per OAuth client
+    // which would cause older tokens to be automatically invalidated
     const reconnect = searchParams.get('reconnect') === 'true';
-    const forceConsent = reconnect || mode === 'connect'; // Force consent for new connections
+    const forceConsent = reconnect; // Only force consent when explicitly reconnecting
 
     // Create state object to pass through OAuth
     const state = JSON.stringify({ mode });
