@@ -9,7 +9,7 @@ import { getCurrentUserEmail } from '@/lib/storage';
 import { loadStoredEmails } from '@/lib/storage';
 import { listKnowledge } from '@/lib/knowledge';
 import { getGuardrails } from '@/lib/guardrails';
-import { getOpenAIApiKey } from '@/lib/ai-draft';
+import { getGroqApiKey } from '@/lib/ai-draft';
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       loadStoredEmails({ limit: 100 }),
       listKnowledge(userEmail),
       getGuardrails(userEmail),
-      getOpenAIApiKey(),
+      getGroqApiKey(),
     ]);
 
     if (!openaiApiKey) {
