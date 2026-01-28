@@ -116,7 +116,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [isCreatingTickets, setIsCreatingTickets] = useState(false) // Track if tickets are being created
+  const [isCreatingTickets, setIsCreatingTickets] = useState(false) // Track if tickets are being creating
+  const [ticketCounts, setTicketCounts] = useState({ open: 0, assigned: 0, unassigned: 0, closed: 0 })
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
   const [activeTab, setActiveTab] = useState<"assigned" | "unassigned" | "open" | "closed">("unassigned")
 
@@ -568,16 +569,26 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
 
       // Determine sort order based on active tab
-      // User request: Open/Unassigned = Oldest to Newest (ASC)
-      // Closed = Newest to Oldest (DESC)
-      // Note: activeTab isn't a dependency of fetchTickets usually to avoid excessive refetches, 
-      // but here we need it. We'll use the current state ref or pass it as arg if needed.
-      // Since fetchTickets is called in effects that don't track activeTab, we might need to 
-      // rely on the current state value when the specific fetch happens.
-      // Ideally, changing tabs should trigger a refetch or re-sort.
       const sortOrder = activeTab === 'closed' ? 'desc' : 'asc';
       console.log(`[Tickets] Fetching with activeTab=${activeTab}, sortOrder=${sortOrder}`);
       url += `&sort=${sortOrder}`;
+
+      // CRITICAL UPDATE: Server-side filtering
+      // If searching, we skip status filters to search EVERYTHING
+      if (activeSearchQuery) {
+        url += `&q=${encodeURIComponent(activeSearchQuery)}`;
+      } else {
+        // Apply status filter based on active tab
+        if (activeTab === 'closed') {
+          url += `&status=closed`;
+        } else {
+          // For all other tabs (open, assigned, unassigned), we want open tickets
+          // The specific "assigned" vs "unassigned" vs "all open" distinction 
+          // is handled by role-filtering or client-side filtering for now, 
+          // BUT we must ensure we don't fetch closed tickets here.
+          url += `&status=open,pending,on_hold`;
+        }
+      }
 
       // CRITICAL: Send user ID in header from sessionStorage (per-tab) to prevent cookie sharing issues
       // This ensures each tab uses its own user ID even when cookies are shared
@@ -663,11 +674,44 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setIsCreatingTickets(false)
       if (!silent) setLoading(false)
     }
-  }, [selectedAccount, currentUserId, checkSyncStatus, activeTab]) // Add checkSyncStatus and activeTab dependency
+  }, [selectedAccount, currentUserId, checkSyncStatus, activeTab, activeSearchQuery]) // Add checkSyncStatus and activeTab dependency
 
-  // Re-fetch when active tab changes to apply new sort order
+  // Fetch ticket counts
+  const fetchCounts = useCallback(async () => {
+    if (!currentUserId) return;
+    try {
+      let url = `/api/tickets/counts?_=${Date.now()}`;
+      if (selectedAccount !== 'all') {
+        url += `&account=${encodeURIComponent(selectedAccount)}`;
+      }
+
+      const headers: Record<string, string> = {};
+      if (currentUserId) headers['x-user-id'] = currentUserId;
+
+      const res = await fetch(url, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.counts) {
+          setTicketCounts(data.counts);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching counts:', error);
+    }
+  }, [currentUserId, selectedAccount]);
+
+  // Initial load and polling for counts
+  useEffect(() => {
+    fetchCounts();
+    const interval = setInterval(fetchCounts, 30000); // Poll counts every 30s
+    return () => clearInterval(interval);
+  }, [fetchCounts]);
+
+  // Re-fetch when active tab changes to apply new sort order and status filter
   useEffect(() => {
     fetchTickets();
+    // Also refresh counts when switching tabs to ensure accuracy
+    fetchCounts();
   }, [activeTab]);
 
   // Handle quick reply selection
@@ -754,6 +798,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         fetchTicketViews(),
         fetchAccounts(),
         fetchAgentDepartments(),
+        fetchCounts(),
         ...(currentUserId ? [fetchQuickReplies()] : [])
       ]).catch(err => console.error('Error loading initial data:', err))
     }, 0)
@@ -2040,18 +2085,25 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       // This ensures closed tickets are searchable from any tab
     } else {
       // Tab-based filtering (only applied when NOT searching)
+      // Note: Server now handles main status filtering (Closed vs Open), 
+      // but we still need client-side filtering for Assigned/Unassigned/Dept rules
+      // within the "Open" bucket that the server returned.
       console.log('[Filter] Applying tab filter (' + activeTab + '):', filtered.length)
       if (activeTab === "assigned") {
-        filtered = filtered.filter(t => t.assigneeUserId === currentUserId && t.status !== "closed")
+        filtered = filtered.filter(t => t.assigneeUserId === currentUserId)
         console.log('[Filter] Assigned filter:', filtered.length)
       } else if (activeTab === "unassigned") {
-        filtered = filtered.filter(t => t.assigneeUserId === null && t.status !== "closed")
+        filtered = filtered.filter(t => t.assigneeUserId === null)
         console.log('[Filter] Unassigned filter:', filtered.length)
       } else if (activeTab === "open") {
-        filtered = filtered.filter(t => t.status !== "closed")
+        // "Open" tab usually means "All Open" (or maybe "Open + Unassigned"?). 
+        // Based on UI, "Open" seems to be the catch-all for non-closed.
+        // Server already filtered out closed, so we just take what we have.
+        // filtered = filtered.filter(t => t.status !== "closed") // redundant but safe
         console.log('[Filter] Open filter:', filtered.length)
       } else if (activeTab === "closed") {
-        filtered = filtered.filter(t => t.status === "closed")
+        // Server already filtered to closed only
+        // filtered = filtered.filter(t => t.status === "closed") // redundant but safe
         console.log('[Filter] Closed filter:', filtered.length)
       }
     }
@@ -2317,53 +2369,41 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                   <TabsTrigger value="assigned" className="relative px-1 min-w-0">
                     <span className="flex items-center gap-1 truncate">
                       <span className="truncate">Assigned</span>
-                      {(() => {
-                        const count = tickets.filter(t => t.assigneeUserId === currentUserId && t.status !== 'closed').length
-                        return count > 0 && (
-                          <Badge variant="secondary" className="h-4 px-1 text-[9px] flex-shrink-0">
-                            {count}
-                          </Badge>
-                        )
-                      })()}
+                      {ticketCounts.assigned > 0 && (
+                        <Badge variant="secondary" className="h-4 px-1 text-[9px] flex-shrink-0">
+                          {ticketCounts.assigned}
+                        </Badge>
+                      )}
                     </span>
                   </TabsTrigger>
                   <TabsTrigger value="unassigned" className="relative px-1 min-w-0">
                     <span className="flex items-center gap-1 truncate">
                       <span className="truncate">Unassigned</span>
-                      {(() => {
-                        const count = tickets.filter(t => t.assigneeUserId === null && t.status !== 'closed').length
-                        return count > 0 && (
-                          <Badge variant="secondary" className="h-4 px-1 text-[9px] flex-shrink-0">
-                            {count}
-                          </Badge>
-                        )
-                      })()}
+                      {ticketCounts.unassigned > 0 && (
+                        <Badge variant="secondary" className="h-4 px-1 text-[9px] flex-shrink-0">
+                          {ticketCounts.unassigned}
+                        </Badge>
+                      )}
                     </span>
                   </TabsTrigger>
                   <TabsTrigger value="open" className="relative px-1 min-w-0">
                     <span className="flex items-center gap-1 truncate">
                       <span className="truncate">Open</span>
-                      {(() => {
-                        const count = tickets.filter(t => t.status !== 'closed').length
-                        return count > 0 && (
-                          <Badge variant="secondary" className="h-4 px-1 text-[9px] flex-shrink-0">
-                            {count}
-                          </Badge>
-                        )
-                      })()}
+                      {ticketCounts.open > 0 && (
+                        <Badge variant="secondary" className="h-4 px-1 text-[9px] flex-shrink-0">
+                          {ticketCounts.open}
+                        </Badge>
+                      )}
                     </span>
                   </TabsTrigger>
                   <TabsTrigger value="closed" className="relative px-1 min-w-0">
                     <span className="flex items-center gap-1 truncate">
                       <span className="truncate">Closed</span>
-                      {(() => {
-                        const count = tickets.filter(t => t.status === 'closed').length
-                        return count > 0 && (
-                          <Badge variant="secondary" className="h-4 px-1 text-[9px] flex-shrink-0">
-                            {count}
-                          </Badge>
-                        )
-                      })()}
+                      {ticketCounts.closed > 0 && (
+                        <Badge variant="secondary" className="h-4 px-1 text-[9px] flex-shrink-0">
+                          {ticketCounts.closed}
+                        </Badge>
+                      )}
                     </span>
                   </TabsTrigger>
                 </TabsList>

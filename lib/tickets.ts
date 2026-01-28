@@ -473,13 +473,20 @@ export async function ensureTicketForEmail(
  * - Agents: see only their own tickets + unassigned tickets
  * - Admin/Manager: see all tickets for the shared Gmail account
  */
+/**
+ * Get tickets with role-based filtering, optional status filtering, and search
+ * - Agents: see only their own tickets + unassigned tickets
+ * - Admin/Manager: see all tickets for the shared Gmail account
+ */
 export async function getTickets(
   currentUserId: string | null,
   canViewAll: boolean,
   userEmail: string | null,
   accountFilter?: string,
   businessId?: string | null,
-  sortOrder: 'asc' | 'desc' = 'desc'
+  sortOrder: 'asc' | 'desc' = 'desc',
+  statusFilter?: TicketStatus[],
+  searchQuery?: string
 ): Promise<Ticket[]> {
   if (!supabase) return [];
 
@@ -501,6 +508,25 @@ export async function getTickets(
   // Filter by specific connected account if provided
   if (accountFilter) {
     query = query.eq('owner_email', accountFilter);
+  }
+
+  // Apply status filter if provided
+  if (statusFilter && statusFilter.length > 0) {
+    // If multiple statuses, use 'in', otherwise 'eq'
+    if (statusFilter.length === 1) {
+      query = query.eq('status', statusFilter[0]);
+    } else {
+      query = query.in('status', statusFilter);
+    }
+  }
+
+  // Apply search query if provided
+  if (searchQuery) {
+    // Basic text search on subject, customer_email, customer_name
+    // Note: This is a basic ILIKE search. For better performance on large datasets, 
+    // we should use Postgres Full Text Search (to_tsvector/to_tsquery).
+    const term = `%${searchQuery}%`;
+    query = query.or(`subject.ilike.${term},customer_email.ilike.${term},customer_name.ilike.${term}`);
   }
 
   // Role-based filtering
@@ -536,6 +562,9 @@ export async function getTickets(
   // 'asc' = Oldest first (FIFO) - good for working through backlog
   // 'desc' = Newest first (LIFO) - good for seeing latest activity
   console.log(`[getTickets] Applying sort order: ${sortOrder}, ascending: ${sortOrder === 'asc'}`);
+
+  // If we are searching, we usually want relevance or newest first, regardless of the tab sort order
+  // But for now we respect the requested sort order
   query = query.order('last_customer_reply_at', { ascending: sortOrder === 'asc', nullsFirst: false });
 
   // OPTIMIZED: Removed limit to prevent hiding new tickets
@@ -543,11 +572,12 @@ export async function getTickets(
 
   const { data, error } = await query;
 
-  console.log(`[getTickets] Query params: userEmail=${userEmail}, canViewAll=${canViewAll}`);
+  console.log(`[getTickets] Query params: userEmail=${userEmail}, canViewAll=${canViewAll}, status=${statusFilter?.join(',')}, search=${searchQuery}`);
 
   if (error) {
     console.error('Error fetching tickets:', error);
     // Fallback to simple query if JOIN fails (backward compatibility)
+    // Note: Fallback doesn't support new filters yet, but it's a legacy path
     return getTicketsFallback(currentUserId, canViewAll, userEmail);
   }
 
@@ -591,6 +621,115 @@ export async function getTickets(
     }
     return ticket;
   });
+}
+
+/**
+ * Get ticket counts grouped by status/type for the sidebar/tabs
+ */
+export async function getTicketCounts(
+  currentUserId: string | null,
+  canViewAll: boolean,
+  userEmail: string | null,
+  accountFilter?: string
+): Promise<{ open: number; assigned: number; unassigned: number; closed: number }> {
+  if (!supabase) return { open: 0, assigned: 0, unassigned: 0, closed: 0 };
+
+  // Helper to build base query
+  const buildBaseQuery = () => {
+    let q = supabase!.from('tickets').select('id, status, assignee_user_id, department_id', { count: 'exact', head: true });
+
+    if (userEmail) {
+      q = q.eq('user_email', userEmail);
+    }
+    if (accountFilter) {
+      q = q.eq('owner_email', accountFilter);
+    }
+
+    // Role-based scoping (mirrors getTickets logic)
+    // Note: We can't strictly return partial counts here easily without multiple queries 
+    // or a complex group_by which Supabase/PostgREST doesn't support flexibly for conditional logic.
+    // For now, we will run parallel queries for the different buckets.
+    return q;
+  };
+
+  // We need to fetch counts for:
+  // 1. Open (total open tickets visible to user)
+  // 2. Assigned (assigned to current user)
+  // 3. Unassigned (visible to user)
+  // 4. Closed (visible to user)
+
+  try {
+    // Shared role-based filter string
+    let roleFilter = '';
+    // Fetch departments for agent filtering if needed
+    let deptIds: string[] = [];
+
+    if (!canViewAll && currentUserId) {
+      const { data: userDepts } = await supabase
+        .from('user_departments')
+        .select('department_id')
+        .eq('user_id', currentUserId);
+
+      deptIds = userDepts?.map((ud: any) => ud.department_id) || [];
+
+      if (deptIds.length > 0) {
+        roleFilter = `assignee_user_id.eq.${currentUserId},and(assignee_user_id.is.null,department_id.in.(${deptIds.join(',')}))`;
+      } else {
+        roleFilter = `assignee_user_id.eq.${currentUserId},assignee_user_id.is.null`;
+      }
+    }
+
+    // 1. Assigned to Me (Open only)
+    let assignedQuery = buildBaseQuery()
+      .eq('assignee_user_id', currentUserId)
+      .neq('status', 'closed');
+
+    // 2. Unassigned (Open only)
+    let unassignedQuery = buildBaseQuery()
+      .is('assignee_user_id', null)
+      .neq('status', 'closed');
+
+    // Apply department filter to unassigned if agent
+    if (!canViewAll && currentUserId && deptIds.length > 0) {
+      unassignedQuery = unassignedQuery.in('department_id', deptIds);
+    }
+
+    // 3. All Open (for the "Open" tab - sum of everything visible that isn't closed)
+    let openQuery = buildBaseQuery()
+      .neq('status', 'closed');
+
+    // Apply role filter to open query
+    if (!canViewAll && currentUserId) {
+      openQuery = openQuery.or(roleFilter);
+    }
+
+    // 4. Closed
+    let closedQuery = buildBaseQuery()
+      .eq('status', 'closed');
+
+    // Apply role filter to closed query
+    if (!canViewAll && currentUserId) {
+      closedQuery = closedQuery.or(roleFilter);
+    }
+
+    // Execute in parallel
+    const [assignedRes, unassignedRes, openRes, closedRes] = await Promise.all([
+      assignedQuery,
+      unassignedQuery,
+      openQuery,
+      closedQuery
+    ]);
+
+    return {
+      assigned: assignedRes.count || 0,
+      unassigned: unassignedRes.count || 0,
+      open: openRes.count || 0,
+      closed: closedRes.count || 0
+    };
+  } catch (err) {
+    console.error('Error fetching ticket counts:', err);
+    return { open: 0, assigned: 0, unassigned: 0, closed: 0 };
+  }
 }
 
 // Fallback method if JOIN fails (backward compatibility)

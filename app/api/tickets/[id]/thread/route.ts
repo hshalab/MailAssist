@@ -8,7 +8,7 @@ import { getThreadById } from '@/lib/gmail';
 import { getValidTokens } from '@/lib/token-refresh';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { canViewAllTickets } from '@/lib/permissions';
-import { getUserEmailForTickets } from '@/lib/ticket-helpers';
+import { getCurrentUserEmail } from '@/lib/storage';
 import { getGmailClient } from '@/lib/gmail';
 
 type RouteContext =
@@ -31,19 +31,12 @@ export async function GET(
     }
 
     const userId = getCurrentUserIdFromRequest(request);
+    const userEmail = await getCurrentUserEmail();
 
-    if (!userId) {
+    if (!userId || !userEmail) {
       return NextResponse.json(
         { error: 'Not authenticated' },
         { status: 401 }
-      );
-    }
-
-    const userEmail = await getUserEmailForTickets();
-    if (!userEmail) {
-      return NextResponse.json(
-        { error: 'No Gmail account connected' },
-        { status: 400 }
       );
     }
 
@@ -66,26 +59,6 @@ export async function GET(
     if ((!tokens || !tokens.access_token) && userEmail && userEmail !== ticket.userEmail) {
       console.log(`[Thread] Ticket userEmail ${ticket.userEmail} has no tokens, trying current user ${userEmail}`);
       tokens = await getValidTokens(userEmail);
-    }
-
-    // FALLBACK: For personal accounts using session auth (businessId is null)
-    if (!tokens || !tokens.access_token) {
-      const { validateBusinessSession } = await import('@/lib/session');
-      const businessSession = await validateBusinessSession();
-
-      if (!businessSession || !businessSession.businessId) {
-        console.log('[Thread] Trying loadBusinessTokens fallback for personal account...');
-        const { loadBusinessTokens } = await import('@/lib/storage');
-        const targetEmail = businessSession?.email || userEmail;
-
-        if (targetEmail) {
-          const connectedAccounts = await loadBusinessTokens(null, targetEmail);
-          if (connectedAccounts.length > 0) {
-            tokens = connectedAccounts[0].tokens;
-            console.log(`[Thread] Found tokens via loadBusinessTokens for: ${connectedAccounts[0].email}`);
-          }
-        }
-      }
     }
 
     if (!tokens || !tokens.access_token) {
@@ -112,7 +85,7 @@ export async function GET(
         }
 
         console.log(`[Thread API] Fetching attachment data for message ${msg.id}`);
-
+        
         const attachmentResults = await Promise.allSettled(
           msg.attachments.map(async (att: any) => {
             try {
@@ -135,7 +108,7 @@ export async function GET(
             }
           })
         );
-
+        
         const attachmentsWithData = attachmentResults.map((result, idx) => {
           if (result.status === 'fulfilled') {
             return result.value;

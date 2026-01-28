@@ -92,6 +92,13 @@ export async function GET(request: NextRequest) {
     const sortOrder = (sortParam === 'asc' || sortParam === 'desc') ? sortParam : 'desc';
     console.log(`[Tickets API] Received sort param: ${sortParam}, using sortOrder: ${sortOrder}`);
 
+    // Parse status filter (comma separated) e.g. "open,pending"
+    const statusParam = request.nextUrl.searchParams.get('status');
+    const statusFilter = statusParam ? (statusParam.split(',') as any[]) : undefined;
+
+    // Parse search query
+    const searchQuery = request.nextUrl.searchParams.get('q') || undefined;
+
     // Get tickets with role-based filtering and optional account scope
     let tickets = await getTickets(
       userId,
@@ -99,7 +106,9 @@ export async function GET(request: NextRequest) {
       userEmail,
       accountFilter,
       businessId,
-      sortOrder
+      sortOrder,
+      statusFilter,
+      searchQuery
     );
 
     // CRITICAL FIX: Filter tickets to only show those from connected accounts
