@@ -123,10 +123,10 @@ export async function generateDraftReply(
   const startTime = Date.now();
   let draft = await callGroqAPI(prompt, groqApiKey);
   const responseTimeMs = Date.now() - startTime;
-  
+
   // Track knowledge items used
   const knowledgeItemIds = relevantKnowledge.map(k => k.id).filter(Boolean) as string[];
-  
+
   // Enforce guardrails and track usage
   const originalDraft = draft;
   draft = enforceGuardrailsOutput(draft, guardrails, {
@@ -230,10 +230,10 @@ export async function generateNewEmailDraft(
   const startTime = Date.now();
   let draft = await callGroqAPI(prompt, groqApiKey);
   const responseTimeMs = Date.now() - startTime;
-  
+
   // Track knowledge items used
   const knowledgeItemIds = relevantKnowledge.map(k => k.id).filter(Boolean) as string[];
-  
+
   // Enforce guardrails and track usage
   const originalDraft = draft;
   draft = enforceGuardrailsOutput(draft, guardrails, {
@@ -283,14 +283,14 @@ function createNewEmailPrompt(
 
   const knowledgeSection = knowledgeItems.length
     ? `\n\nRELEVANT KNOWLEDGE SNIPPETS:\n${knowledgeItems
-        .map((k, idx) => `[${idx + 1}] ${k.title}: ${k.body}`)
-        .join("\n")}\n`
+      .map((k, idx) => `[${idx + 1}] ${k.title}: ${k.body}`)
+      .join("\n")}\n`
     : ""
 
   const topicRulesSection = topicRules.length
     ? `\nTopic-specific rules:\n${topicRules
-        .map((r) => `- If tags/intent match "${r.tag}", then: ${r.instruction}`)
-        .join("\n")}`
+      .map((r) => `- If tags/intent match "${r.tag}", then: ${r.instruction}`)
+      .join("\n")}`
     : ""
 
   const bannedSection = banned.length
@@ -388,14 +388,14 @@ function createDraftPrompt(
 
   const knowledgeSection = knowledgeItems.length
     ? `\n\nRELEVANT KNOWLEDGE SNIPPETS:\n${knowledgeItems
-        .map((k, idx) => `[${idx + 1}] ${k.title}: ${k.body}`)
-        .join("\n")}\n`
+      .map((k, idx) => `[${idx + 1}] ${k.title}: ${k.body}`)
+      .join("\n")}\n`
     : ""
 
   const topicRulesSection = topicRules.length
     ? `\nTopic-specific rules:\n${topicRules
-        .map((r) => `- If tags/intent match "${r.tag}", then: ${r.instruction}`)
-        .join("\n")}`
+      .map((r) => `- If tags/intent match "${r.tag}", then: ${r.instruction}`)
+      .join("\n")}`
     : ""
 
   const bannedSection = banned.length
@@ -474,11 +474,11 @@ function enforceGuardrailsOutput(
   }
 ): string {
   if (!guardrails) return draft
-  
+
   let result = draft
   const banned = guardrails.bannedWords?.filter(Boolean) || []
   const foundBannedWords: string[] = []
-  
+
   banned.forEach((word) => {
     const re = new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")
     if (re.test(result)) {
@@ -486,7 +486,7 @@ function enforceGuardrailsOutput(
       result = result.replace(re, "[removed]")
     }
   })
-  
+
   // Log guardrail usage
   if (options?.userEmail && guardrails) {
     // Always log guardrails as applied when they exist
@@ -502,7 +502,7 @@ function enforceGuardrailsOutput(
         : { guardrailsApplied: true, toneStyle: !!guardrails.toneStyle, rules: !!guardrails.rules, topicRules: guardrails.topicRules?.length || 0 },
       draftContent: draft,
     })
-    
+
     // Log topic rules if any match ticket tags
     if (guardrails.topicRules && guardrails.topicRules.length > 0) {
       // Note: We'd need ticket tags to check, but for now log that topic rules exist
@@ -510,33 +510,45 @@ function enforceGuardrailsOutput(
       // For now, topic rules are counted if they exist in the guardrails
     }
   }
-  
+
   return result
 }
 
 /**
- * Get Groq API key from environment
+ * Get OpenAI API key from environment
  */
-export function getGroqApiKey(): string | null {
-  return process.env.GROQ_API_KEY || null;
+export function getOpenAIApiKey(): string | null {
+  return process.env.OPENAI_API_KEY || null;
 }
 
 /**
- * Call Groq API to generate draft
+ * Call AI API (Groq or OpenAI) to generate draft
  */
 async function callGroqAPI(prompt: string, apiKey: string, temperature?: number): Promise<string> {
-  const REQUEST_TIMEOUT = 30000; // 30 seconds timeout for Groq API
-  const models = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'llama-3-70b-8192']; // Try models in order
-  
+  const REQUEST_TIMEOUT = 30000; // 30 seconds timeout
+  // Determine if this is an OpenAI key or Groq key
+  const isOpenAI = apiKey.startsWith('sk-');
+
+  const baseUrl = isOpenAI
+    ? 'https://api.openai.com/v1/chat/completions'
+    : 'https://api.groq.com/openai/v1/chat/completions';
+
+  // Allow using different models based on provider
+  // For OpenAI: gpt-4o, gpt-4-turbo, gpt-3.5-turbo
+  // For Groq: llama-3.3-70b-versatile, etc.
+  const models = isOpenAI
+    ? ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo']
+    : ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'llama-3-70b-8192'];
+
   let lastError: Error | null = null;
-  
+
   for (const model of models) {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
-      
+
       try {
-        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        const response = await fetch(baseUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -563,20 +575,20 @@ async function callGroqAPI(prompt: string, apiKey: string, temperature?: number)
         clearTimeout(timeoutId);
 
         if (!response.ok) {
-          let errorMessage = `Groq API error (${model}): ${response.status} ${response.statusText}`;
+          let errorMessage = `AI API error (${model}): ${response.status} ${response.statusText}`;
           try {
             const errorData = await response.json();
             errorMessage = errorData.error?.message || errorData.message || errorMessage;
-            
+
             // If model not found (404), try next model
             if (response.status === 404 && models.indexOf(model) < models.length - 1) {
-              console.warn(`[Groq API] Model ${model} not found, trying next model...`);
+              console.warn(`[AI API] Model ${model} not found, trying next model...`);
               continue; // Try next model
             }
-            
+
             // Provide helpful hints for common errors
             if (response.status === 401 || response.status === 403) {
-              errorMessage += ' (Check your GROQ_API_KEY)';
+              errorMessage += ' (Check your API_KEY)';
               throw new Error(errorMessage); // Don't retry on auth errors
             } else if (response.status === 429) {
               errorMessage += ' (Rate limit exceeded, please try again later)';
@@ -584,47 +596,47 @@ async function callGroqAPI(prompt: string, apiKey: string, temperature?: number)
             }
           } catch (parseError) {
             // If JSON parsing fails, use the status text
-            if (parseError instanceof Error && parseError.message.includes('Check your GROQ_API_KEY')) {
+            if (parseError instanceof Error && parseError.message.includes('Check your API_KEY')) {
               throw parseError; // Re-throw auth errors
             }
           }
-          
+
           // If it's not the last model, try the next one
           if (models.indexOf(model) < models.length - 1) {
             lastError = new Error(errorMessage);
             continue;
           }
-          
+
           throw new Error(errorMessage);
         }
 
         const data = await response.json();
-        
+
         if (!data.choices || !Array.isArray(data.choices) || data.choices.length === 0) {
-          throw new Error('Invalid response format from Groq API: no choices returned');
+          throw new Error('Invalid response format from AI API: no choices returned');
         }
-        
+
         const draft = data.choices[0]?.message?.content?.trim();
 
         if (!draft) {
-          throw new Error('No draft content in Groq API response');
+          throw new Error('No draft content in AI API response');
         }
 
-        console.log(`[Groq API] Successfully generated draft using model: ${model}`);
+        console.log(`[AI API] Successfully generated draft using model: ${model}`);
         return draft;
       } catch (fetchError: any) {
         clearTimeout(timeoutId);
         if (fetchError.name === 'AbortError') {
           // Timeout - don't retry with other models
-          throw new Error('Request timeout: Groq API took too long to respond');
+          throw new Error('Request timeout: AI API took too long to respond');
         }
-        
+
         // If it's an auth/rate limit error, don't try other models
-        if (fetchError.message?.includes('Check your GROQ_API_KEY') || 
-            fetchError.message?.includes('Rate limit')) {
+        if (fetchError.message?.includes('Check your API_KEY') ||
+          fetchError.message?.includes('Rate limit')) {
           throw fetchError;
         }
-        
+
         // Otherwise, try next model
         lastError = fetchError;
         if (models.indexOf(model) < models.length - 1) {
@@ -642,9 +654,9 @@ async function callGroqAPI(prompt: string, apiKey: string, temperature?: number)
       continue;
     }
   }
-  
+
   // If we get here, all models failed
-  throw lastError || new Error('All Groq API models failed');
+  throw lastError || new Error('All AI API models failed');
 }
 
 
