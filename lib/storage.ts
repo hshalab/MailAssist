@@ -737,6 +737,32 @@ export async function saveTokens(tokens: StoredTokens, businessId?: string | nul
     throw new Error('User email is required to save tokens securely');
   }
 
+  // CRITICAL FIX: If new tokens don't have a refresh token (e.g. from select_account login),
+  // try to preserve the existing refresh token from the database to prevent data loss.
+  if (!tokens.refresh_token) {
+    try {
+      let query = supabase
+        .from('tokens')
+        .select('refresh_token')
+        .eq('user_email', finalUserEmail);
+
+      if (businessId) {
+        query = query.eq('business_id', businessId);
+      } else {
+        query = query.is('business_id', null);
+      }
+
+      const { data: existingToken } = await query.maybeSingle();
+
+      if (existingToken?.refresh_token) {
+        console.log('[saveTokens] Preserving existing refresh token for', finalUserEmail);
+        tokens.refresh_token = existingToken.refresh_token;
+      }
+    } catch (fetchError) {
+      console.warn('Error fetching existing refresh token:', fetchError);
+    }
+  }
+
   // CRITICAL SECURITY FIX: Only delete tokens for THIS user AND THIS CONTEXT
   // This prevents one user's login from affecting another user's session
   // and separates Personal (business_id=null) from Business (business_id=xyz) contexts
@@ -807,13 +833,14 @@ export async function saveTokens(tokens: StoredTokens, businessId?: string | nul
         console.error('Error saving tokens to Supabase (after retry):', retryError);
         throw retryError;
       }
-    } else {
-      console.error('Error saving tokens to Supabase:', error);
-      throw error;
+      return finalUserEmail;
     }
+
+    console.error('Error saving tokens to Supabase:', error);
+    return null;
   }
 
-  return finalUserEmail; // Return user email so caller can set session cookie
+  return finalUserEmail;
 }
 
 /**
