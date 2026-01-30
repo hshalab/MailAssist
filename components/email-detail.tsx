@@ -742,11 +742,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           const closeResult = await closeResponse.json()
           console.log('✅ Ticket closed successfully:', closeResult)
 
-          // Step 3: Broadcast event to refresh tickets page and switch to closed tab
+          // Step 3: Broadcast event to refresh tickets page (don't switch tab - let agent continue working)
           console.log('📢 Broadcasting ticket update event...')
           console.log('📦 Event detail:', { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId })
           window.dispatchEvent(new CustomEvent('ticketUpdated', {
-            detail: { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId, switchToTab: 'closed' }
+            detail: { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId }
           }))
           // Also fire a simpler refresh event for listeners
           window.dispatchEvent(new Event('ticketsForceRefresh'))

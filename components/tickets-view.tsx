@@ -25,6 +25,7 @@ import ShopifySidebar from "@/components/shopify-sidebar"
 import RichTextEditor from "@/components/rich-text-editor"
 import { EmailContentViewer } from "@/components/email-content-viewer"
 import { htmlToText } from "@/lib/html-to-text"
+import CustomerEmailTimeline from "@/components/customer-email-timeline"
 
 const toPlainText = (html: string) => {
   if (!html) return ""
@@ -708,8 +709,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   }, [fetchCounts]);
 
   // Re-fetch when active tab changes to apply new sort order and status filter
+  // Use silent mode to prevent visual flicker - tickets stay visible while loading
   useEffect(() => {
-    fetchTickets();
+    fetchTickets({ silent: true });
     // Also refresh counts when switching tabs to ensure accuracy
     fetchCounts();
   }, [activeTab]);
@@ -819,12 +821,27 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   }
 
   // Refresh tickets when window gains focus (to catch updates from inbox)
+  // Use debouncing to prevent rapid re-fetches that cause flickering
   useEffect(() => {
     console.log('🎧 Setting up event listeners in tickets-view')
 
+    // Debounce ref to prevent multiple rapid fetches
+    let refreshTimeoutId: NodeJS.Timeout | null = null
+
+    const debouncedFetch = (delay: number = 1000) => {
+      if (refreshTimeoutId) {
+        clearTimeout(refreshTimeoutId)
+      }
+      refreshTimeoutId = setTimeout(() => {
+        console.log('🔄 Debounced fetch executing...')
+        fetchTickets({ silent: true })
+        refreshTimeoutId = null
+      }, delay)
+    }
+
     const handleFocus = () => {
-      console.log('Window focused - refreshing tickets')
-      fetchTickets({ silent: true })
+      console.log('Window focused - scheduling refresh')
+      debouncedFetch(500) // Short delay for focus events
     }
 
     const handleTicketUpdate = (e: Event) => {
@@ -834,15 +851,45 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         const detail = e.detail as { ticketId?: string; status?: Ticket['status']; assigneeUserId?: string | null; switchToTab?: 'assigned' | 'closed' | 'unassigned' | 'open' }
         if (detail?.ticketId) {
           console.log('⚡ Optimistically updating ticket:', detail.ticketId, 'status:', detail.status, 'assignee:', detail.assigneeUserId)
-          setTickets(prev => {
-            const updated = prev.map(t =>
-              t.id === detail.ticketId
-                ? { ...t, status: detail.status ?? t.status, assigneeUserId: detail.assigneeUserId ?? t.assigneeUserId }
-                : t
-            )
-            console.log('✨ Tickets updated, new count:', updated.length)
-            return updated
-          })
+
+          // If this is the currently selected ticket being closed, auto-select the next one
+          if (detail.status === 'closed' && selectedTicket?.id === detail.ticketId) {
+            console.log('🔀 Currently selected ticket was closed, selecting next ticket...')
+            // Get the current filtered list to find the next ticket
+            setTickets(prev => {
+              const currentIndex = prev.findIndex(t => t.id === detail.ticketId)
+              // Find next ticket that isn't closed
+              const nextTicket = prev.slice(currentIndex + 1).find(t => t.status !== 'closed')
+                || prev.slice(0, currentIndex).find(t => t.status !== 'closed')
+
+              if (nextTicket) {
+                console.log('➡️ Auto-selecting next ticket:', nextTicket.id, nextTicket.subject)
+                // Use setTimeout to ensure state updates don't conflict
+                setTimeout(() => setSelectedTicket(nextTicket), 0)
+              } else {
+                console.log('📭 No more open tickets to select')
+                setTimeout(() => setSelectedTicket(null), 0)
+              }
+
+              // Return the updated tickets with the closed status
+              return prev.map(t =>
+                t.id === detail.ticketId
+                  ? { ...t, status: detail.status ?? t.status, assigneeUserId: detail.assigneeUserId ?? t.assigneeUserId }
+                  : t
+              )
+            })
+          } else {
+            // Standard optimistic update
+            setTickets(prev => {
+              const updated = prev.map(t =>
+                t.id === detail.ticketId
+                  ? { ...t, status: detail.status ?? t.status, assigneeUserId: detail.assigneeUserId ?? t.assigneeUserId }
+                  : t
+              )
+              console.log('✨ Tickets updated, new count:', updated.length)
+              return updated
+            })
+          }
 
           // Switch to the appropriate tab if specified
           if (detail.switchToTab && ['assigned', 'closed', 'unassigned', 'open'].includes(detail.switchToTab)) {
@@ -851,8 +898,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           }
         }
       }
-      console.log('🔄 Fetching fresh tickets...')
-      fetchTickets({ silent: true })
+
+      // Debounced fetch to sync with server (longer delay to let optimistic update show)
+      console.log('📡 Scheduling background sync...')
+      debouncedFetch(2000) // 2 second delay after optimistic update
     }
 
     window.addEventListener('focus', handleFocus)
@@ -862,19 +911,20 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     return () => {
       console.log('🔇 Removing event listeners')
+      if (refreshTimeoutId) clearTimeout(refreshTimeoutId)
       window.removeEventListener('focus', handleFocus)
       window.removeEventListener('ticketUpdated', handleTicketUpdate as EventListener)
       window.removeEventListener('ticketsForceRefresh', handleTicketUpdate as EventListener)
     }
-  }, [fetchTickets])
+  }, [fetchTickets, selectedTicket])
 
   // Auto-poll for ticket updates every 60 seconds (silent refresh)
-  // Reduced frequency to minimize server load
+  // Reduced frequency to minimize server load and prevent UI flickering
   useEffect(() => {
     const pollInterval = setInterval(() => {
       console.log('Auto-polling for ticket updates...')
       fetchTickets({ silent: true })
-    }, 10000) // 10 seconds
+    }, 60000) // 60 seconds - reduced from 10s to prevent flickering
 
     return () => clearInterval(pollInterval)
   }, [fetchTickets])
@@ -1976,10 +2026,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           console.log('🔒 Step 2: Closing ticket...')
           await handleUpdateStatus("closed", activeTicketId)
 
-          // Step 3: Broadcast event to switch to closed tab
+          // Step 3: Broadcast event to refresh tickets (don't switch tab - let agent continue working)
           console.log('📢 Broadcasting ticket update event...')
           window.dispatchEvent(new CustomEvent('ticketUpdated', {
-            detail: { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId, switchToTab: 'closed' }
+            detail: { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId }
           }))
           console.log('✅ Send & Close completed successfully!')
 
@@ -2787,6 +2837,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                     return (
                       <Card
                         key={ticket.id}
+                        data-ticket-id={ticket.id}
                         className={`m-2 cursor-pointer relative transition-all duration-300 ease-out animate-in fade-in slide-in-from-left-4 ${isSelected
                           ? "border-primary border-2 bg-muted/30 shadow-lg ring-2 ring-primary/20"
                           : isUnread
@@ -3142,7 +3193,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                 </div>
 
                 {/* Main Content Area */}
-                <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-4 md:space-y-6 w-full max-w-full">
+                <div data-ticket-content className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6 space-y-4 md:space-y-6 w-full max-w-full">
                   {/* Customer Info */}
                   <Card className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out w-full max-w-full border-border/50 shadow-sm hover:shadow-md transition-all duration-300">
                     <CardContent className="p-4 space-y-3 w-full max-w-full overflow-hidden">
@@ -3188,6 +3239,83 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                       </div>
                     </CardContent>
                   </Card>
+
+                  {/* Customer Email Timeline - Past conversations with this customer */}
+                  <CustomerEmailTimeline
+                    customerEmail={selectedTicket.customerEmail}
+                    currentTicketId={selectedTicket.id}
+                    onNavigateToTicket={async (ticketId) => {
+                      // Find the ticket in our list and select it
+                      const targetTicket = tickets.find(t => t.id === ticketId)
+
+                      const selectAndScrollToTicket = (ticket: Ticket) => {
+                        // Set the ticket
+                        setSelectedTicket(ticket)
+
+                        // Scroll the content area to top
+                        setTimeout(() => {
+                          const contentArea = document.querySelector('[data-ticket-content]')
+                          if (contentArea) {
+                            contentArea.scrollTo({ top: 0, behavior: 'smooth' })
+                          }
+                        }, 100)
+
+                        // Also scroll the ticket list to show the selected ticket
+                        setTimeout(() => {
+                          const ticketCard = document.querySelector(`[data-ticket-id="${ticket.id}"]`)
+                          if (ticketCard) {
+                            ticketCard.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                          }
+                        }, 300) // Slightly longer delay to allow tab switch and render
+                      }
+
+                      if (targetTicket) {
+                        selectAndScrollToTicket(targetTicket)
+                        // Switch to appropriate tab based on ticket status
+                        if (targetTicket.status === 'closed') {
+                          setActiveTab('closed')
+                        } else if (targetTicket.assigneeUserId === currentUserId) {
+                          setActiveTab('assigned')
+                        } else if (!targetTicket.assigneeUserId) {
+                          setActiveTab('unassigned')
+                        } else {
+                          setActiveTab('open')
+                        }
+                      } else {
+                        // Ticket not in current list, try fetching it directly
+                        try {
+                          const response = await fetch(`/api/tickets/${ticketId}`)
+                          const data = await response.json()
+
+                          if (data.ticket) {
+                            selectAndScrollToTicket(data.ticket)
+                            // Switch to appropriate tab
+                            if (data.ticket.status === 'closed') {
+                              setActiveTab('closed')
+                            } else if (data.ticket.assigneeUserId === currentUserId) {
+                              setActiveTab('assigned')
+                            } else {
+                              setActiveTab('open')
+                            }
+                            // Refresh tickets in background to include this one
+                            fetchTickets({ silent: true })
+                          } else {
+                            toast({
+                              title: "Ticket not found",
+                              description: "This ticket may have been deleted",
+                              variant: "destructive",
+                            })
+                          }
+                        } catch {
+                          toast({
+                            title: "Error",
+                            description: "Could not load the selected ticket",
+                            variant: "destructive",
+                          })
+                        }
+                      }
+                    }}
+                  />
 
                   {/* Conversation Thread */}
                   <Card className="animate-in fade-in slide-in-from-bottom-4 duration-500 ease-out w-full max-w-full border-border/50 shadow-sm hover:shadow-md transition-all duration-300" style={{ animationDelay: '100ms' }}>
