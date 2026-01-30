@@ -570,26 +570,18 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
 
       // Determine sort order based on active tab
-      const sortOrder = activeTab === 'closed' ? 'desc' : 'asc';
-      console.log(`[Tickets] Fetching with activeTab=${activeTab}, sortOrder=${sortOrder}`);
+      // OPTIMIZED: Always fetch descending (Newest first) and sort client-side
+      // This allows us to cache the response and switch tabs instantly without refetching
+      const sortOrder = 'desc';
+      // console.log(`[Tickets] Fetching with sortOrder=${sortOrder}`);
       url += `&sort=${sortOrder}`;
 
-      // CRITICAL UPDATE: Server-side filtering
-      // If searching, we skip status filters to search EVERYTHING
+      // Fetch ALL tickets and let client-side filtering handle tabs
+      // This enables instant tab switching without API delays
       if (activeSearchQuery) {
         url += `&q=${encodeURIComponent(activeSearchQuery)}`;
-      } else {
-        // Apply status filter based on active tab
-        if (activeTab === 'closed') {
-          url += `&status=closed`;
-        } else {
-          // For all other tabs (open, assigned, unassigned), we want open tickets
-          // The specific "assigned" vs "unassigned" vs "all open" distinction 
-          // is handled by role-filtering or client-side filtering for now, 
-          // BUT we must ensure we don't fetch closed tickets here.
-          url += `&status=open,pending,on_hold`;
-        }
       }
+      // NOTE: Removed status filter - we fetch all tickets and filter client-side
 
       // CRITICAL: Send user ID in header from sessionStorage (per-tab) to prevent cookie sharing issues
       // This ensures each tab uses its own user ID even when cookies are shared
@@ -675,7 +667,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setIsCreatingTickets(false)
       if (!silent) setLoading(false)
     }
-  }, [selectedAccount, currentUserId, checkSyncStatus, activeTab, activeSearchQuery]) // Add checkSyncStatus and activeTab dependency
+  }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery]) // Removed activeTab dependency to prevent refetching
 
   // Fetch ticket counts
   const fetchCounts = useCallback(async () => {
@@ -708,13 +700,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     return () => clearInterval(interval);
   }, [fetchCounts]);
 
-  // Re-fetch when active tab changes to apply new sort order and status filter
-  // Use silent mode to prevent visual flicker - tickets stay visible while loading
+  // Tab switching is now handled purely client-side via filteredTickets
+  // No need to refetch on tab change - just update counts for accuracy
   useEffect(() => {
-    fetchTickets({ silent: true });
-    // Also refresh counts when switching tabs to ensure accuracy
     fetchCounts();
-  }, [activeTab]);
+  }, [activeTab, fetchCounts]);
 
   // Handle quick reply selection
   const handleSelectQuickReply = (content: string) => {
@@ -2148,12 +2138,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       } else if (activeTab === "open") {
         // "Open" tab usually means "All Open" (or maybe "Open + Unassigned"?). 
         // Based on UI, "Open" seems to be the catch-all for non-closed.
-        // Server already filtered out closed, so we just take what we have.
-        // filtered = filtered.filter(t => t.status !== "closed") // redundant but safe
+        // Client-side filter ensures we don't show closed tickets while waiting for server
+        filtered = filtered.filter(t => t.status !== "closed")
         console.log('[Filter] Open filter:', filtered.length)
       } else if (activeTab === "closed") {
-        // Server already filtered to closed only
-        // filtered = filtered.filter(t => t.status === "closed") // redundant but safe
+        // Client-side filter ensures we don't show open tickets while waiting for server
+        filtered = filtered.filter(t => t.status === "closed")
         console.log('[Filter] Closed filter:', filtered.length)
       }
     }
@@ -2783,7 +2773,35 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             )}
 
             <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 w-full">
-              {filteredTickets.length === 0 ? (
+              {/* Show skeleton only when loading AND we have no tickets to display (initial load) */}
+              {(loading && tickets.length === 0) ? (
+                <div className="p-2 space-y-2">
+                  {/* Skeleton loading cards to show tickets are loading */}
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <Card key={i} className="m-2 border-border/50 animate-pulse">
+                      <CardContent className="p-3 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <Skeleton className="h-4 w-3/4" />
+                          <Skeleton className="h-5 w-16 rounded-full" />
+                        </div>
+                        <Skeleton className="h-4 w-20 rounded-full" />
+                        <div className="flex items-center gap-2">
+                          <Skeleton className="h-3 w-3 rounded-full" />
+                          <Skeleton className="h-3 w-40" />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Skeleton className="h-3 w-3 rounded-full" />
+                          <Skeleton className="h-3 w-24" />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Skeleton className="h-3 w-3 rounded-full" />
+                          <Skeleton className="h-3 w-32" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : filteredTickets.length === 0 ? (
                 <div className="flex-1 flex items-center justify-center p-8">
                   <div className="text-center space-y-4 max-w-md">
                     <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mx-auto">
@@ -2890,7 +2908,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                               <Badge className={`${getStatusColor(ticket.status)} text-white text-xs transition-all duration-200`}>
                                 {ticket.status}
                               </Badge>
-                              {ticket.assigneeUserId && (
+                              {ticket.assigneeUserId && ticket.priority && (
                                 <Badge className={`${getPriorityColor(ticket.priority)} text-white text-xs transition-all duration-200`}>
                                   {ticket.priority}
                                 </Badge>
@@ -4021,7 +4039,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </div >
   )
 }
 

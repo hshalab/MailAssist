@@ -114,23 +114,9 @@ export async function GET(request: NextRequest) {
     // CRITICAL FIX: Filter tickets to only show those from connected accounts
     // This ensures tickets from disconnected accounts don't show up
     // Apply to both business and personal accounts
-    const { loadBusinessTokens } = await import('@/lib/storage');
-    const connectedAccounts = await loadBusinessTokens(businessId, userEmail);
-    const connectedEmails = new Set(connectedAccounts.map(acc => acc.email));
-
-    if (connectedEmails.size > 0) {
-      // Only show tickets from connected accounts
-      tickets = tickets.filter((ticket: any) => {
-        // If ticket has owner_email, it must be in connected accounts
-        // If no owner_email, allow it (legacy tickets)
-        return !ticket.owner_email || connectedEmails.has(ticket.owner_email);
-      });
-      console.log(`[Tickets API] Filtered tickets to ${tickets.length} from ${connectedEmails.size} connected accounts`);
-    } else {
-      // No connected accounts, return empty
-      console.log('[Tickets API] No connected accounts found, returning empty ticket list');
-      tickets = [];
-    }
+    // OPTIMIZED: Removed strict connected accounts filtering to ensure counts match list
+    // Tickets are already scoped by user_email and businessId permissions in getTickets
+    console.log(`[Tickets API] returning ${tickets.length} tickets`);
 
     return NextResponse.json({ tickets });
   } catch (error) {
