@@ -252,11 +252,17 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
       .from('user_sessions')
       .select('user_id, expires_at')
       .eq('session_token', sessionToken)
-      .single()
+      .maybeSingle()
 
-    if (sessionError || !session) {
-      console.log('[Session] Invalid or missing session. Error:', sessionError, 'TokenPrefix:', sessionToken?.substring(0, 5));
-      return null
+    if (sessionError) {
+      console.error('[Session] Database error validating session:', sessionError);
+      return null;
+    }
+
+    if (!session) {
+      // Session not found - valid case, just return null without noisy logs
+      // console.log('[Session] Session not found for token:', sessionToken?.substring(0, 5));
+      return null;
     }
 
     // Check if session is expired
@@ -419,9 +425,10 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
       )
     `)
     .eq('id', userId)
-    .single()
+    .maybeSingle()
 
   if (error || !user) {
+    if (error) console.error('[Session] Error fetching current user:', error);
     return null
   }
 

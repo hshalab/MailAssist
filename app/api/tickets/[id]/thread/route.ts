@@ -85,7 +85,7 @@ export async function GET(
         }
 
         console.log(`[Thread API] Fetching attachment data for message ${msg.id}`);
-        
+
         const attachmentResults = await Promise.allSettled(
           msg.attachments.map(async (att: any) => {
             try {
@@ -108,7 +108,7 @@ export async function GET(
             }
           })
         );
-        
+
         const attachmentsWithData = attachmentResults.map((result, idx) => {
           if (result.status === 'fulfilled') {
             return result.value;
@@ -131,7 +131,17 @@ export async function GET(
       console.log(`  Message ${i}: ${msg.id}, attachments:`, msg.attachments?.length || 0, msg.attachments?.map((a: any) => ({ id: a.id, filename: a.filename, hasData: !!a.data })));
     });
 
-    return NextResponse.json({ messages: messagesWithAttachmentData || [] });
+    const response = NextResponse.json({ messages: messagesWithAttachmentData || [] });
+
+    // PERFORMANCE: Cache thread details
+    // Short cache time because threads get new messages
+    // stale-while-revalidate allows instant load while fetching updates in background
+    response.headers.set(
+      'Cache-Control',
+      'public, max-age=30, stale-while-revalidate=300'
+    );
+
+    return response;
   } catch (error) {
     console.error('Error fetching ticket thread:', error);
     return NextResponse.json(

@@ -1496,12 +1496,78 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         markTicketViewed(nextTicket)
       } else {
         // No more tickets, clear selection
-        console.log('🏁 No more tickets to navigate to')
-        setSelectedTicket(null)
-        toast({ title: "No more tickets", description: "All tickets in this view have been processed." })
+      }
+    }
+  }
+
+  const handleStatusChange = async (status: Ticket["status"]) => {
+    if (!selectedTicket) return
+    const targetTicketId = selectedTicket.id
+    const previousStatus = selectedTicket.status
+
+    if (previousStatus === status) return
+
+    // OPTIMISTIC UPDATE FOR CLOSE (Parity with Send & Close)
+    if (status === 'closed') {
+      try {
+        console.log('🚀 Optimistic Dropdown Close for:', targetTicketId)
+
+        setUpdatingStatus(true) // Briefly show loading state on the button/dropdown if valid
+
+        // 1. Update state immediately (Close it in the list)
+        const closedTicketState = { ...selectedTicket, status: 'closed' as const }
+        setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
+
+        // 2. Determine next ticket & Navigate
+        const currentIndex = filteredTickets.findIndex(t => t.id === targetTicketId)
+        let nextTicket = filteredTickets[currentIndex + 1] || filteredTickets[0]
+        if (nextTicket && nextTicket.id === targetTicketId) nextTicket = null as any // No others
+
+        if (nextTicket) {
+          console.log('➡️ Optimistically navigating to next ticket:', nextTicket.id)
+          setSelectedTicket(nextTicket)
+        } else {
+          console.log('🏁 No next ticket, clearing selection')
+          setSelectedTicket(null)
+        }
+
+        toast({ title: "Ticket closed", description: "Processing in background..." })
+
+        // 3. Perform background API call
+        // We don't await this to block UI, but we catch errors
+        fetch(`/api/tickets/${targetTicketId}/status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        }).then(async (response) => {
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}))
+            throw new Error(errorData.error || "Failed to update status")
+          }
+          // Success - maybe silent refetch to ensure consistency
+          fetchTickets({ silent: true })
+        }).catch(err => {
+          console.error('❌ Background Close Failed:', err)
+          toast({
+            title: "Update Failed",
+            description: "Failed to close ticket on server. Please refresh.",
+            variant: "destructive",
+            duration: 5000
+          })
+          // Revert local state if needed (complex due to navigation, usually user refresh is best)
+        }).finally(() => {
+          setUpdatingStatus(false)
+        })
+
+        return; // Exit early, we handled it optimistically
+
+      } catch (e) {
+        // Fallback to normal flow if something synchronous failed (unlikely)
+        console.error('Optimistic update failed, falling back', e)
       }
     }
 
+    // STANDARD FLOW (Open, Pending, On Hold)
     try {
       setUpdatingStatus(true)
       const response = await fetch(`/api/tickets/${targetTicketId}/status`, {
