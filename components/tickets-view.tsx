@@ -849,8 +849,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             setTickets(prev => {
               const currentIndex = prev.findIndex(t => t.id === detail.ticketId)
               // Find next ticket that isn't closed
-              const nextTicket = prev.slice(currentIndex + 1).find(t => t.status !== 'closed')
-                || prev.slice(0, currentIndex).find(t => t.status !== 'closed')
+              // IMPROVED LOGIC: 
+              // 1. Try to find the ticket immediately FOLLOWING the current one.
+              // 2. If no following ticket, try to find one immediately PRECEDING the current one.
+              // 3. Fallback to any open ticket.
+
+              let nextTicket = prev.slice(currentIndex + 1).find(t => t.status !== 'closed');
+              if (!nextTicket) {
+                // If no next ticket, look backwards (e.g. we closed the last one in the list)
+                // We reverse the slice to find the *closest* preceding ticket (index-1, then index-2...)
+                nextTicket = prev.slice(0, currentIndex).reverse().find(t => t.status !== 'closed');
+              }
 
               if (nextTicket) {
                 console.log('➡️ Auto-selecting next ticket:', nextTicket.id, nextTicket.subject)
@@ -1294,15 +1303,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
 
-  const fetchNotes = async () => {
+  const fetchNotes = async (signal?: AbortSignal) => {
     if (!selectedTicket) return
     try {
-      const response = await fetch(`/api/tickets/${selectedTicket.id}/notes`)
+      const response = await fetch(`/api/tickets/${selectedTicket.id}/notes`, { signal })
       if (response.ok) {
         const data = await response.json()
         setNotes(data.notes || [])
       }
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return
       console.error("Error fetching notes:", err)
     }
   }
@@ -1891,13 +1901,24 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     } catch (err) {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Failed to generate draft", variant: "destructive" })
     } finally {
-      setGeneratingDraft(false)
+      if (!opts?.closeTicket) { // Only stop loading if we didn't navigate away
+        setSendingReply(false)
+        setSendingAction(null)
+      }
     }
   }
 
   const handleSendReply = async (opts?: { closeTicket?: boolean }) => {
     if (!selectedTicket || !replyHtml.trim() || !threadMessages.length) return
     const targetTicketId = selectedTicket.id
+
+    // Capture state before any navigation/clearing
+    const contentToSend = {
+      html: replyHtml.trim(),
+      text: toPlainText(replyHtml) || replyText || replyHtml.trim(),
+      attachments: [...replyAttachments],
+      draftId: draftId
+    }
 
     // Clear typing status when sending
     if (typingTimeout) {
@@ -1906,141 +1927,181 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     setIsTyping(false)
     updateTypingStatus(false)
 
-    try {
-      setSendingReply(true)
-      setSendingAction(opts?.closeTicket ? 'send-close' : 'send')
-      // Use the first message ID from thread (the original email) to send reply
-      const emailId = threadMessages[0].id
-      const response = await fetch(`/api/emails/${emailId}/reply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          draftText: toPlainText(replyHtml) || replyText || replyHtml.trim(),
-          draftHtml: replyHtml.trim(), // Send HTML version for proper rendering
-          draftId: draftId || null,
-          attachments: replyAttachments
-        }),
-      })
+    setSendingReply(true)
+    setSendingAction(opts?.closeTicket ? 'send-close' : 'send')
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to send reply")
+    // OPTIMISTIC NAVIGATION & UPDATE FOR "SEND & CLOSE"
+    // We do this BEFORE the slow email send to make it feel instant
+    if (opts?.closeTicket) {
+      console.log('🚀 Optimistic "Send & Close" started for:', targetTicketId)
+
+      // 1. Determine next ticket
+      const currentIndex = filteredTickets.findIndex(t => t.id === targetTicketId)
+      // If we are about to close this ticket, we should look for the immediate next valid one
+      // We start searching from currentIndex + 1
+      let nextTicket = filteredTickets[currentIndex + 1] || filteredTickets[0]
+
+      // If the found 'next' is the same as current (list of 1), or undefined
+      if (nextTicket && nextTicket.id === targetTicketId) {
+        nextTicket = null as any; // No other tickets
       }
 
-      const data = await response.json().catch(() => ({}))
-      const activeTicketId = data?.ticketId || targetTicketId
-
+      // 2. Clear editor state immediately so it's ready for the next ticket
       setReplyHtml("")
-      setReplyAttachments([])
       setReplyText("")
+      setReplyAttachments([])
       setDraftText("")
       setDraftId(null)
       setShowDraft(false)
 
-      // Refresh thread and tickets silently (no loading screen)
-      await fetchThread({ silent: true })
-      await fetchTickets({ silent: true })
+      // 3. Optimistically mark current as closed in the list
+      // This ensures it drops out of the "Open" filter instantly if applicable
+      const closedTicketState = {
+        ...selectedTicket,
+        status: 'closed' as const,
+        assigneeUserId: currentUserId || selectedTicket.assigneeUserId
+      }
 
-      toast({ title: "Reply sent successfully" })
+      setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
 
-      // Always assign ticket to replier if unassigned (first replier gets it)
-      if (activeTicketId && currentUserId && !opts?.closeTicket) {
-        try {
-          // Check if ticket is already assigned, if not, assign it
-          const ticketCheckResponse = await fetch(`/api/tickets/${activeTicketId}`)
-          if (ticketCheckResponse.ok) {
-            const ticketData = await ticketCheckResponse.json()
-            const ticket = ticketData.ticket
+      // 4. Navigate immediately
+      if (nextTicket) {
+        console.log('➡️ Optimistically navigating to next ticket:', nextTicket.id)
+        setSelectedTicket(nextTicket)
+        // We don't need to setLoading(true) because we have the ticket data already
+      } else {
+        console.log('🏁 No next ticket, clearing selection')
+        setSelectedTicket(null)
+      }
 
-            // Only assign if ticket is unassigned
-            if (ticket && !ticket.assigneeUserId) {
-              console.log('📝 Auto-assigning ticket to first replier:', activeTicketId, 'user:', currentUserId)
-              const assignResponse = await fetch(`/api/tickets/${activeTicketId}/assign`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assigneeUserId: currentUserId }),
-              })
+      // 5. Show toast immediately
+      toast({
+        title: "Reply sending...",
+        description: "Ticket closed. Processing in background.",
+      })
+    }
 
-              if (assignResponse.ok) {
-                console.log('✅ Ticket auto-assigned to replier')
-                // Broadcast event to switch to "assigned" tab
+    // Perform the actual work (Background if closed, Foreground if just send)
+    const performSend = async () => {
+      try {
+        // Step 1: Send Email (The slow part)
+        // Use the first message ID from thread (the original email) to send reply
+        const emailId = threadMessages[0].id
+        const response = await fetch(`/api/emails/${emailId}/reply`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            draftText: contentToSend.text,
+            draftHtml: contentToSend.html,
+            draftId: contentToSend.draftId || null,
+            attachments: contentToSend.attachments
+          }),
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || "Failed to send reply")
+        }
+
+        const data = await response.json().catch(() => ({}))
+        const activeTicketId = data?.ticketId || targetTicketId
+
+        // If we DIDN'T optimistcally navigate (Send only), clear state here
+        if (!opts?.closeTicket) {
+          setReplyHtml("")
+          setReplyAttachments([])
+          setReplyText("")
+          setDraftText("")
+          setDraftId(null)
+          setShowDraft(false)
+          toast({ title: "Reply sent successfully" })
+
+          // Refresh stuff
+          await fetchThread({ silent: true })
+          await fetchTickets({ silent: true })
+        } else {
+          // We already navigated. Just ensuring background sync matches up.
+          // Maybe silence the duplicate success toast?
+          // But if it failed, we'd want to know.
+        }
+
+        // Handle Assignment & Closing (Server-side)
+        if (activeTicketId && currentUserId) {
+          // If Close was requested
+          if (opts?.closeTicket) {
+            // Step 2 & 3: Assign and Close
+            // We do this sequentially to ensure correctness
+
+            // Assign
+            await fetch(`/api/tickets/${activeTicketId}/assign`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ assigneeUserId: currentUserId }),
+            });
+
+            // Close (Logic re-implementation to avoid UI state dependency)
+            await fetch(`/api/tickets/${activeTicketId}/status`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: 'closed' }),
+            });
+
+            // Broadcast to ensure other tabs/components know
+            window.dispatchEvent(new CustomEvent('ticketUpdated', {
+              detail: { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId }
+            }))
+
+            // Re-fetch tickets silently to ensure server state consistency
+            fetchTickets({ silent: true });
+
+            console.log('✅ Background Send & Close completed for:', activeTicketId);
+          }
+          // If NOT closing, but unassigned, auto-assign (existing logic)
+          else if (!opts?.closeTicket) {
+            // Check if ticket is unassigned
+            const ticketCheckResponse = await fetch(`/api/tickets/${activeTicketId}`)
+            if (ticketCheckResponse.ok) {
+              const ticketData = await ticketCheckResponse.json()
+              const ticket = ticketData.ticket
+
+              if (ticket && !ticket.assigneeUserId) {
+                await fetch(`/api/tickets/${activeTicketId}/assign`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ assigneeUserId: currentUserId }),
+                })
                 window.dispatchEvent(new CustomEvent('ticketUpdated', {
                   detail: { ticketId: activeTicketId, assigneeUserId: currentUserId, status: 'pending', switchToTab: 'assigned' }
                 }))
               }
-            } else {
-              // Ticket already assigned
-              const assignedToCurrentUser = ticket?.assigneeUserId === currentUserId
-              // If assigned to current user, switch to assigned tab
-              window.dispatchEvent(new CustomEvent('ticketUpdated', {
-                detail: {
-                  ticketId: activeTicketId,
-                  assigneeUserId: ticket?.assigneeUserId || currentUserId,
-                  status: 'pending',
-                  switchToTab: assignedToCurrentUser ? 'assigned' : undefined
-                }
-              }))
             }
           }
-        } catch (assignError) {
-          console.warn('⚠️ Failed to auto-assign ticket (non-critical):', assignError)
-          // Still broadcast the update even if assignment fails
-          window.dispatchEvent(new CustomEvent('ticketUpdated', {
-            detail: { ticketId: activeTicketId, assigneeUserId: currentUserId, status: 'pending' }
-          }))
         }
-      }
-
-      // If closeTicket option is set, assign and close it
-      if (opts?.closeTicket && activeTicketId && currentUserId) {
-        console.log('🎫 Starting Send & Close for ticket:', activeTicketId, 'user:', currentUserId)
-
-        try {
-          // Step 1: Assign the ticket
-          console.log('📝 Step 1: Assigning ticket to user...')
-          const assignResponse = await fetch(`/api/tickets/${activeTicketId}/assign`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ assigneeUserId: currentUserId }),
-          })
-
-          if (!assignResponse.ok) {
-            const error = await assignResponse.json().catch(() => ({}))
-            console.error('❌ Failed to assign ticket:', error)
-            throw new Error(error.error || 'Failed to assign ticket')
-          }
-
-          console.log('✅ Ticket assigned successfully')
-
-          // Step 2: Close the ticket
-          console.log('🔒 Step 2: Closing ticket...')
-          await handleUpdateStatus("closed", activeTicketId)
-
-          // Step 3: Broadcast event to refresh tickets (don't switch tab - let agent continue working)
-          console.log('📢 Broadcasting ticket update event...')
-          window.dispatchEvent(new CustomEvent('ticketUpdated', {
-            detail: { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId }
-          }))
-          console.log('✅ Send & Close completed successfully!')
-
-          toast({
-            title: "Ticket closed",
-            description: "Ticket has been assigned to you and closed",
-          })
-        } catch (error) {
-          console.error('❌ Error in Send & Close:', error)
-          toast({
-            title: "Ticket update failed",
-            description: error instanceof Error ? error.message : "Failed to update ticket",
-            variant: "destructive",
-          })
+      } catch (err) {
+        console.error('❌ Error in Send Reply:', err)
+        toast({
+          title: "Message Delivery Failed",
+          description: opts?.closeTicket ? "The email may not have sent, but we navigated away. Please check the ticket." : (err instanceof Error ? err.message : "Failed to send"),
+          variant: "destructive",
+          duration: 10000
+        })
+        // If we optimistically closed, we might want to revert? 
+        // Complex to revert navigation. Best to just warn user.
+        // We could revert the 'closed' status in the list:
+        if (opts?.closeTicket) {
+          setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: 'open' } : t)) // Revert to open
         }
+      } finally {
+        setSendingReply(false)
+        setSendingAction(null)
       }
-    } catch (err) {
-      toast({ title: "Error", description: err instanceof Error ? err.message : "Failed to send reply", variant: "destructive" })
-    } finally {
-      setSendingReply(false)
-      setSendingAction(null)
+    }
+
+    // Execute!
+    // If optimistic, we don't await this function to block UI
+    if (opts?.closeTicket) {
+      performSend();
+    } else {
     }
   }
 
@@ -2285,8 +2346,38 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const filteredTickets = getFilteredTickets()
 
 
-  // Show loading spinner only if loading AND no tickets yet
-  // If tickets exist but are being created, show tickets list with banner instead
+  // Prefetch next/prev tickets for instant navigation
+  useEffect(() => {
+    if (!selectedTicket || filteredTickets.length === 0) return
+
+    const currentIndex = filteredTickets.findIndex(t => t.id === selectedTicket.id)
+    if (currentIndex === -1) return
+
+    // Identify next and previous tickets to prefetch
+    const nextTicket = filteredTickets[currentIndex + 1]
+    const prevTicket = filteredTickets[currentIndex - 1]
+
+    const ticketsToPrefetch = [nextTicket, prevTicket].filter(Boolean)
+
+    ticketsToPrefetch.forEach(t => {
+      // Prefetch Email Detail (Body, etc.)
+      // The browser will cache this due to Cache-Control headers
+      const emailUrl = `/api/emails/${t.id}`
+      const threadUrl = `/api/emails/threads/${encodeURIComponent(t.threadId)}`
+
+      // Use low priority fetch if supported, or standard fetch
+      console.log(`🚀 Prefetching data for ticket ${t.id} (${t.subject.substring(0, 20)}...)`)
+
+      // We don't await these, just fire and let browser cache handle it
+      fetch(emailUrl, { priority: 'low' } as any).catch(e => console.error('Prefetch email failed', e))
+
+      // Only prefetch thread if it's different (usually is)
+      if (t.threadId) {
+        fetch(threadUrl, { priority: 'low' } as any).catch(e => console.error('Prefetch thread failed', e))
+      }
+    })
+  }, [selectedTicket, filteredTickets])
+
   if (loading && tickets.length === 0) {
     return (
       <div className="flex items-center justify-center h-full w-full bg-background animate-in fade-in duration-300">

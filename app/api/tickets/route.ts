@@ -118,7 +118,11 @@ export async function GET(request: NextRequest) {
     // Tickets are already scoped by user_email and businessId permissions in getTickets
     console.log(`[Tickets API] returning ${tickets.length} tickets`);
 
-    return NextResponse.json({ tickets });
+    return NextResponse.json({ tickets }, {
+      headers: {
+        'Cache-Control': 'private, max-age=5, stale-while-revalidate=10'
+      }
+    });
   } catch (error) {
     console.error('Error fetching tickets:', error);
     return NextResponse.json(

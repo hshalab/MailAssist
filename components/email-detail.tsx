@@ -362,59 +362,75 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
       let threadPromise: Promise<Response | Error> | null = null;
       if (threadIdToUse) {
+        // If we have a threadId, we can fetch messages immediately in parallel
         threadPromise = fetch(`/api/emails/threads/${encodeURIComponent(threadIdToUse)}`, {
           signal
-        }).catch(e => e); // CRITICAL: Catch errors immediately to prevent unhandled rejection on Abort
+        }).catch(e => e); // Catch errors immediately to prevent unhandled rejection
       }
 
       // Check if request was aborted early
       if (signal?.aborted) return
 
-      // Await email response first (it's the primary source of truth)
-      const emailResponse = await emailPromise;
-      if (!emailResponse.ok) {
-        throw new Error('Failed to fetch email')
-      }
+      // Execute fetches (parallel or sequential depending on threadId availability)
+      let emailResponse: Response;
 
-      const emailData = await emailResponse.json()
-      const email: EmailSummary = emailData.email
-      // If user switched emails, abort applying this result
-      if (requestToken && requestToken !== latestRequestRef.current) return
-      if (signal?.aborted) return
-
-      // Update email summary with full data
-      setEmailSummary(email)
-      setLoading(false) // Content is ready to display
-
-      // Now handle thread response
-      let threadResponse: Response | Error;
       if (threadPromise) {
-        threadResponse = await threadPromise;
-      } else {
-        const threadId = email.threadId || emailId
-        threadResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`, {
-          signal
-        }).catch(e => e);
-      }
+        // PARALLEL EXECUTION
+        const [emailRes, threadResOrError] = await Promise.all([
+          emailPromise,
+          threadPromise
+        ]);
 
-      if (threadResponse instanceof Error) {
-        if (threadResponse.name === 'AbortError') return;
-        throw threadResponse;
-      }
+        emailResponse = emailRes;
 
-      // Check if request was aborted
-      if (signal?.aborted) return
-      if (requestToken && requestToken !== latestRequestRef.current) return
+        // Process Email Response
+        if (!emailResponse.ok) {
+          throw new Error('Failed to fetch email');
+        }
 
-      if (threadResponse.ok) {
-        const threadData = await threadResponse.json()
-        // Fix: thread data is nested under 'thread' key from API
-        const thread: EmailMessage[] = threadData.thread?.messages || threadData.messages || []
+        const emailData = await emailResponse.json();
+        const email: EmailSummary = emailData.email;
 
-        if (thread.length > 0) {
-          setThreadMessages(thread)
+        // Update email summary first
+        if (requestToken && requestToken !== latestRequestRef.current) return;
+        if (signal?.aborted) return;
+
+        setEmailSummary(email);
+        setLoading(false); // Content is ready to display
+
+        // Process Thread Response
+        let threadResponse: Response | Error = threadResOrError;
+        if (threadResponse instanceof Error) {
+          if (threadResponse.name === 'AbortError') return;
+          // If parallel fetch failed, we might want to try again with the ID from the email
+          // (e.g. if our initial threadId guess was wrong), but typically it will be correct.
+          throw threadResponse;
+        }
+
+        if (signal?.aborted) return;
+        if (requestToken && requestToken !== latestRequestRef.current) return;
+
+        if (threadResponse.ok) {
+          const threadData = await threadResponse.json();
+          const thread: EmailMessage[] = threadData.thread?.messages || threadData.messages || [];
+          if (thread.length > 0) {
+            setThreadMessages(thread);
+          } else {
+            setThreadMessages([{
+              id: email.id,
+              threadId: email.threadId,
+              subject: email.subject,
+              from: email.from,
+              to: email.to,
+              date: email.date,
+              body: email.body,
+              snippet: email.snippet,
+              labels: email.labels,
+              attachments: email.attachments,
+            }]);
+          }
         } else {
-          // If no thread, show the single email with attachments
+          // Thread fetch failed, show single email
           setThreadMessages([{
             id: email.id,
             threadId: email.threadId,
@@ -426,23 +442,69 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
             snippet: email.snippet,
             labels: email.labels,
             attachments: email.attachments,
-          }])
+          }]);
         }
+
       } else {
-        // Thread fetch failed, show single email with attachments
-        setThreadMessages([{
-          id: email.id,
-          threadId: email.threadId,
-          subject: email.subject,
-          from: email.from,
-          to: email.to,
-          date: email.date,
-          body: email.body,
-          snippet: email.snippet,
-          labels: email.labels,
-          attachments: email.attachments,
-        }])
+        // SEQUENTIAL FALLBACK (if we didn't have threadId)
+        emailResponse = await emailPromise;
+        if (!emailResponse.ok) {
+          throw new Error('Failed to fetch email');
+        }
+
+        const emailData = await emailResponse.json();
+        const email: EmailSummary = emailData.email;
+
+        if (requestToken && requestToken !== latestRequestRef.current) return;
+        if (signal?.aborted) return;
+
+        setEmailSummary(email);
+        setLoading(false);
+
+        // Now fetch thread with the ID we just got
+        const threadId = email.threadId || emailId;
+        const threadResponse = await fetch(`/api/emails/threads/${encodeURIComponent(threadId)}`, {
+          signal
+        });
+
+        if (signal?.aborted) return;
+        if (requestToken && requestToken !== latestRequestRef.current) return;
+
+        if (threadResponse.ok) {
+          const threadData = await threadResponse.json();
+          const thread: EmailMessage[] = threadData.thread?.messages || threadData.messages || [];
+          if (thread.length > 0) {
+            setThreadMessages(thread);
+          } else {
+            setThreadMessages([{
+              id: email.id,
+              threadId: email.threadId,
+              subject: email.subject,
+              from: email.from,
+              to: email.to,
+              date: email.date,
+              body: email.body,
+              snippet: email.snippet,
+              labels: email.labels,
+              attachments: email.attachments,
+            }]);
+          }
+        } else {
+          setThreadMessages([{
+            id: email.id,
+            threadId: email.threadId,
+            subject: email.subject,
+            from: email.from,
+            to: email.to,
+            date: email.date,
+            body: email.body,
+            snippet: email.snippet,
+            labels: email.labels,
+            attachments: email.attachments,
+          }]);
+        }
       }
+
     } catch (err) {
       // Ignore abort errors
       if (err instanceof Error && err.name === 'AbortError') {
@@ -593,6 +655,8 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           draftHtml: htmlValue,
           draftId: draftId || null,
           attachments: attachments.map(att => ({ filename: att.name, mimeType: att.type, data: att.data })),
+          assignToUser: true, // Auto-assign to self
+          closeTicket: opts?.closeTicket // Close if requested
         }),
       })
 
@@ -605,21 +669,20 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       setSendSuccess(true)
 
       // Add sent message to thread immediately (optimistic UI update)
-      // Get the user's email from the first message's 'to' field (since it was sent to us)
       const userEmail = threadMessages[0]?.to || emailSummary?.to || 'You'
       const newMessage: EmailMessage = {
         id: `sent-${Date.now()}`,
         threadId: emailSummary?.threadId,
         subject: emailSummary?.subject || '(No subject)',
-        from: userEmail, // Your email
-        to: emailSummary?.from || '', // Recipient
+        from: userEmail,
+        to: emailSummary?.from || '',
         date: new Date().toISOString(),
         body: htmlValue,
         snippet: textValue.substring(0, 100)
       }
       setThreadMessages(prev => [...prev, newMessage])
 
-      // Clear draft UI and autosaved data after successful send
+      // Clear draft UI and autosaved data
       try {
         localStorage.removeItem(`draft_${emailId}`)
       } catch {
@@ -638,135 +701,41 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         setTimeout(() => {
           setSendSuccess(false)
           setSendResetTimer(null)
-        }, 5000) // Show success for 5 seconds instead of 3
+        }, 5000)
       )
 
       toast({
-        title: "Reply sent",
+        title: opts?.closeTicket ? "Reply sent & Ticket closed" : "Reply sent",
         description: "Your reply was delivered via Gmail.",
       })
 
-      // Use the ticketId returned from the reply API (it ensures creation) or the prop ticketId
+      // Use the ticketId returned from the reply API
       const activeTicketId = data?.ticketId || ticketId
 
-      // Always assign ticket to replier if unassigned (first replier gets it)
-      if (activeTicketId && currentUserId && !opts?.closeTicket) {
-        try {
-          // Check if ticket is already assigned, if not, assign it
-          const ticketCheckResponse = await fetch(`/api/tickets/${activeTicketId}`)
-          if (ticketCheckResponse.ok) {
-            const ticketData = await ticketCheckResponse.json()
-            const ticket = ticketData.ticket
-
-            // Only assign if ticket is unassigned
-            if (ticket && !ticket.assigneeUserId) {
-              console.log('📝 Auto-assigning ticket to first replier:', activeTicketId, 'user:', currentUserId)
-              const assignResponse = await fetch(`/api/tickets/${activeTicketId}/assign`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assigneeUserId: currentUserId }),
-              })
-
-              if (assignResponse.ok) {
-                console.log('✅ Ticket auto-assigned to replier')
-                // Broadcast event to switch to "assigned" tab
-                window.dispatchEvent(new CustomEvent('ticketUpdated', {
-                  detail: { ticketId: activeTicketId, assigneeUserId: currentUserId, status: 'pending', switchToTab: 'assigned' }
-                }))
-              }
-            } else {
-              // Ticket already assigned
-              const assignedToCurrentUser = ticket?.assigneeUserId === currentUserId
-              // If assigned to current user, switch to assigned tab
-              window.dispatchEvent(new CustomEvent('ticketUpdated', {
-                detail: {
-                  ticketId: activeTicketId,
-                  assigneeUserId: ticket?.assigneeUserId || currentUserId,
-                  status: 'pending',
-                  switchToTab: assignedToCurrentUser ? 'assigned' : undefined
-                }
-              }))
+      if (activeTicketId) {
+        // If we requested close, broadcast closed event immediately
+        if (opts?.closeTicket) {
+          console.log('✅ Ticket closed via single-request:', activeTicketId);
+          window.dispatchEvent(new CustomEvent('ticketUpdated', {
+            detail: {
+              ticketId: activeTicketId,
+              status: 'closed',
+              assigneeUserId: currentUserId
             }
-          }
-        } catch (assignError) {
-          console.warn('⚠️ Failed to auto-assign ticket (non-critical):', assignError)
-          // Still broadcast the update even if assignment fails
+          }));
+        } else {
+          // Otherwise just assigned
+          console.log('✅ Ticket assigned via single-request:', activeTicketId);
           window.dispatchEvent(new CustomEvent('ticketUpdated', {
-            detail: { ticketId: activeTicketId, assigneeUserId: currentUserId, status: 'pending' }
-          }))
+            detail: {
+              ticketId: activeTicketId,
+              assigneeUserId: currentUserId,
+              status: 'pending' // Status might not have changed, but assignment did
+            }
+          }));
         }
-        window.dispatchEvent(new Event('ticketsForceRefresh'))
-      }
-
-      // If closeTicket option is set and we have a ticketId, assign and close it
-      if (opts?.closeTicket && activeTicketId && currentUserId) {
-        console.log('🎫 Starting Send & Close for ticket:', activeTicketId, 'user:', currentUserId)
-
-        // Execute assign and close sequentially - wait for completion
-        try {
-          // Step 1: Assign the ticket
-          console.log('📝 Step 1: Assigning ticket to user...')
-          const assignResponse = await fetch(`/api/tickets/${activeTicketId}/assign`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ assigneeUserId: currentUserId }),
-          })
-
-          console.log('📝 Assign response status:', assignResponse.status)
-
-          if (!assignResponse.ok) {
-            const error = await assignResponse.json().catch(() => ({}))
-            console.error('❌ Failed to assign ticket:', error)
-            throw new Error(error.error || 'Failed to assign ticket')
-          }
-
-          const assignResult = await assignResponse.json()
-          console.log('✅ Ticket assigned successfully:', assignResult)
-
-          // Step 2: Close the ticket
-          console.log('🔒 Step 2: Closing ticket...')
-          const closeResponse = await fetch(`/api/tickets/${activeTicketId}/status`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'closed' }),
-          })
-
-          console.log('🔒 Close response status:', closeResponse.status)
-
-          if (!closeResponse.ok) {
-            const error = await closeResponse.json().catch(() => ({}))
-            console.error('❌ Failed to close ticket:', error)
-            throw new Error(error.error || 'Failed to close ticket')
-          }
-
-          const closeResult = await closeResponse.json()
-          console.log('✅ Ticket closed successfully:', closeResult)
-
-          // Step 3: Broadcast event to refresh tickets page (don't switch tab - let agent continue working)
-          console.log('📢 Broadcasting ticket update event...')
-          console.log('📦 Event detail:', { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId })
-          window.dispatchEvent(new CustomEvent('ticketUpdated', {
-            detail: { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId }
-          }))
-          // Also fire a simpler refresh event for listeners
-          window.dispatchEvent(new Event('ticketsForceRefresh'))
-          console.log('✅ Events dispatched - ticketUpdated and ticketsForceRefresh')
-          console.log('✅ Send & Close completed successfully!')
-
-          // Show success toast
-          toast({
-            title: "Ticket closed",
-            description: "Ticket has been assigned to you and closed",
-          })
-
-        } catch (error) {
-          console.error('❌ Error in Send & Close:', error)
-          toast({
-            title: "Ticket update failed",
-            description: error instanceof Error ? error.message : "Failed to update ticket",
-            variant: "destructive",
-          })
-        }
+        // Force refresh list to be safe
+        window.dispatchEvent(new Event('ticketsForceRefresh'));
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to send reply"
@@ -1252,9 +1221,9 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       {/* Scrollable email content */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden animate-in fade-in duration-300" style={{ paddingTop: '0.75rem' }}>
         <Card className="mx-4 md:mx-6 mt-4 mb-3 shadow-lg border-border animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ borderRadius: '1rem' }}>
-          <div className="px-6 py-5 border-b border-border flex-shrink-0 bg-card">
-            <div className="flex items-start justify-between gap-4 mb-2">
-              <h2 className="text-xl font-bold text-foreground line-clamp-2 break-words flex-1">
+          <div className="px-4 py-3 border-b border-border flex-shrink-0 bg-card">
+            <div className="flex items-start justify-between gap-4 mb-1">
+              <h2 className="text-lg font-bold text-foreground line-clamp-2 break-words flex-1">
                 {threadMessages[threadMessages.length - 1]?.subject || emailSummary?.subject || "(No subject)"}
               </h2>
               {threadMessages.length > 0 && (

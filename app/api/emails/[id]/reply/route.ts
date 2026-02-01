@@ -37,7 +37,14 @@ export async function POST(
       );
     }
 
-    let body: { draftText?: string; draftHtml?: string; draftId?: string; attachments?: { filename?: string; mimeType?: string; name?: string; type?: string; data?: string; dataUrl?: string }[] } | null = null;
+    let body: {
+      draftText?: string;
+      draftHtml?: string;
+      draftId?: string;
+      attachments?: { filename?: string; mimeType?: string; name?: string; type?: string; data?: string; dataUrl?: string }[];
+      closeTicket?: boolean;
+      assignToUser?: boolean;
+    } | null = null;
     try {
       body = await request.json();
     } catch {
@@ -298,7 +305,7 @@ export async function POST(
       // Auto-assign ticket to replier if unassigned
       if (userId && incomingEmail.threadId) {
         try {
-          const { getTicketById, assignTicket, ensureTicketForEmail } = await import('@/lib/tickets');
+          const { getTicketById, assignTicket, ensureTicketForEmail, updateTicketStatus } = await import('@/lib/tickets');
 
           // 1. Ensure ticket exists and has updated timestamps/status
           // This handles creating the ticket if missing, and updating lastAgentReplyAt/status
@@ -316,20 +323,29 @@ export async function POST(
             ticketId = ticket.id;
           }
 
-          // 2. Auto-assign if unassigned
-          if (ticket && !ticket.assigneeUserId) {
-            // CRITICAL: Verify user is active before auto-assigning
-            const { getUserById } = await import('@/lib/users');
-            const replierUser = await getUserById(userId);
-            if (replierUser && replierUser.isActive) {
-              console.log(`[Reply] Auto-assigning unassigned ticket ${ticket.id} to replier ${userId}`);
-              await assignTicket(ticket.id, userId, userEmail, userId);
-              // Refresh ticket to get latest state including assignment
-              // ticket = await getTicketById(ticket.id, userId, true, userEmail);
-            } else {
-              console.warn(`[Reply] Skipping auto-assignment - replier ${userId} is inactive`);
+          // 2. Auto-assign if unassigned OR if requested explicitly
+          if (ticket) {
+            const shouldAssign = body?.assignToUser || (!ticket.assigneeUserId);
+
+            if (shouldAssign) {
+              // CRITICAL: Verify user is active before auto-assigning
+              const { getUserById } = await import('@/lib/users');
+              const replierUser = await getUserById(userId);
+              if (replierUser && replierUser.isActive) {
+                console.log(`[Reply] Auto-assigning ticket ${ticket.id} to replier ${userId}`);
+                await assignTicket(ticket.id, userId, userEmail, userId);
+              } else {
+                console.warn(`[Reply] Skipping auto-assignment - replier ${userId} is inactive`);
+              }
             }
           }
+
+          // 3. Close if requested
+          if (ticket && body?.closeTicket) {
+            console.log(`[Reply] Closing ticket ${ticket.id}`);
+            await updateTicketStatus(ticket.id, 'closed', userId);
+          }
+
         } catch (assignError) {
           console.warn('[Reply] Failed to auto-assign/update ticket:', assignError);
         }

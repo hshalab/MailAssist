@@ -99,6 +99,10 @@ export async function GET(request: NextRequest) {
       totalSpent: customerData.totalSpent,
       recentOrders: customerData.recentOrders,
       currency: currency,
+    }, {
+      headers: {
+        'Cache-Control': 'public, max-age=300, stale-while-revalidate=60'
+      }
     });
   } catch (error) {
     console.error('Error fetching Shopify customer data:', error);

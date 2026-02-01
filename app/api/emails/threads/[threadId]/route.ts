@@ -50,7 +50,17 @@ export async function GET(
       console.log(`  Message ${i}: ${msg.id}, attachments:`, msg.attachments?.length || 0, msg.attachments);
     });
 
-    return NextResponse.json({ thread });
+    const response = NextResponse.json({ thread });
+
+    // PERFORMANCE: Cache thread details
+    // Short cache time because threads get new messages
+    // stale-while-revalidate allows instant load while fetching updates in background
+    response.headers.set(
+      'Cache-Control',
+      'public, max-age=30, stale-while-revalidate=300'
+    );
+
+    return response;
   } catch (error) {
     console.error('Error fetching email thread:', error);
     return NextResponse.json(
