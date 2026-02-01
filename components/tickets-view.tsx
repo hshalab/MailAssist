@@ -1478,6 +1478,30 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setSelectedTicket(optimisticTicket)
     }
 
+    // OPTIMISTIC NAVIGATION: If closing, move to next ticket IMMEDIATELY
+    if (status === "closed" && selectedTicket?.id === targetTicketId) {
+      console.log('🚀 Optimistically closing and navigating...')
+      // Find next ticket from current filtered list
+      const currentIndex = filteredTickets.findIndex(t => t.id === targetTicketId)
+      // Improve next ticket logic: try next, then try previous (if we closed the last one)
+      let nextTicket = filteredTickets[currentIndex + 1]
+      if (!nextTicket) {
+        nextTicket = filteredTickets[currentIndex - 1]
+      }
+
+      // Ensure we don't select the same ticket (unlikely given filters but safe to check)
+      if (nextTicket && nextTicket.id !== targetTicketId) {
+        console.log('➡️ Optimistically navigating to:', nextTicket.id)
+        setSelectedTicket(nextTicket)
+        markTicketViewed(nextTicket)
+      } else {
+        // No more tickets, clear selection
+        console.log('🏁 No more tickets to navigate to')
+        setSelectedTicket(null)
+        toast({ title: "No more tickets", description: "All tickets in this view have been processed." })
+      }
+    }
+
     try {
       setUpdatingStatus(true)
       const response = await fetch(`/api/tickets/${targetTicketId}/status`, {
@@ -1488,37 +1512,30 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+
         // Rollback on error
         setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: previousStatus } : t))
+
+        // If we navigated away, we might want to stay on the "next" ticket but show an error,
+        // OR navigate back. Navigating back can be jarring. 
+        // For now, let's just warn the user. The ticket in the LIST will go back to 'open'.
+        // If the user is still viewing the old ticket (didn't navigate), revert it.
         if (selectedTicket?.id === targetTicketId) {
           setSelectedTicket(prev => prev ? { ...prev, status: previousStatus } : null)
         }
+
         throw new Error(errorData.error || errorData.details || "Failed to update status")
       }
       const data = await response.json()
 
-      // Update selected ticket if it's the one being updated
+      // Update with server data (in case there are side effects like updated_at)
+      setTickets((prev) => prev.map((t) => (t.id === targetTicketId ? data.ticket : t)))
+
+      // If we are still viewing this ticket (e.g. we didn't close it, just changed status to pending), update it
       if (selectedTicket?.id === targetTicketId) {
         setSelectedTicket(data.ticket)
-
-        // Auto-navigate to next ticket if closing
-        if (status === "closed") {
-          // Find next ticket from current filtered list
-          const currentIndex = filteredTickets.findIndex(t => t.id === targetTicketId)
-          const nextTicket = filteredTickets[currentIndex + 1] || filteredTickets[0]
-
-          if (nextTicket && nextTicket.id !== targetTicketId) {
-            setSelectedTicket(nextTicket)
-            markTicketViewed(nextTicket)
-          } else {
-            // No more tickets, clear selection
-            setSelectedTicket(null)
-            toast({ title: "No more tickets", description: "All tickets in this view have been processed." })
-          }
-        }
       }
 
-      setTickets((prev) => prev.map((t) => (t.id === targetTicketId ? data.ticket : t)))
       toast({ title: "Status updated" })
     } catch (err) {
       toast({ title: "Error", description: "Failed to update status", variant: "destructive" })
