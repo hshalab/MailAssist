@@ -30,8 +30,8 @@ export async function PATCH(
 
     // Try getting userId from cookie first, then fallback to business session
     let userId = getCurrentUserIdFromRequest(request);
+    const businessSession = await validateBusinessSession();
     if (!userId) {
-      const businessSession = await validateBusinessSession();
       userId = businessSession?.id || null;
     }
 
@@ -60,7 +60,9 @@ export async function PATCH(
       );
     }
 
-    const ticket = await updateTicketStatus(ticketId, status, userEmail);
+    // Pass businessId for proper multi-email account support
+    const businessId = businessSession?.businessId || null;
+    const ticket = await updateTicketStatus(ticketId, status, userEmail, businessId);
 
     if (!ticket) {
       return NextResponse.json(
@@ -69,7 +71,13 @@ export async function PATCH(
       );
     }
 
-    return NextResponse.json({ ticket });
+    return NextResponse.json({ ticket }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+    });
   } catch (error) {
     console.error('Error updating ticket status:', error);
     return NextResponse.json(

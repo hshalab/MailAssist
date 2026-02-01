@@ -962,9 +962,37 @@ export async function assignTicket(
 export async function updateTicketStatus(
   ticketId: string,
   status: TicketStatus,
-  userEmail: string | null
+  userEmail: string | null,
+  businessId?: string | null
 ): Promise<Ticket | null> {
   if (!supabase) return null;
+
+  // For business accounts with multiple connected emails, we need to verify access
+  // differently than just matching user_email (which only works for single accounts)
+  if (businessId) {
+    // First verify the ticket belongs to this business by checking if user_email
+    // is one of the business's connected accounts
+    const { loadBusinessTokens } = await import('@/lib/storage');
+    const connectedAccounts = await loadBusinessTokens(businessId);
+    const connectedEmails = connectedAccounts.map(a => a.email.toLowerCase());
+    
+    // Get the ticket to verify ownership
+    const { data: ticketCheck } = await supabase
+      .from('tickets')
+      .select('user_email')
+      .eq('id', ticketId)
+      .maybeSingle();
+    
+    if (!ticketCheck) {
+      console.error('Ticket not found:', ticketId);
+      return null;
+    }
+    
+    if (!connectedEmails.includes(ticketCheck.user_email?.toLowerCase())) {
+      console.error('Ticket does not belong to this business:', ticketId, ticketCheck.user_email);
+      return null;
+    }
+  }
 
   const updates: any = {
     status,
@@ -977,7 +1005,8 @@ export async function updateTicketStatus(
     .eq('id', ticketId)
     .select('*');
 
-  if (userEmail) {
+  // Only filter by user_email for non-business (single account) scenarios
+  if (userEmail && !businessId) {
     query = query.eq('user_email', userEmail);
   }
 

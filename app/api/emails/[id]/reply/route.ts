@@ -343,7 +343,11 @@ export async function POST(
           // 3. Close if requested
           if (ticket && body?.closeTicket) {
             console.log(`[Reply] Closing ticket ${ticket.id}`);
-            await updateTicketStatus(ticket.id, 'closed', userId);
+            // Get businessId for proper multi-email account support
+            const { validateBusinessSession } = await import('@/lib/session');
+            const businessSession = await validateBusinessSession();
+            const businessId = businessSession?.businessId || null;
+            await updateTicketStatus(ticket.id, 'closed', userEmail, businessId);
           }
 
         } catch (assignError) {

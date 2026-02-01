@@ -1433,6 +1433,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setPendingAssignment(null)
 
       toast({ title: "Ticket assigned successfully" })
+      fetchCounts()
     } catch (err) {
       console.error('[Assign Ticket] Error:', err)
       setError(err instanceof Error ? err.message : "Failed to assign ticket")
@@ -1470,12 +1471,36 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     if (!targetTicket) return
 
     const previousStatus = targetTicket.status
+    if (previousStatus === status) return // No change needed
+
     const optimisticTicket = { ...targetTicket, status, updatedAt: new Date().toISOString() }
 
     // Update UI immediately
     setTickets(prev => prev.map(t => t.id === targetTicketId ? optimisticTicket : t))
     if (selectedTicket?.id === targetTicketId) {
       setSelectedTicket(optimisticTicket)
+    }
+
+    // OPTIMISTICALLY UPDATE COUNTS immediately when closing
+    const wasAssigned = targetTicket.assigneeUserId === currentUserId
+    const wasUnassigned = !targetTicket.assigneeUserId
+    if (status === "closed") {
+      setTicketCounts(prev => ({
+        ...prev,
+        closed: prev.closed + 1,
+        open: Math.max(0, prev.open - 1),
+        assigned: wasAssigned ? Math.max(0, prev.assigned - 1) : prev.assigned,
+        unassigned: wasUnassigned ? Math.max(0, prev.unassigned - 1) : prev.unassigned,
+      }))
+    } else if (previousStatus === "closed") {
+      // Reopening a ticket
+      setTicketCounts(prev => ({
+        ...prev,
+        closed: Math.max(0, prev.closed - 1),
+        open: prev.open + 1,
+        assigned: wasAssigned ? prev.assigned + 1 : prev.assigned,
+        unassigned: wasUnassigned ? prev.unassigned + 1 : prev.unassigned,
+      }))
     }
 
     // OPTIMISTIC NAVIGATION: If closing, move to next ticket IMMEDIATELY
@@ -1496,6 +1521,60 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         markTicketViewed(nextTicket)
       } else {
         // No more tickets, clear selection
+        setSelectedTicket(null)
+      }
+    }
+
+    // ACTUALLY CALL THE API to persist the change!
+    try {
+      const response = await fetch(`/api/tickets/${targetTicketId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || "Failed to update status")
+      }
+
+      // Success - refresh counts from server
+      setTimeout(() => {
+        fetchCounts()
+      }, 500)
+
+      toast({ title: "Status updated" })
+    } catch (err) {
+      console.error('❌ Status update failed:', err)
+      toast({
+        title: "Update Failed",
+        description: err instanceof Error ? err.message : "Failed to update status",
+        variant: "destructive",
+      })
+      
+      // Revert optimistic updates on error
+      setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: previousStatus } : t))
+      if (selectedTicket?.id === targetTicketId) {
+        setSelectedTicket(prev => prev ? { ...prev, status: previousStatus } : null)
+      }
+      
+      // Revert counts
+      if (status === "closed") {
+        setTicketCounts(prev => ({
+          ...prev,
+          closed: Math.max(0, prev.closed - 1),
+          open: prev.open + 1,
+          assigned: wasAssigned ? prev.assigned + 1 : prev.assigned,
+          unassigned: wasUnassigned ? prev.unassigned + 1 : prev.unassigned,
+        }))
+      } else if (previousStatus === "closed") {
+        setTicketCounts(prev => ({
+          ...prev,
+          closed: prev.closed + 1,
+          open: Math.max(0, prev.open - 1),
+          assigned: wasAssigned ? Math.max(0, prev.assigned - 1) : prev.assigned,
+          unassigned: wasUnassigned ? Math.max(0, prev.unassigned - 1) : prev.unassigned,
+        }))
       }
     }
   }
@@ -1517,6 +1596,18 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         // 1. Update state immediately (Close it in the list)
         const closedTicketState = { ...selectedTicket, status: 'closed' as const }
         setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
+
+        // 1b. OPTIMISTICALLY UPDATE COUNTS immediately
+        // Determine which tab this ticket was in before closing
+        const wasAssigned = selectedTicket.assigneeUserId === currentUserId
+        const wasUnassigned = !selectedTicket.assigneeUserId
+        setTicketCounts(prev => ({
+          ...prev,
+          closed: prev.closed + 1,
+          open: Math.max(0, prev.open - 1),
+          assigned: wasAssigned ? Math.max(0, prev.assigned - 1) : prev.assigned,
+          unassigned: wasUnassigned ? Math.max(0, prev.unassigned - 1) : prev.unassigned,
+        }))
 
         // 2. Determine next ticket & Navigate
         const currentIndex = filteredTickets.findIndex(t => t.id === targetTicketId)
@@ -1544,8 +1635,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             const errorData = await response.json().catch(() => ({}))
             throw new Error(errorData.error || "Failed to update status")
           }
-          // Success - maybe silent refetch to ensure consistency
-          fetchTickets({ silent: true })
+          // Success - fetch fresh counts from server to ensure accuracy
+          // Small delay to ensure DB has committed the change
+          setTimeout(() => {
+            fetchCounts()
+          }, 500)
         }).catch(err => {
           console.error('❌ Background Close Failed:', err)
           toast({
@@ -1554,7 +1648,15 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             variant: "destructive",
             duration: 5000
           })
-          // Revert local state if needed (complex due to navigation, usually user refresh is best)
+          // Revert local state on error - revert counts too
+          setTicketCounts(prev => ({
+            ...prev,
+            closed: Math.max(0, prev.closed - 1),
+            open: prev.open + 1,
+            assigned: wasAssigned ? prev.assigned + 1 : prev.assigned,
+            unassigned: wasUnassigned ? prev.unassigned + 1 : prev.unassigned,
+          }))
+          setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: previousStatus } : t))
         }).finally(() => {
           setUpdatingStatus(false)
         })
@@ -1596,6 +1698,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       // Update with server data
       setTickets((prev) => prev.map((t) => (t.id === targetTicketId ? data.ticket : t)))
+      fetchCounts()
 
       // Use functional update to avoid stale closure issue
       // Only update the selected ticket if we are actually still viewing the one that was updated
@@ -1681,7 +1784,27 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         variant: failedCount ? "destructive" : "default"
       })
 
-      await fetchTickets({ silent: true })
+      // If closing tickets, optimistically update counts based on success count
+      if (updates.status === "closed" && successCount > 0) {
+        // Count how many tickets were assigned to us vs unassigned among the closed ones
+        const closedIds = new Set((data.results || []).map((r: any) => r.ticketId))
+        const closedTickets = tickets.filter(t => closedIds.has(t.id))
+        const wasAssignedCount = closedTickets.filter(t => t.assigneeUserId === currentUserId).length
+        const wasUnassignedCount = closedTickets.filter(t => !t.assigneeUserId).length
+        
+        setTicketCounts(prev => ({
+          ...prev,
+          closed: prev.closed + successCount,
+          open: Math.max(0, prev.open - successCount),
+          assigned: Math.max(0, prev.assigned - wasAssignedCount),
+          unassigned: Math.max(0, prev.unassigned - wasUnassignedCount),
+        }))
+      }
+
+      // Fetch counts from server after a delay to ensure accuracy
+      setTimeout(() => {
+        fetchCounts()
+      }, 500)
     } catch (err) {
       toast({
         title: "Error",
@@ -2046,6 +2169,18 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
 
+      // 3b. OPTIMISTICALLY UPDATE COUNTS immediately
+      // Determine which tab this ticket was in before closing
+      const wasAssigned = selectedTicket.assigneeUserId === currentUserId
+      const wasUnassigned = !selectedTicket.assigneeUserId
+      setTicketCounts(prev => ({
+        ...prev,
+        closed: prev.closed + 1,
+        open: Math.max(0, prev.open - 1),
+        assigned: wasAssigned ? Math.max(0, prev.assigned - 1) : prev.assigned,
+        unassigned: wasUnassigned ? Math.max(0, prev.unassigned - 1) : prev.unassigned,
+      }))
+
       // 4. Navigate immediately
       if (nextTicket) {
         console.log('➡️ Optimistically navigating to next ticket:', nextTicket.id)
@@ -2133,8 +2268,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               detail: { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId }
             }))
 
-            // Re-fetch tickets silently to ensure server state consistency
-            fetchTickets({ silent: true });
+            // Fetch counts after a delay to ensure DB has committed
+            // Don't fetch tickets to avoid overwriting optimistic state
+            setTimeout(() => {
+              fetchCounts()
+            }, 500)
 
             console.log('✅ Background Send & Close completed for:', activeTicketId);
           }
@@ -2167,11 +2305,20 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           variant: "destructive",
           duration: 10000
         })
-        // If we optimistically closed, we might want to revert? 
-        // Complex to revert navigation. Best to just warn user.
-        // We could revert the 'closed' status in the list:
+        // If we optimistically closed, revert the local state changes
         if (opts?.closeTicket) {
-          setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: 'open' } : t)) // Revert to open
+          // Revert the ticket status in the list
+          setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: 'open' } : t))
+          // Revert the counts - use selectedTicket captured at start of handler
+          const wasAssigned = selectedTicket.assigneeUserId === currentUserId
+          const wasUnassigned = !selectedTicket.assigneeUserId
+          setTicketCounts(prev => ({
+            ...prev,
+            closed: Math.max(0, prev.closed - 1),
+            open: prev.open + 1,
+            assigned: wasAssigned ? prev.assigned + 1 : prev.assigned,
+            unassigned: wasUnassigned ? prev.unassigned + 1 : prev.unassigned,
+          }))
         }
       } finally {
         setSendingReply(false)

@@ -120,7 +120,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ tickets }, {
       headers: {
-        'Cache-Control': 'private, max-age=5, stale-while-revalidate=10'
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
       }
     });
   } catch (error) {

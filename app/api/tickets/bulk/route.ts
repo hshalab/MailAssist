@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { updateTicketStatus, assignTicket, updateTicketTags } from '@/lib/tickets';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { getUserEmailForTickets } from '@/lib/ticket-helpers';
+import { validateBusinessSession } from '@/lib/session';
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,6 +27,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get businessId for proper multi-email account support
+    const businessSession = await validateBusinessSession();
+    const businessId = businessSession?.businessId || null;
+
     const body = await request.json();
     const { ticketIds, status, assigneeUserId, tags } = body;
 
@@ -45,7 +50,7 @@ export async function POST(request: NextRequest) {
 
         // Update status if provided
         if (status && ['open', 'pending', 'on_hold', 'closed'].includes(status)) {
-          updatedTicket = await updateTicketStatus(ticketId, status, userEmail);
+          updatedTicket = await updateTicketStatus(ticketId, status, userEmail, businessId);
         }
 
         // Update assignee if provided
@@ -78,6 +83,12 @@ export async function POST(request: NextRequest) {
       failed: errors.length,
       results,
       errors: errors.length > 0 ? errors : undefined,
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
     });
   } catch (error) {
     console.error('Error in bulk update:', error);

@@ -121,6 +121,41 @@ export async function GET(
       );
     }
 
+    // CRITICAL FIX: Handle Ticket ID (UUID) provided instead of Gmail Message ID
+    // If input looks like UUID, find the ticket first
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (uuidRegex.test(emailId)) {
+      console.log(`[Email Detail] Detected UUID (Ticket ID): ${emailId}, resolving to Gmail Message ID...`);
+      const { getTicketById } = await import('@/lib/tickets');
+      const { getThreadById } = await import('@/lib/gmail');
+
+      const ticket = await getTicketById(emailId, null, true, null); // viewAll=true to bypass permission checks for resolution
+
+      if (ticket && ticket.threadId) {
+        // We have the thread ID, now we need to find the LATEST message in this thread
+        // to show as the "main" email content.
+        console.log(`[Email Detail] Resolved to Thread ID: ${ticket.threadId}`);
+
+        try {
+          const thread = await getThreadById(tokens, ticket.threadId);
+          if (thread && thread.messages && thread.messages.length > 0) {
+            // Use the last message (newest) as the reference
+            // Gmail API returns messages in chronological order (oldest first)
+            const latestMessage = thread.messages[thread.messages.length - 1];
+            emailId = latestMessage.id;
+            console.log(`[Email Detail] Resolved to latest Gmail Message ID: ${emailId}`);
+          } else {
+            console.warn(`[Email Detail] Ticket ${ticket.id} has thread ${ticket.threadId} but no messages found`);
+          }
+        } catch (threadError) {
+          console.error('[Email Detail] Failed to resolve thread for ticket:', threadError);
+          // Fallback: Continue with original ID (will likely fail but safe fallback)
+        }
+      } else {
+        console.warn(`[Email Detail] Ticket ${emailId} not found or has no thread ID`);
+      }
+    }
+
     // Fetch the specific email with full content including attachments
     const email = await getEmailById(tokens, emailId);
 
