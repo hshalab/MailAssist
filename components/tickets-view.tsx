@@ -1516,25 +1516,24 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         // Rollback on error
         setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: previousStatus } : t))
 
-        // If we navigated away, we might want to stay on the "next" ticket but show an error,
-        // OR navigate back. Navigating back can be jarring. 
-        // For now, let's just warn the user. The ticket in the LIST will go back to 'open'.
-        // If the user is still viewing the old ticket (didn't navigate), revert it.
-        if (selectedTicket?.id === targetTicketId) {
-          setSelectedTicket(prev => prev ? { ...prev, status: previousStatus } : null)
-        }
+        // Use functional update to check current state before reverting
+        setSelectedTicket(curr => {
+          if (curr?.id === targetTicketId) {
+            return curr ? { ...curr, status: previousStatus } : null
+          }
+          return curr
+        })
 
         throw new Error(errorData.error || errorData.details || "Failed to update status")
       }
       const data = await response.json()
 
-      // Update with server data (in case there are side effects like updated_at)
+      // Update with server data
       setTickets((prev) => prev.map((t) => (t.id === targetTicketId ? data.ticket : t)))
 
-      // If we are still viewing this ticket (e.g. we didn't close it, just changed status to pending), update it
-      if (selectedTicket?.id === targetTicketId) {
-        setSelectedTicket(data.ticket)
-      }
+      // Use functional update to avoid stale closure issue
+      // Only update the selected ticket if we are actually still viewing the one that was updated
+      setSelectedTicket(curr => (curr?.id === targetTicketId ? data.ticket : curr))
 
       toast({ title: "Status updated" })
     } catch (err) {
