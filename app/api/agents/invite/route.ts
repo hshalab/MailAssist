@@ -72,12 +72,43 @@ export async function POST(request: NextRequest) {
     // 3. Check if user already exists in this business
     const { data: existingUser } = await supabase
       .from('users')
-      .select('id, email, business_id')
+      .select('id, email, business_id, is_active, role')
       .eq('email', email)
       .eq('business_id', sessionUser.businessId)
       .single()
 
     if (existingUser) {
+      // If user exists but is INACTIVE (was removed), reactivate them with new role
+      if (existingUser.is_active === false) {
+        const { error: reactivateError } = await supabase
+          .from('users')
+          .update({ 
+            is_active: true, 
+            role: role,
+          })
+          .eq('id', existingUser.id)
+
+        if (reactivateError) {
+          console.error('[InviteAgent] Error reactivating user:', reactivateError)
+          return NextResponse.json(
+            { error: 'Failed to reactivate user' },
+            { status: 500 }
+          )
+        }
+
+        return NextResponse.json({
+          success: true,
+          message: `${email} has been reactivated with ${role} access`,
+          reactivated: true,
+          user: {
+            id: existingUser.id,
+            email: existingUser.email,
+            role: role,
+          },
+        })
+      }
+
+      // User exists and is ACTIVE - block duplicate
       return NextResponse.json(
         { error: 'A user with this email already exists in your business' },
         { status: 409 }
