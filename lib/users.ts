@@ -223,6 +223,21 @@ export async function deleteUser(userId: string): Promise<boolean> {
     throw error;
   }
 
+  // CRITICAL: Clean up tickets assigned to this inactive user
+  // Set assignee_user_id to NULL for all tickets assigned to this user
+  // This ensures counts are accurate and tickets appear as "unassigned"
+  const { error: ticketsError } = await supabase
+    .from('tickets')
+    .update({ assignee_user_id: null })
+    .eq('assignee_user_id', userId);
+
+  if (ticketsError) {
+    console.error('Error cleaning up ticket assignments:', ticketsError);
+    // Don't throw - user deletion succeeded, ticket cleanup is secondary
+  } else {
+    console.log(`[deleteUser] Cleaned up ticket assignments for user ${userId}`);
+  }
+
   return true;
 }
 

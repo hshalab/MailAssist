@@ -625,6 +625,9 @@ export async function getTickets(
 
 /**
  * Get ticket counts grouped by status/type for the sidebar/tabs
+ * 
+ * Uses the same getTickets() function to ensure counts match exactly what the UI shows.
+ * This guarantees consistency between the ticket list and the count badges.
  */
 export async function getTicketCounts(
   currentUserId: string | null,
@@ -634,101 +637,121 @@ export async function getTicketCounts(
 ): Promise<{ open: number; assigned: number; unassigned: number; closed: number }> {
   if (!supabase) return { open: 0, assigned: 0, unassigned: 0, closed: 0 };
 
-  // Helper to build base query
-  const buildBaseQuery = () => {
-    let q = supabase!.from('tickets').select('id, status, assignee_user_id, department_id', { count: 'exact', head: true });
-
-    if (userEmail) {
-      q = q.eq('user_email', userEmail);
-    }
-    if (accountFilter) {
-      q = q.eq('owner_email', accountFilter);
-    }
-
-    // Role-based scoping (mirrors getTickets logic)
-    // Note: We can't strictly return partial counts here easily without multiple queries 
-    // or a complex group_by which Supabase/PostgREST doesn't support flexibly for conditional logic.
-    // For now, we will run parallel queries for the different buckets.
-    return q;
-  };
-
-  // We need to fetch counts for:
-  // 1. Open (total open tickets visible to user)
-  // 2. Assigned (assigned to current user)
-  // 3. Unassigned (visible to user)
-  // 4. Closed (visible to user)
-
   try {
-    // Shared role-based filter string
-    let roleFilter = '';
-    // Fetch departments for agent filtering if needed
-    let deptIds: string[] = [];
+    // Use the SAME getTickets function that populates the UI
+    // This guarantees the counts match exactly what users see
+    const tickets = await getTickets(
+      currentUserId,
+      canViewAll,
+      userEmail,
+      accountFilter,
+      null, // businessId - not needed for counting
+      'desc', // sortOrder - doesn't matter for counting
+      undefined, // statusFilter - get all statuses
+      undefined // searchQuery - no search filter
+    );
 
-    if (!canViewAll && currentUserId) {
-      const { data: userDepts } = await supabase
-        .from('user_departments')
-        .select('department_id')
-        .eq('user_id', currentUserId);
+    // Count tickets using the same logic as the frontend's getFilteredTickets
+    let assigned = 0;
+    let unassigned = 0;
+    let open = 0;
+    let closed = 0;
 
-      deptIds = userDepts?.map((ud: any) => ud.department_id) || [];
+    for (const ticket of tickets) {
+      const isClosed = ticket.status === 'closed';
+      // After getTickets mapping, assigneeUserId is already null for inactive/deleted users
+      const isUnassigned = ticket.assigneeUserId === null;
+      const isAssignedToMe = ticket.assigneeUserId === currentUserId;
 
-      if (deptIds.length > 0) {
-        roleFilter = `assignee_user_id.eq.${currentUserId},and(assignee_user_id.is.null,department_id.in.(${deptIds.join(',')}))`;
+      if (isClosed) {
+        closed++;
       } else {
-        roleFilter = `assignee_user_id.eq.${currentUserId},assignee_user_id.is.null`;
+        open++;
+        if (isAssignedToMe) {
+          assigned++;
+        } else if (isUnassigned) {
+          unassigned++;
+        }
+        // Note: tickets assigned to OTHER active users are in "open" but not "assigned" or "unassigned"
       }
     }
 
-    // 1. Assigned to Me (Open only)
-    let assignedQuery = buildBaseQuery()
-      .eq('assignee_user_id', currentUserId)
-      .neq('status', 'closed');
-
-    // 2. Unassigned (Open only)
-    let unassignedQuery = buildBaseQuery()
-      .is('assignee_user_id', null)
-      .neq('status', 'closed');
-
-    // Apply department filter to unassigned if agent
-    if (!canViewAll && currentUserId && deptIds.length > 0) {
-      unassignedQuery = unassignedQuery.in('department_id', deptIds);
-    }
-
-    // 3. All Open (for the "Open" tab - sum of everything visible that isn't closed)
-    let openQuery = buildBaseQuery()
-      .neq('status', 'closed');
-
-    // Apply role filter to open query
-    if (!canViewAll && currentUserId) {
-      openQuery = openQuery.or(roleFilter);
-    }
-
-    // 4. Closed
-    let closedQuery = buildBaseQuery()
-      .eq('status', 'closed');
-
-    // Apply role filter to closed query
-    if (!canViewAll && currentUserId) {
-      closedQuery = closedQuery.or(roleFilter);
-    }
-
-    // Execute in parallel
-    const [assignedRes, unassignedRes, openRes, closedRes] = await Promise.all([
-      assignedQuery,
-      unassignedQuery,
-      openQuery,
-      closedQuery
-    ]);
-
-    return {
-      assigned: assignedRes.count || 0,
-      unassigned: unassignedRes.count || 0,
-      open: openRes.count || 0,
-      closed: closedRes.count || 0
-    };
+    return { assigned, unassigned, open, closed };
   } catch (err) {
     console.error('Error fetching ticket counts:', err);
     return { open: 0, assigned: 0, unassigned: 0, closed: 0 };
+  }
+}
+
+/**
+ * Clean up orphaned ticket assignments
+ * 
+ * Sets assignee_user_id to NULL for tickets assigned to inactive or non-existent users.
+ * This fixes count inconsistencies when users are soft-deleted (is_active = false).
+ * 
+ * @returns Number of tickets cleaned up
+ */
+export async function cleanupOrphanedTicketAssignments(): Promise<number> {
+  if (!supabase) return 0;
+
+  try {
+    // Get all active user IDs
+    const { data: activeUsers, error: usersError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('is_active', true);
+
+    if (usersError) {
+      console.error('Error fetching active users:', usersError);
+      throw usersError;
+    }
+
+    const activeUserIds = new Set((activeUsers || []).map((u: any) => String(u.id)));
+
+    // Find all tickets with assignee_user_id set
+    const { data: tickets, error: ticketsError } = await supabase
+      .from('tickets')
+      .select('id, assignee_user_id')
+      .not('assignee_user_id', 'is', null);
+
+    if (ticketsError) {
+      console.error('Error fetching tickets:', ticketsError);
+      throw ticketsError;
+    }
+
+    if (!tickets || tickets.length === 0) {
+      return 0;
+    }
+
+    // Find tickets assigned to inactive/non-existent users
+    const orphanedTicketIds: string[] = [];
+    for (const ticket of tickets) {
+      const assigneeIdStr = ticket.assignee_user_id ? String(ticket.assignee_user_id) : null;
+      if (assigneeIdStr && !activeUserIds.has(assigneeIdStr)) {
+        orphanedTicketIds.push(ticket.id);
+      }
+    }
+
+    if (orphanedTicketIds.length === 0) {
+      return 0;
+    }
+
+    // Set assignee_user_id to NULL for orphaned tickets
+    const { error: updateError } = await supabase
+      .from('tickets')
+      .update({ assignee_user_id: null })
+      .in('id', orphanedTicketIds);
+
+    if (updateError) {
+      console.error('Error cleaning up orphaned assignments:', updateError);
+      throw updateError;
+    }
+
+    console.log(`[cleanupOrphanedTicketAssignments] Cleaned up ${orphanedTicketIds.length} orphaned ticket assignments`);
+    return orphanedTicketIds.length;
+  } catch (err) {
+    console.error('Error in cleanupOrphanedTicketAssignments:', err);
+    throw err;
   }
 }
 
