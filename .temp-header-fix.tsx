@@ -18,7 +18,7 @@
         {formatDate(email.date)}
     </span>
 </div>
-
+// ex
 {/* Badges row - SEPARATE ROW */ }
 <div className="flex items-center gap-1.5">
     {email.ownerEmail && (
