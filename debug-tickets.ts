@@ -30,7 +30,7 @@ async function debugTickets() {
     const { data: depts } = await supabase.from('departments').select('id, name');
     // logOutput += ... (skip brevity)
 
-    // 2. Tickets Grouped by Dept
+    // 2. Tickets Grouped by Department
     const { data: tickets } = await supabase.from('tickets').select('id, subject, department_id, user_email, owner_email, assignee_user_id');
     const ticketCounts: Record<string, number> = {};
     const classifiedTickets: any[] = [];
