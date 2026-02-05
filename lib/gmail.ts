@@ -420,7 +420,8 @@ export async function stopHistoryWatch(
  */
 export async function getNewMessagesFromHistory(
   tokens: { access_token?: string | null; refresh_token?: string | null },
-  startHistoryId: string | null
+  startHistoryId: string | null,
+  maxPages: number = 5 // Limit history pages to prevent timeouts
 ): Promise<{ messageIds: string[]; latestHistoryId: string | null }> {
   const gmail = getGmailClient(tokens);
 
@@ -437,9 +438,16 @@ export async function getNewMessagesFromHistory(
     const messageIds = new Set<string>();
     let pageToken: string | undefined;
     let latestHistoryId = startHistoryId;
+    let pagesFetched = 0;
 
     // Paginate through history to get all new messages
     do {
+      // Safety break
+      if (pagesFetched >= maxPages) {
+        console.log(`[Gmail] Hit max history pages limit (${maxPages}), stopping fetch early`);
+        break;
+      }
+
       const response = await gmail.users.history.list({
         userId: 'me',
         startHistoryId,
@@ -471,6 +479,7 @@ export async function getNewMessagesFromHistory(
       }
 
       pageToken = response.data.nextPageToken || undefined;
+      pagesFetched++;
     } while (pageToken);
 
     return {

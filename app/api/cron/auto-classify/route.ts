@@ -90,7 +90,7 @@ export async function GET(request: NextRequest) {
         // Process each account individually for better incremental sync
         for (const token of tokenData) {
             if (isTimeRunningOut()) {
-                console.log('[CRON] Time running out, stopping early');
+                console.log('[CRON] Time running out, stopping early before next account');
                 break;
             }
 
@@ -118,16 +118,14 @@ export async function GET(request: NextRequest) {
                     refresh_token: token.refresh_token,
                 };
 
-                const { messageIds, latestHistoryId } = await getNewMessagesFromHistory(tokens, lastHistoryId);
+                // Limit history fetch to 5 pages to keep it fast
+                const { messageIds, latestHistoryId } = await getNewMessagesFromHistory(tokens, lastHistoryId, 5);
                 result.newMessages = messageIds.length;
                 totalNewMessages += messageIds.length;
 
-                console.log(`[CRON] ${userEmail}: ${messageIds.length} new messages`);
+                console.log(`[CRON] ${userEmail}: ${messageIds.length} new messages to process`);
 
                 if (messageIds.length > 0) {
-                    // Fetch message details for new messages only
-                    const newEmails = await getMessagesByIds(tokens, messageIds);
-
                     // Get agent emails (connected accounts for this business)
                     const { data: businessTokens } = await adminClient
                         .from('tokens')
@@ -144,37 +142,58 @@ export async function GET(request: NextRequest) {
                         agentEmails.push(userEmail.toLowerCase());
                     }
 
-                    // Process new emails to create tickets
-                    for (const email of newEmails) {
-                        if (isTimeRunningOut()) break;
+                    // BATCH PROCESSING: Process messages in chunks of 5 to avoid timeouts
+                    const BATCH_SIZE = 5;
+                    const batches = [];
+                    for (let i = 0; i < messageIds.length; i += BATCH_SIZE) {
+                        batches.push(messageIds.slice(i, i + BATCH_SIZE));
+                    }
+
+                    console.log(`[CRON] Processing ${messageIds.length} messages in ${batches.length} batches`);
+
+                    for (const [batchIndex, batchIds] of batches.entries()) {
+                        if (isTimeRunningOut()) {
+                            console.log(`[CRON] Time running out during batch ${batchIndex + 1}/${batches.length}, stopping ticket creation`);
+                            break;
+                        }
 
                         try {
-                            const extractEmail = (emailStr: string) => {
-                                const match = emailStr?.match(/<([^>]+)>/) || emailStr?.match(/([^\s<>]+@[^\s<>]+)/);
-                                return match ? match[1].toLowerCase() : emailStr?.toLowerCase();
-                            };
+                            // Fetch details for this batch only
+                            const newEmails = await getMessagesByIds(tokens, batchIds);
 
-                            const emailFrom = extractEmail(email.from || '');
-                            const isFromAgent = agentEmails.some(agentEmail =>
-                                emailFrom === agentEmail || emailFrom?.includes(agentEmail)
-                            );
+                            // Process new emails to create tickets
+                            for (const email of newEmails) {
+                                try {
+                                    const extractEmail = (emailStr: string) => {
+                                        const match = emailStr?.match(/<([^>]+)>/) || emailStr?.match(/([^\s<>]+@[^\s<>]+)/);
+                                        return match ? match[1].toLowerCase() : emailStr?.toLowerCase();
+                                    };
 
-                            await ensureTicketForEmail(
-                                {
-                                    id: email.id,
-                                    threadId: email.threadId,
-                                    subject: email.subject,
-                                    from: email.from,
-                                    to: email.to,
-                                    date: email.date,
-                                },
-                                isFromAgent
-                            );
+                                    const emailFrom = extractEmail(email.from || '');
+                                    const isFromAgent = agentEmails.some(agentEmail =>
+                                        emailFrom === agentEmail || emailFrom?.includes(agentEmail)
+                                    );
 
-                            result.ticketsCreated++;
-                            totalTickets++;
-                        } catch (emailError) {
-                            console.warn(`[CRON] Error processing email ${email.id}:`, emailError);
+                                    await ensureTicketForEmail(
+                                        {
+                                            id: email.id,
+                                            threadId: email.threadId,
+                                            subject: email.subject,
+                                            from: email.from,
+                                            to: email.to,
+                                            date: email.date,
+                                        },
+                                        isFromAgent
+                                    );
+
+                                    result.ticketsCreated++;
+                                    totalTickets++;
+                                } catch (emailError) {
+                                    console.warn(`[CRON] Error processing email ${email.id}:`, emailError);
+                                }
+                            }
+                        } catch (batchError) {
+                            console.error(`[CRON] Error processing batch ${batchIndex}:`, batchError);
                         }
                     }
                 }
@@ -184,11 +203,11 @@ export async function GET(request: NextRequest) {
                     await updateSyncState(userEmail, latestHistoryId);
                 }
 
-                // Run classification for this account's new tickets (limit to 10 per run for speed)
+                // Run classification for this account's new tickets (limit to 5 per run for speed)
                 if (!isTimeRunningOut() && result.ticketsCreated > 0) {
                     try {
                         const classifyResult = await runAutoClassify({
-                            limit: 10, // Reduced limit for speed
+                            limit: 5, // Reduced limit for speed and safety
                             businessId: token.business_id,
                             userEmail: userEmail,
                             days: 1
