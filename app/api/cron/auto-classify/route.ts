@@ -1,9 +1,9 @@
 /**
  * Cron endpoint for automatic email sync and classification
- * Runs on a schedule to process new emails for all accounts
+ * Uses INCREMENTAL sync via Gmail History API for fast execution
  * 
  * Vercel Cron Jobs will call this endpoint automatically
- * Last updated: 2026-01-24
+ * Last updated: 2026-02-05
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,26 +12,29 @@ import { createClient } from '@supabase/supabase-js';
 
 // Force dynamic to ensure this route is always built as a serverless function
 export const dynamic = 'force-dynamic';
-// Remove maxDuration to avoid potential plan limits causing 404s
-// export const maxDuration = 60; 
+
+// Timeout guard - leave 5 seconds buffer before Vercel's 30s limit
+const MAX_EXECUTION_TIME = 25000;
 
 export async function GET(request: NextRequest) {
     const startTime = Date.now();
+
+    // Helper to check if we're running out of time
+    const isTimeRunningOut = () => Date.now() - startTime > MAX_EXECUTION_TIME;
 
     // Verify cron secret for security (Vercel sends this automatically)
     const authHeader = request.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
 
-    // In production, require the secret. In development, allow without secret for testing.
     if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
         console.log('[CRON] Unauthorized request - invalid or missing CRON_SECRET');
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    console.log('[CRON] Starting scheduled sync and classify job...');
+    console.log('[CRON] Starting incremental sync and classify job...');
 
     try {
-        // Use admin client to bypass RLS and get all businesses
+        // Use admin client to bypass RLS
         let adminClient = supabase;
         if (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.NEXT_PUBLIC_SUPABASE_URL) {
             adminClient = createClient(
@@ -45,10 +48,10 @@ export async function GET(request: NextRequest) {
             throw new Error('Supabase client not available');
         }
 
-        // Get all unique business IDs from tokens table (including personal accounts where business_id is null)
+        // Get all tokens with their sync state
         const { data: tokenData, error: tokenError } = await adminClient
             .from('tokens')
-            .select('business_id, user_email')
+            .select('business_id, user_email, access_token, refresh_token')
             .not('access_token', 'is', null);
 
         if (tokenError) {
@@ -64,91 +67,88 @@ export async function GET(request: NextRequest) {
             });
         }
 
-        // Group by business_id (null for personal accounts)
-        const businessMap = new Map<string | null, string[]>();
-        for (const token of tokenData) {
-            const key = token.business_id || null;
-            if (!businessMap.has(key)) {
-                businessMap.set(key, []);
-            }
-            if (token.user_email) {
-                businessMap.get(key)!.push(token.user_email);
-            }
-        }
+        console.log(`[CRON] Found ${tokenData.length} accounts to process`);
 
-        console.log(`[CRON] Found ${businessMap.size} account groups to process`);
+        // Import sync functions
+        const { getNewMessagesFromHistory, getMessagesByIds } = await import('@/lib/gmail');
+        const { getSyncState, updateSyncState } = await import('@/lib/sync-state');
+        const { ensureTicketForEmail } = await import('@/lib/tickets');
+        const { runAutoClassify } = await import('@/lib/auto-classify');
 
         const results: {
-            businessId: string | null;
-            emails: string[];
-            ticketsProcessed: number;
+            email: string;
+            newMessages: number;
+            ticketsCreated: number;
             classified: number;
-            errors: string[];
+            error?: string;
         }[] = [];
 
-        // Process each business/personal account group
-        for (const [businessId, emails] of businessMap) {
-            console.log(`[CRON] Processing ${businessId ? `business ${businessId}` : 'personal accounts'}: ${emails.join(', ')}`);
+        let totalNewMessages = 0;
+        let totalTickets = 0;
+        let totalClassified = 0;
+
+        // Process each account individually for better incremental sync
+        for (const token of tokenData) {
+            if (isTimeRunningOut()) {
+                console.log('[CRON] Time running out, stopping early');
+                break;
+            }
+
+            const userEmail = token.user_email;
+            if (!userEmail) continue;
 
             const result = {
-                businessId,
-                emails,
-                ticketsProcessed: 0,
+                email: userEmail,
+                newMessages: 0,
+                ticketsCreated: 0,
                 classified: 0,
-                errors: [] as string[],
+                error: undefined as string | undefined,
             };
 
             try {
-                // Import the functions we need
-                const { fetchAllInboxEmails } = await import('@/lib/email-service');
-                const { ensureTicketForEmail } = await import('@/lib/tickets');
-                const { runAutoClassify } = await import('@/lib/auto-classify');
-                const { loadBusinessTokens } = await import('@/lib/storage');
+                // Get last sync state for this account
+                const syncState = await getSyncState(userEmail);
+                const lastHistoryId = syncState?.last_history_id || null;
 
-                // Get connected accounts for this business/user
-                const accounts = await loadBusinessTokens(businessId, emails[0]);
+                console.log(`[CRON] Processing ${userEmail}, lastHistoryId: ${lastHistoryId || 'none (first sync)'}`);
 
-                if (accounts.length === 0) {
-                    console.log(`[CRON] No valid tokens for ${businessId || emails[0]}, skipping`);
-                    result.errors.push('No valid tokens');
-                    results.push(result);
-                    continue;
-                }
+                // Get new messages since last sync using History API
+                const tokens = {
+                    access_token: token.access_token,
+                    refresh_token: token.refresh_token,
+                };
 
-                // Fetch recent inbox emails (last 50 per account, 60 days max)
-                console.log(`[CRON] Fetching inbox emails for ${accounts.length} accounts...`);
+                const { messageIds, latestHistoryId } = await getNewMessagesFromHistory(tokens, lastHistoryId);
+                result.newMessages = messageIds.length;
+                totalNewMessages += messageIds.length;
 
-                let inboxEmails: any[] = [];
-                if (businessId) {
-                    // Business account: fetch from all connected accounts
-                    inboxEmails = await fetchAllInboxEmails(businessId, 50, undefined, emails[0]);
-                } else {
-                    // Personal account: fetch from the single account
-                    const { fetchInboxEmails } = await import('@/lib/gmail');
-                    if (accounts[0]?.tokens?.access_token) {
-                        inboxEmails = await fetchInboxEmails(accounts[0].tokens, 50);
+                console.log(`[CRON] ${userEmail}: ${messageIds.length} new messages`);
+
+                if (messageIds.length > 0) {
+                    // Fetch message details for new messages only
+                    const newEmails = await getMessagesByIds(tokens, messageIds);
+
+                    // Get agent emails (connected accounts for this business)
+                    const { data: businessTokens } = await adminClient
+                        .from('tokens')
+                        .select('user_email')
+                        .eq('business_id', token.business_id || '')
+                        .not('user_email', 'is', null);
+
+                    const agentEmails = (businessTokens || [])
+                        .map(t => t.user_email?.toLowerCase())
+                        .filter(Boolean) as string[];
+
+                    // Also add current user's email
+                    if (userEmail && !agentEmails.includes(userEmail.toLowerCase())) {
+                        agentEmails.push(userEmail.toLowerCase());
                     }
-                }
 
-                // Filter out spam/trash
-                inboxEmails = inboxEmails.filter((email: any) => {
-                    const labels = email.labels || [];
-                    return !labels.some((label: string) => ['SPAM', 'TRASH'].includes(label));
-                });
+                    // Process new emails to create tickets
+                    for (const email of newEmails) {
+                        if (isTimeRunningOut()) break;
 
-                console.log(`[CRON] Found ${inboxEmails.length} inbox emails`);
-
-                // Get agent emails for this account to determine if email is from agent
-                const agentEmails = accounts.map(acc => acc.email.toLowerCase());
-
-                // Process emails to create tickets (batch of 20)
-                const BATCH_SIZE = 20;
-                for (let i = 0; i < Math.min(inboxEmails.length, 100); i += BATCH_SIZE) {
-                    const batch = inboxEmails.slice(i, i + BATCH_SIZE);
-
-                    for (const email of batch) {
                         try {
-                            // Determine if email is from agent
                             const extractEmail = (emailStr: string) => {
                                 const match = emailStr?.match(/<([^>]+)>/) || emailStr?.match(/([^\s<>]+@[^\s<>]+)/);
                                 return match ? match[1].toLowerCase() : emailStr?.toLowerCase();
@@ -171,47 +171,54 @@ export async function GET(request: NextRequest) {
                                 isFromAgent
                             );
 
-                            result.ticketsProcessed++;
+                            result.ticketsCreated++;
+                            totalTickets++;
                         } catch (emailError) {
-                            // Don't fail entire batch for one email
                             console.warn(`[CRON] Error processing email ${email.id}:`, emailError);
                         }
                     }
                 }
 
-                console.log(`[CRON] Processed ${result.ticketsProcessed} tickets, now classifying...`);
+                // Update sync state with latest historyId
+                if (latestHistoryId) {
+                    await updateSyncState(userEmail, latestHistoryId);
+                }
 
-                // Run auto-classification
-                const classifyResult = await runAutoClassify({
-                    limit: 30,
-                    businessId: businessId,
-                    userEmail: emails[0],
-                    days: 1 // Only look at tickets created in the last 24 hours (newly arrived)
-                });
-
-                result.classified = classifyResult.success;
-                console.log(`[CRON] Classified ${classifyResult.success} tickets (${classifyResult.failed} failed)`);
+                // Run classification for this account's new tickets (limit to 10 per run for speed)
+                if (!isTimeRunningOut() && result.ticketsCreated > 0) {
+                    try {
+                        const classifyResult = await runAutoClassify({
+                            limit: 10, // Reduced limit for speed
+                            businessId: token.business_id,
+                            userEmail: userEmail,
+                            days: 1
+                        });
+                        result.classified = classifyResult.success;
+                        totalClassified += classifyResult.success;
+                    } catch (classifyError) {
+                        console.warn(`[CRON] Classification error for ${userEmail}:`, classifyError);
+                    }
+                }
 
             } catch (error) {
-                console.error(`[CRON] Error processing ${businessId || emails[0]}:`, error);
-                result.errors.push(error instanceof Error ? error.message : String(error));
+                console.error(`[CRON] Error processing ${userEmail}:`, error);
+                result.error = error instanceof Error ? error.message : String(error);
             }
 
             results.push(result);
         }
 
         const duration = Date.now() - startTime;
-        const totalTickets = results.reduce((sum, r) => sum + r.ticketsProcessed, 0);
-        const totalClassified = results.reduce((sum, r) => sum + r.classified, 0);
 
-        console.log(`[CRON] Completed in ${duration}ms: ${totalTickets} tickets processed, ${totalClassified} classified`);
+        console.log(`[CRON] Completed in ${duration}ms: ${totalNewMessages} new messages, ${totalTickets} tickets created, ${totalClassified} classified`);
 
         return NextResponse.json({
             success: true,
-            message: `Processed ${totalTickets} tickets, classified ${totalClassified}`,
-            accountGroups: results.length,
-            totalTicketsProcessed: totalTickets,
+            message: `Processed ${totalNewMessages} new messages, created ${totalTickets} tickets, classified ${totalClassified}`,
+            totalNewMessages,
+            totalTicketsCreated: totalTickets,
             totalClassified,
+            accountsProcessed: results.length,
             duration,
             results,
         });

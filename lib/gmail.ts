@@ -410,6 +410,139 @@ export async function stopHistoryWatch(
 }
 
 /**
+ * Fetch new message IDs since a given historyId using Gmail History API.
+ * This is much faster than fetching all inbox messages because it only
+ * returns changes (new messages added) since the last sync.
+ * 
+ * @param tokens - OAuth tokens
+ * @param startHistoryId - The historyId to start from (from last sync)
+ * @returns Object with new message IDs and the latest historyId
+ */
+export async function getNewMessagesFromHistory(
+  tokens: { access_token?: string | null; refresh_token?: string | null },
+  startHistoryId: string | null
+): Promise<{ messageIds: string[]; latestHistoryId: string | null }> {
+  const gmail = getGmailClient(tokens);
+
+  // If no startHistoryId, we need to do initial sync - get current historyId
+  if (!startHistoryId) {
+    const profile = await gmail.users.getProfile({ userId: 'me' });
+    return {
+      messageIds: [], // No incremental sync possible without starting point
+      latestHistoryId: profile.data.historyId || null,
+    };
+  }
+
+  try {
+    const messageIds = new Set<string>();
+    let pageToken: string | undefined;
+    let latestHistoryId = startHistoryId;
+
+    // Paginate through history to get all new messages
+    do {
+      const response = await gmail.users.history.list({
+        userId: 'me',
+        startHistoryId,
+        historyTypes: ['messageAdded'],
+        labelId: 'INBOX', // Only care about inbox messages
+        maxResults: 100,
+        pageToken,
+      });
+
+      // Extract message IDs from history records
+      const history = response.data.history || [];
+      for (const record of history) {
+        if (record.messagesAdded) {
+          for (const added of record.messagesAdded) {
+            if (added.message?.id) {
+              // Skip if message is in SPAM or TRASH
+              const labels = added.message.labelIds || [];
+              if (!labels.includes('SPAM') && !labels.includes('TRASH')) {
+                messageIds.add(added.message.id);
+              }
+            }
+          }
+        }
+      }
+
+      // Update latest historyId
+      if (response.data.historyId) {
+        latestHistoryId = response.data.historyId;
+      }
+
+      pageToken = response.data.nextPageToken || undefined;
+    } while (pageToken);
+
+    return {
+      messageIds: Array.from(messageIds),
+      latestHistoryId,
+    };
+  } catch (error: any) {
+    // Handle case where historyId is too old (404 error)
+    if (error.code === 404 || error.status === 404) {
+      console.warn('[Gmail] History ID expired, need full resync');
+      // Return current historyId for future incremental syncs
+      const profile = await gmail.users.getProfile({ userId: 'me' });
+      return {
+        messageIds: [], // Can't do incremental, but don't fail
+        latestHistoryId: profile.data.historyId || null,
+      };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Fetch specific messages by their IDs (for processing new messages from history)
+ */
+export async function getMessagesByIds(
+  tokens: { access_token?: string | null; refresh_token?: string | null },
+  messageIds: string[]
+): Promise<any[]> {
+  if (messageIds.length === 0) return [];
+
+  const gmail = getGmailClient(tokens);
+
+  // Fetch all messages in parallel (Gmail allows ~50 requests/second)
+  const messages = await Promise.all(
+    messageIds.map(async (id) => {
+      try {
+        const response = await gmail.users.messages.get({
+          userId: 'me',
+          id,
+          format: 'metadata', // Fast fetch for ticket creation
+        });
+        return parseEmailMessageForTicket(response.data);
+      } catch (error) {
+        console.error(`[Gmail] Error fetching message ${id}:`, error);
+        return null;
+      }
+    })
+  );
+
+  return messages.filter(Boolean);
+}
+
+/**
+ * Parse Gmail message for ticket creation (minimal fields needed)
+ */
+function parseEmailMessageForTicket(message: any) {
+  const headers = message.payload?.headers || [];
+  const getHeader = (name: string) =>
+    headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+
+  return {
+    id: message.id,
+    threadId: message.threadId,
+    subject: getHeader('subject'),
+    from: getHeader('from'),
+    to: getHeader('to'),
+    date: getHeader('date'),
+    labels: message.labelIds || [],
+  };
+}
+
+/**
  * Parse Gmail message format into a simpler structure
  * @param message - Gmail message object
  * @param metadataOnly - If true, skip body extraction (for list views)

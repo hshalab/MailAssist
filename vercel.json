@@ -1,3 +1,13 @@
 {
-    "$schema": "https://openapi.vercel.sh/vercel.json"
+    "$schema": "https://openapi.vercel.sh/vercel.json",
+    "crons": [
+        {
+            "path": "/api/cron/auto-classify",
+            "schedule": "* * * * *"
+        },
+        {
+            "path": "/api/cron/renew-watches",
+            "schedule": "0 0 * * *"
+        }
+    ]
 }
