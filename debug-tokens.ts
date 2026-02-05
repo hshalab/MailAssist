@@ -21,7 +21,7 @@ if (!supabaseUrl || !supabaseKey) {
     console.log('Available keys:', Object.keys(envVars));
     process.exit(1);
 }
-
+// ex
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function checkTokens() {
