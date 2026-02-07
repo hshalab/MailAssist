@@ -335,7 +335,8 @@ export async function classifyTicketToDepartmentAsync(
  */
 export async function ensureTicketForEmail(
   email: TicketEmailLike,
-  isFromAgent: boolean
+  isFromAgent: boolean,
+  emailBody?: string // Optional: email body for AI classification
 ): Promise<Ticket | null> {
   if (!supabase) return null;
 
@@ -351,6 +352,7 @@ export async function ensureTicketForEmail(
 
   if (!ticket) {
     // Create new ticket using this email as seed
+    // Pass emailBody for AI classification of new tickets
     ticket = await getOrCreateTicketForThread(threadId, {
       subject: email.subject,
       customerEmail,
@@ -361,13 +363,14 @@ export async function ensureTicketForEmail(
       lastCustomerReplyAt: isFromAgent ? undefined : dateIso,
       lastAgentReplyAt: isFromAgent ? dateIso : undefined,
       ownerEmail: email.ownerEmail, // Pass owner email from source
-    })!;
+    }, emailBody); // Pass email body for classification
     if (ticket) {
       console.log(`[Ticket] Created ticket ${ticket.id} for email ${email.id}`, {
         threadId,
         lastCustomerReplyAt: ticket.lastCustomerReplyAt,
         createdAt: ticket.createdAt,
-        dateIso
+        dateIso,
+        hasBody: !!emailBody
       });
     }
     return ticket;
@@ -998,19 +1001,19 @@ export async function updateTicketStatus(
     const { loadBusinessTokens } = await import('@/lib/storage');
     const connectedAccounts = await loadBusinessTokens(businessId);
     const connectedEmails = connectedAccounts.map(a => a.email.toLowerCase());
-    
+
     // Get the ticket to verify ownership
     const { data: ticketCheck } = await supabase
       .from('tickets')
       .select('user_email')
       .eq('id', ticketId)
       .maybeSingle();
-    
+
     if (!ticketCheck) {
       console.error('Ticket not found:', ticketId);
       return null;
     }
-    
+
     if (!connectedEmails.includes(ticketCheck.user_email?.toLowerCase())) {
       console.error('Ticket does not belong to this business:', ticketId, ticketCheck.user_email);
       return null;

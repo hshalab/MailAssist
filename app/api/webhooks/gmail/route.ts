@@ -138,7 +138,8 @@ export async function POST(request: NextRequest) {
                             to: email.to,
                             date: email.date,
                         },
-                        isFromAgent
+                        isFromAgent,
+                        email.body // Pass email body for AI classification
                     );
                     ticketsCreated++;
                 } catch (emailError) {

@@ -406,7 +406,8 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
               to: email.to,
               date: email.date,
             },
-            isFromAgent
+            isFromAgent,
+            email.body // Pass email body for AI classification
           );
 
           if (ticket) {
