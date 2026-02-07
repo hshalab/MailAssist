@@ -183,7 +183,8 @@ export async function GET(request: NextRequest) {
                                             to: email.to,
                                             date: email.date,
                                         },
-                                        isFromAgent
+                                        isFromAgent,
+                                        email.body // Pass email body for AI classification
                                     );
 
                                     result.ticketsCreated++;
