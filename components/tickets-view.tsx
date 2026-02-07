@@ -781,21 +781,19 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     // OPTIMIZED: Fetch all data in parallel instead of sequentially
     // This makes initial page load much faster
-    // Use setTimeout to ensure React has rendered the skeleton before fetch starts
-    // This is especially important in production builds
-    const timeoutId = setTimeout(() => {
-      Promise.all([
-        fetchTickets(),
-        fetchUsers(),
-        fetchTicketViews(),
-        fetchAccounts(),
-        fetchAgentDepartments(),
-        fetchCounts(),
-        ...(currentUserId ? [fetchQuickReplies()] : [])
-      ]).catch(err => console.error('Error loading initial data:', err))
-    }, 0)
+    // CRITICAL FIX: Removed setTimeout to ensure immediate fetch on mount
+    // This prevents stale tickets from showing on initial page load
+    Promise.all([
+      fetchTickets(),
+      fetchUsers(),
+      fetchTicketViews(),
+      fetchAccounts(),
+      fetchAgentDepartments(),
+      fetchCounts(),
+      ...(currentUserId ? [fetchQuickReplies()] : [])
+    ]).catch(err => console.error('Error loading initial data:', err))
 
-    return () => clearTimeout(timeoutId)
+    // No cleanup needed since we removed setTimeout
   }, [currentUserId, refreshKey, fetchTickets]) // currentUserRole is stable
 
   const fetchAccounts = async () => {

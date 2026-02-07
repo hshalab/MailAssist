@@ -812,7 +812,7 @@ function PageContent() {
       case "tickets":
         return (
           <TicketsView
-            key={currentUserId || "no-user"}
+            key={`${currentUserId || "no-user"}-${ticketsVersion}`}
             currentUserId={currentUserId}
             currentUserRole={currentUser?.role as "admin" | "manager" | "agent" | null}
             globalSearchTerm={globalSearch}
