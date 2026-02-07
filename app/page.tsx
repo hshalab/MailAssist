@@ -309,6 +309,8 @@ function PageContent() {
               setIsConnected(true) // FIX: Ensure connection state is synced
               setCheckingUser(false)
               setCheckingAuth(false)
+              // CRITICAL: Force tickets refresh after auth to ensure fresh data
+              setTicketsVersion(v => v + 1)
               return
             }
           }
@@ -344,6 +346,8 @@ function PageContent() {
           }
           setCheckingUser(false)
           setCheckingAuth(false)
+          // CRITICAL: Force tickets refresh after auth to ensure fresh data
+          setTicketsVersion(v => v + 1)
         } else {
           // No user found but response was ok - set checking to false
           setCheckingUser(false)
