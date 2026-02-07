@@ -810,6 +810,69 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
 
+  // Supabase Realtime subscription for instant ticket updates
+  // This enables new tickets to appear automatically when emails arrive
+  useEffect(() => {
+    if (!supabaseBrowser) {
+      console.log('[Realtime] Supabase client not available')
+      return
+    }
+
+    console.log('[Realtime] Setting up tickets subscription...')
+
+    const channel = supabaseBrowser
+      .channel('tickets-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'tickets',
+        },
+        (payload) => {
+          console.log('[Realtime] New ticket created:', payload.new)
+          // Refresh tickets to get the new one with all joined data
+          fetchTickets({ silent: true })
+          fetchCounts()
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'tickets',
+        },
+        (payload) => {
+          console.log('[Realtime] Ticket updated:', payload.new)
+          // Update the ticket in state if it exists
+          const updatedTicket = payload.new as any
+          setTickets(prev => prev.map(t =>
+            t.id === updatedTicket.id
+              ? { ...t, ...updatedTicket, departmentName: t.departmentName } // Keep joined fields
+              : t
+          ))
+          // Also update selected ticket if it's the one being updated
+          setSelectedTicket(prev =>
+            prev?.id === updatedTicket.id
+              ? { ...prev, ...updatedTicket }
+              : prev
+          )
+          fetchCounts()
+        }
+      )
+      .subscribe((status) => {
+        console.log('[Realtime] Subscription status:', status)
+      })
+
+    return () => {
+      console.log('[Realtime] Cleaning up tickets subscription')
+      if (supabaseBrowser) {
+        supabaseBrowser.removeChannel(channel)
+      }
+    }
+  }, [fetchTickets, fetchCounts])
+
   // Refresh tickets when window gains focus (to catch updates from inbox)
   // Use debouncing to prevent rapid re-fetches that cause flickering
   useEffect(() => {
@@ -1551,13 +1614,13 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         description: err instanceof Error ? err.message : "Failed to update status",
         variant: "destructive",
       })
-      
+
       // Revert optimistic updates on error
       setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: previousStatus } : t))
       if (selectedTicket?.id === targetTicketId) {
         setSelectedTicket(prev => prev ? { ...prev, status: previousStatus } : null)
       }
-      
+
       // Revert counts
       if (status === "closed") {
         setTicketCounts(prev => ({
@@ -1791,7 +1854,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         const closedTickets = tickets.filter(t => closedIds.has(t.id))
         const wasAssignedCount = closedTickets.filter(t => t.assigneeUserId === currentUserId).length
         const wasUnassignedCount = closedTickets.filter(t => !t.assigneeUserId).length
-        
+
         setTicketCounts(prev => ({
           ...prev,
           closed: prev.closed + successCount,
