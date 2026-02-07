@@ -873,13 +873,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [fetchTickets, fetchCounts])
 
-  // Refresh tickets when window gains focus (to catch updates from inbox)
+  // Refresh tickets when window gains focus or visibility changes (to catch updates from inbox)
   // Use debouncing to prevent rapid re-fetches that cause flickering
   useEffect(() => {
     console.log('🎧 Setting up event listeners in tickets-view')
 
     // Debounce ref to prevent multiple rapid fetches
     let refreshTimeoutId: NodeJS.Timeout | null = null
+    let lastFetchTime = 0
 
     const debouncedFetch = (delay: number = 1000) => {
       if (refreshTimeoutId) {
@@ -888,6 +889,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       refreshTimeoutId = setTimeout(() => {
         console.log('🔄 Debounced fetch executing...')
         fetchTickets({ silent: true })
+        fetchCounts()
+        lastFetchTime = Date.now()
         refreshTimeoutId = null
       }, delay)
     }
@@ -895,6 +898,24 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     const handleFocus = () => {
       console.log('Window focused - scheduling refresh')
       debouncedFetch(500) // Short delay for focus events
+    }
+
+    // Handle visibility change (for when user switches apps/tabs)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Only fetch if at least 5 seconds have passed since last fetch
+        const timeSinceLastFetch = Date.now() - lastFetchTime
+        if (timeSinceLastFetch > 5000) {
+          console.log('Tab became visible - scheduling refresh')
+          debouncedFetch(300) // Shorter delay for visibility changes
+        }
+      }
+    }
+
+    // Handle custom event for when navigating back to tickets view
+    const handleTicketsForceFresh = () => {
+      console.log('📍 Tickets force fresh event received')
+      debouncedFetch(100) // Very short delay for navigation
     }
 
     const handleTicketUpdate = (e: Event) => {
@@ -967,18 +988,26 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
 
     window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('ticketUpdated', handleTicketUpdate as EventListener)
     window.addEventListener('ticketsForceRefresh', handleTicketUpdate as EventListener)
+    window.addEventListener('ticketsForceFresh', handleTicketsForceFresh)
     console.log('✅ Event listeners attached')
+
+    // Trigger initial refresh when component mounts/re-mounts (navigation)
+    // This ensures fresh data when navigating back to tickets page
+    debouncedFetch(100)
 
     return () => {
       console.log('🔇 Removing event listeners')
       if (refreshTimeoutId) clearTimeout(refreshTimeoutId)
       window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('ticketUpdated', handleTicketUpdate as EventListener)
       window.removeEventListener('ticketsForceRefresh', handleTicketUpdate as EventListener)
+      window.removeEventListener('ticketsForceFresh', handleTicketsForceFresh)
     }
-  }, [fetchTickets, selectedTicket])
+  }, [fetchTickets, fetchCounts, selectedTicket])
 
   // Auto-poll for ticket updates every 60 seconds (silent refresh)
   // Reduced frequency to minimize server load and prevent UI flickering
@@ -2169,10 +2198,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     } catch (err) {
       toast({ title: "Error", description: err instanceof Error ? err.message : "Failed to generate draft", variant: "destructive" })
     } finally {
-      if (!opts?.closeTicket) { // Only stop loading if we didn't navigate away
-        setSendingReply(false)
-        setSendingAction(null)
-      }
+      setGeneratingDraft(false)
     }
   }
 
