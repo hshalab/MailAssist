@@ -788,43 +788,39 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       sessionStorage.setItem('__ticketsNavTime', Date.now().toString())
     }
 
-    // CRITICAL FIX: Trigger email sync to create tickets from recent emails
-    // This mirrors the behavior of /api/emails which creates tickets via "SMART SYNC"
-    // Without this, tickets page would only show OLD tickets (before inbox was visited)
-    const triggerEmailSync = async () => {
+    // CRITICAL FIX: Use IIFE for proper async initialization
+    // This ensures email sync completes BEFORE fetching tickets
+    (async () => {
       try {
-        // Call /api/emails with minimal results (5) just to trigger ticket creation
-        // The SMART SYNC in /api/emails will create tickets for recent emails without departments
-        console.log('[Tickets] Triggering email sync to create tickets from recent emails...')
-        await fetch('/api/emails?type=inbox&maxResults=5', {
-          cache: 'no-store',
-          headers: { 'Cache-Control': 'no-cache' }
-        })
-        console.log('[Tickets] Email sync completed - new tickets should now exist')
-      } catch (err) {
-        console.error('[Tickets] Email sync failed (non-blocking):', err)
-      }
-    }
+        // STEP 1: Trigger email sync FIRST to create tickets from recent emails
+        // This mirrors the behavior of /api/emails which creates tickets via "SMART SYNC"
+        console.log('[Tickets] STEP 1: Triggering email sync to create tickets from recent emails...')
+        try {
+          await fetch('/api/emails?type=inbox&maxResults=10', {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+          })
+          console.log('[Tickets] Email sync completed - new tickets should now exist')
+        } catch (syncErr) {
+          console.error('[Tickets] Email sync failed (non-blocking):', syncErr)
+        }
 
-    // OPTIMIZED: Fetch all data in parallel instead of sequentially
-    // This makes initial page load much faster
-    // CRITICAL FIX: Removed setTimeout to ensure immediate fetch on mount
-    // This prevents stale tickets from showing on initial page load
-    Promise.all([
-      triggerEmailSync(), // Trigger sync FIRST to create tickets from new emails
-      fetchUsers(),
-      fetchTicketViews(),
-      fetchAccounts(),
-      fetchAgentDepartments(),
-      ...(currentUserId ? [fetchQuickReplies()] : [])
-    ]).then(() => {
-      // After email sync completes, fetch tickets to get the new ones
-      console.log('[Tickets] Email sync done, now fetching tickets...')
-      return Promise.all([
-        fetchTickets(),
-        fetchCounts()
-      ])
-    }).catch(err => console.error('Error loading initial data:', err))
+        // STEP 2: Now fetch all data including the newly created tickets
+        console.log('[Tickets] STEP 2: Fetching all ticket data...')
+        await Promise.all([
+          fetchTickets(),
+          fetchUsers(),
+          fetchTicketViews(),
+          fetchAccounts(),
+          fetchAgentDepartments(),
+          fetchCounts(),
+          ...(currentUserId ? [fetchQuickReplies()] : [])
+        ])
+        console.log('[Tickets] All data loaded successfully')
+      } catch (err) {
+        console.error('[Tickets] Error loading initial data:', err)
+      }
+    })()
 
     // No cleanup needed since we removed setTimeout
   }, [currentUserId, refreshKey, fetchTickets]) // currentUserRole is stable
