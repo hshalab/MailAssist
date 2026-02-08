@@ -1047,13 +1047,26 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [fetchTickets, fetchCounts, selectedTicket])
 
-  // Auto-poll for ticket updates every 60 seconds (silent refresh)
-  // Reduced frequency to minimize server load and prevent UI flickering
+  // Auto-poll for ticket updates every 15 seconds (silent refresh)
+  // CRITICAL FIX: Also trigger email sync to create tickets from new emails
+  // This makes tickets appear instantly like emails do in inbox
   useEffect(() => {
-    const pollInterval = setInterval(() => {
-      console.log('Auto-polling for ticket updates...')
+    const pollInterval = setInterval(async () => {
+      console.log('[Tickets] Auto-polling: triggering email sync and fetching tickets...')
+
+      // STEP 1: Trigger email sync to create tickets from any new emails
+      try {
+        await fetch('/api/emails?type=inbox&maxResults=5', {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' }
+        })
+      } catch (err) {
+        console.error('[Tickets] Email sync during poll failed:', err)
+      }
+
+      // STEP 2: Fetch updated tickets
       fetchTickets({ silent: true })
-    }, 60000) // 60 seconds - reduced from 10s to prevent flickering
+    }, 15000) // 15 seconds - fast enough to feel instant
 
     return () => clearInterval(pollInterval)
   }, [fetchTickets])
