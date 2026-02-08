@@ -124,6 +124,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // Track if component has mounted to prevent double-fetch
   const hasMountedRef = useRef(false)
   const mountTimeRef = useRef(Date.now())
+  const fetchIdRef = useRef(0) // Track fetch requests to prevent race conditions
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null) // Track polling interval to clear on new fetch
 
   // Clear global search on unmount
   useEffect(() => {
@@ -558,10 +560,20 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // Define fetchTickets before it's used in effects
   const fetchTickets = useCallback(async (options?: { silent?: boolean, returnData?: boolean }) => {
     const { silent = false, returnData = false } = options || {}
+
+    // Increment fetch ID to invalidate previous requests
+    const currentFetchId = ++fetchIdRef.current
+
+    // Clear any existing polling interval from previous fetches
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current)
+      pollIntervalRef.current = null
+    }
+
     try {
       if (!silent) setLoading(true)
       setError(null)
-      console.log('[Tickets] Fetching tickets...')
+      console.log(`[Tickets] Fetching tickets (id: ${currentFetchId})...`)
 
       // Check if sync is running (tickets being created) - do this in parallel with ticket fetch
       const syncCheckPromise = checkSyncStatus()
@@ -607,6 +619,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         syncCheckPromise
       ])
 
+      // Check for stale request
+      if (currentFetchId !== fetchIdRef.current) {
+        console.log(`[Tickets] Ignoring stale fetch result (id: ${currentFetchId}, current: ${fetchIdRef.current})`)
+        return
+      }
+
       if (!response.ok) {
         throw new Error("Failed to fetch tickets")
       }
@@ -634,33 +652,50 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (syncRunning) {
         setIsCreatingTickets(true)
         // Poll for updates every 2 seconds while sync is running
-        const pollInterval = setInterval(async () => {
+        pollIntervalRef.current = setInterval(async () => {
+          // If a new main fetch has started, stop this polling (though clearInterval should have handled it)
+          if (currentFetchId !== fetchIdRef.current) {
+            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+            return
+          }
+
           const stillRunning = await checkSyncStatus()
           if (!stillRunning) {
             setIsCreatingTickets(false)
-            clearInterval(pollInterval)
-            // Fetch tickets one more time to get final count
-            const refreshResponse = await fetch(`/api/tickets?_=${Date.now()}`, { cache: "no-store", headers })
-            if (refreshResponse.ok) {
-              const refreshData = await refreshResponse.json()
-              setTickets(refreshData.tickets || [])
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current)
+              pollIntervalRef.current = null
             }
-            if (!silent) setLoading(false)
+            // Fetch tickets one more time to get final count
+            // Check stale again before fetching/setting
+            if (currentFetchId === fetchIdRef.current) {
+              const refreshResponse = await fetch(`/api/tickets?_=${Date.now()}`, { cache: "no-store", headers })
+              if (refreshResponse.ok && currentFetchId === fetchIdRef.current) {
+                const refreshData = await refreshResponse.json()
+                setTickets(refreshData.tickets || [])
+              }
+              if (!silent) setLoading(false)
+            }
           } else {
             // Refresh tickets while sync is running
-            const refreshResponse = await fetch(`/api/tickets?_=${Date.now()}`, { cache: "no-store", headers })
-            if (refreshResponse.ok) {
-              const refreshData = await refreshResponse.json()
-              setTickets(refreshData.tickets || [])
+            if (currentFetchId === fetchIdRef.current) {
+              const refreshResponse = await fetch(`/api/tickets?_=${Date.now()}`, { cache: "no-store", headers })
+              if (refreshResponse.ok && currentFetchId === fetchIdRef.current) {
+                const refreshData = await refreshResponse.json()
+                setTickets(refreshData.tickets || [])
+              }
             }
           }
         }, 2000)
 
         // Clear interval after 60 seconds max (safety)
         setTimeout(() => {
-          clearInterval(pollInterval)
-          setIsCreatingTickets(false)
-          if (!silent) setLoading(false)
+          if (pollIntervalRef.current && currentFetchId === fetchIdRef.current) {
+            clearInterval(pollIntervalRef.current)
+            pollIntervalRef.current = null
+            setIsCreatingTickets(false)
+            if (!silent) setLoading(false)
+          }
         }, 60000)
       } else {
         setIsCreatingTickets(false)
@@ -669,6 +704,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       if (returnData) return list
     } catch (err) {
+      // Ignore errors from stale requests
+      if (currentFetchId !== fetchIdRef.current) {
+        console.log(`[Tickets] Ignoring error from stale fetch (id: ${currentFetchId})`)
+        return
+      }
+
       console.error('[Tickets] Error fetching tickets:', err)
       setError(err instanceof Error ? err.message : "Failed to load tickets")
       setIsCreatingTickets(false)
