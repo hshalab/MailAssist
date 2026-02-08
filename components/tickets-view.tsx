@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -118,7 +118,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isCreatingTickets, setIsCreatingTickets] = useState(false) // Track if tickets are being creating
-  const [ticketCounts, setTicketCounts] = useState({ open: 0, assigned: 0, unassigned: 0, closed: 0 })
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
   const [activeTab, setActiveTab] = useState<"assigned" | "unassigned" | "open" | "closed">("unassigned")
 
@@ -677,42 +676,39 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery]) // Removed activeTab dependency to prevent refetching
 
-  // Fetch ticket counts
-  const fetchCounts = useCallback(async () => {
-    if (!currentUserId) return;
-    try {
-      let url = `/api/tickets/counts?_=${Date.now()}`;
-      if (selectedAccount !== 'all') {
-        url += `&account=${encodeURIComponent(selectedAccount)}`;
-      }
+  // Derived ticket counts (INSTANT & SYNCED)
+  // Instead of fetching from API, we calculate from the tickets array
+  // This ensures badges always match the list perfectly without delay
+  const ticketCounts = useMemo(() => {
+    let assigned = 0;
+    let unassigned = 0;
+    let open = 0;
+    let closed = 0;
 
-      const headers: Record<string, string> = {};
-      if (currentUserId) headers['x-user-id'] = currentUserId;
+    for (const t of tickets) {
+      const isClosed = t.status === 'closed';
+      const isUnassigned = t.assigneeUserId === null;
+      const isAssignedToMe = t.assigneeUserId === currentUserId;
 
-      const res = await fetch(url, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.counts) {
-          setTicketCounts(data.counts);
+      if (isClosed) {
+        closed++;
+      } else {
+        open++;
+        if (isAssignedToMe) {
+          assigned++;
+        } else if (isUnassigned) {
+          unassigned++;
         }
       }
-    } catch (error) {
-      console.error('Error fetching counts:', error);
     }
-  }, [currentUserId, selectedAccount]);
-
-  // Initial load and polling for counts
-  useEffect(() => {
-    fetchCounts();
-    const interval = setInterval(fetchCounts, 30000); // Poll counts every 30s
-    return () => clearInterval(interval);
-  }, [fetchCounts]);
+    return { open, assigned, unassigned, closed };
+  }, [tickets, currentUserId]);
 
   // Tab switching is now handled purely client-side via filteredTickets
-  // No need to refetch on tab change - just update counts for accuracy
+  // No need to refetch on tab change
   useEffect(() => {
-    fetchCounts();
-  }, [activeTab, fetchCounts]);
+    // No-op - kept for dependency tracking if needed later
+  }, [activeTab]);
 
   // Handle quick reply selection
   const handleSelectQuickReply = (content: string) => {
@@ -796,33 +792,38 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     // This ensures email sync completes BEFORE fetching tickets
     (async () => {
       try {
-        // STEP 1: Trigger email sync FIRST to create tickets from recent emails
-        // This mirrors the behavior of /api/emails which creates tickets via "SMART SYNC"
-        console.log('[Tickets] STEP 1: Triggering email sync to create tickets from recent emails...')
-        try {
-          await fetch('/api/emails?type=inbox&maxResults=10', {
-            cache: 'no-store',
-            headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
-          })
-          console.log('[Tickets] Email sync completed - new tickets should now exist')
-        } catch (syncErr) {
-          console.error('[Tickets] Email sync failed (non-blocking):', syncErr)
-        }
-
-        // STEP 2: Now fetch all data including the newly created tickets
-        console.log('[Tickets] STEP 2: Fetching all ticket data...')
+        // STEP 1: LOAD DB IMMEDIATELY (Atomic with counts via useMemo)
+        // This ensures the user sees something within milliseconds
+        console.log('[Tickets] STEP 1: Fetching initial DB data...')
         await Promise.all([
           fetchTickets(),
           fetchUsers(),
           fetchTicketViews(),
           fetchAccounts(),
           fetchAgentDepartments(),
-          fetchCounts(),
           ...(currentUserId ? [fetchQuickReplies()] : [])
         ])
-        console.log('[Tickets] All data loaded successfully')
+        console.log('[Tickets] Initial DB load complete - UI updated')
+
+        // STEP 2: Trigger Gmail sync in the background
+        // This is the slower part (can take 1-3 seconds)
+        console.log('[Tickets] STEP 2: Triggering background Gmail sync...')
+        try {
+          await fetch('/api/emails?type=inbox&maxResults=10', {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+          })
+          console.log('[Tickets] Background sync completed - new tickets should now exist')
+
+          // STEP 3: SILENT REFRESH
+          // If the sync created new tickets, fetch them again silently to update the UI
+          await fetchTickets({ silent: true })
+          console.log('[Tickets] Silent refresh complete')
+        } catch (syncErr) {
+          console.error('[Tickets] Background sync failed (non-blocking):', syncErr)
+        }
       } catch (err) {
-        console.error('[Tickets] Error loading initial data:', err)
+        console.error('[Tickets] Error loading data:', err)
       }
     })()
 
@@ -864,7 +865,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           console.log('[Realtime] New ticket created:', payload.new)
           // Refresh tickets to get the new one with all joined data
           fetchTickets({ silent: true })
-          fetchCounts()
         }
       )
       .on(
@@ -886,7 +886,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             // Department was updated - refetch to get JOINed departmentName
             console.log('[Realtime] Department changed for ticket', updatedTicket.id, '- refetching tickets to get department name...')
             fetchTickets({ silent: true })
-            fetchCounts()
           } else {
             // Other field updated - just merge the changes
             setTickets(prev => prev.map(t =>
@@ -900,7 +899,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                 ? { ...prev, ...updatedTicket }
                 : prev
             )
-            fetchCounts()
           }
         }
       )
@@ -914,7 +912,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         supabaseBrowser.removeChannel(channel)
       }
     }
-  }, [fetchTickets, fetchCounts])
+  }, [fetchTickets])
 
   // Refresh tickets when window gains focus or visibility changes (to catch updates from inbox)
   // Use debouncing to prevent rapid re-fetches that cause flickering
@@ -932,7 +930,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       refreshTimeoutId = setTimeout(() => {
         console.log('🔄 Debounced fetch executing...')
         fetchTickets({ silent: true })
-        fetchCounts()
         lastFetchTime = Date.now()
         refreshTimeoutId = null
       }, delay)
@@ -1049,7 +1046,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       window.removeEventListener('ticketsForceRefresh', handleTicketUpdate as EventListener)
       window.removeEventListener('ticketsForceFresh', handleTicketsForceFresh)
     }
-  }, [fetchTickets, fetchCounts, selectedTicket])
+  }, [fetchTickets, selectedTicket])
 
   // CHECK: Adaptive polling based on visibility
   // If tab is visible: Poll every 5 seconds (Super fast / Instant feel)
@@ -1070,8 +1067,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
 
       await fetchTickets({ silent: true })
-      // Also update counts immediately to prevent mismatch between list and badges
-      fetchCounts()
     }
 
     // Run immediately on mount
@@ -1618,7 +1613,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setPendingAssignment(null)
 
       toast({ title: "Ticket assigned successfully" })
-      fetchCounts()
     } catch (err) {
       console.error('[Assign Ticket] Error:', err)
       setError(err instanceof Error ? err.message : "Failed to assign ticket")
@@ -1666,27 +1660,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setSelectedTicket(optimisticTicket)
     }
 
-    // OPTIMISTICALLY UPDATE COUNTS immediately when closing
-    const wasAssigned = targetTicket.assigneeUserId === currentUserId
-    const wasUnassigned = !targetTicket.assigneeUserId
-    if (status === "closed") {
-      setTicketCounts(prev => ({
-        ...prev,
-        closed: prev.closed + 1,
-        open: Math.max(0, prev.open - 1),
-        assigned: wasAssigned ? Math.max(0, prev.assigned - 1) : prev.assigned,
-        unassigned: wasUnassigned ? Math.max(0, prev.unassigned - 1) : prev.unassigned,
-      }))
-    } else if (previousStatus === "closed") {
-      // Reopening a ticket
-      setTicketCounts(prev => ({
-        ...prev,
-        closed: Math.max(0, prev.closed - 1),
-        open: prev.open + 1,
-        assigned: wasAssigned ? prev.assigned + 1 : prev.assigned,
-        unassigned: wasUnassigned ? prev.unassigned + 1 : prev.unassigned,
-      }))
-    }
+    // 3b. Counts update automatically via useMemo on tickets change
 
     // OPTIMISTIC NAVIGATION: If closing, move to next ticket IMMEDIATELY
     if (status === "closed" && selectedTicket?.id === targetTicketId) {
@@ -1723,10 +1697,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         throw new Error(errorData.error || "Failed to update status")
       }
 
-      // Success - refresh counts from server
-      setTimeout(() => {
-        fetchCounts()
-      }, 500)
 
       toast({ title: "Status updated" })
     } catch (err) {
@@ -1743,24 +1713,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         setSelectedTicket(prev => prev ? { ...prev, status: previousStatus } : null)
       }
 
-      // Revert counts
-      if (status === "closed") {
-        setTicketCounts(prev => ({
-          ...prev,
-          closed: Math.max(0, prev.closed - 1),
-          open: prev.open + 1,
-          assigned: wasAssigned ? prev.assigned + 1 : prev.assigned,
-          unassigned: wasUnassigned ? prev.unassigned + 1 : prev.unassigned,
-        }))
-      } else if (previousStatus === "closed") {
-        setTicketCounts(prev => ({
-          ...prev,
-          closed: prev.closed + 1,
-          open: Math.max(0, prev.open - 1),
-          assigned: wasAssigned ? Math.max(0, prev.assigned - 1) : prev.assigned,
-          unassigned: wasUnassigned ? Math.max(0, prev.unassigned - 1) : prev.unassigned,
-        }))
-      }
     }
   }
 
@@ -1782,17 +1734,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         const closedTicketState = { ...selectedTicket, status: 'closed' as const }
         setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
 
-        // 1b. OPTIMISTICALLY UPDATE COUNTS immediately
-        // Determine which tab this ticket was in before closing
-        const wasAssigned = selectedTicket.assigneeUserId === currentUserId
-        const wasUnassigned = !selectedTicket.assigneeUserId
-        setTicketCounts(prev => ({
-          ...prev,
-          closed: prev.closed + 1,
-          open: Math.max(0, prev.open - 1),
-          assigned: wasAssigned ? Math.max(0, prev.assigned - 1) : prev.assigned,
-          unassigned: wasUnassigned ? Math.max(0, prev.unassigned - 1) : prev.unassigned,
-        }))
+        // 1b. Counts update automatically via useMemo on tickets change
 
         // 2. Determine next ticket & Navigate
         const currentIndex = filteredTickets.findIndex(t => t.id === targetTicketId)
@@ -1820,11 +1762,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             const errorData = await response.json().catch(() => ({}))
             throw new Error(errorData.error || "Failed to update status")
           }
-          // Success - fetch fresh counts from server to ensure accuracy
-          // Small delay to ensure DB has committed the change
-          setTimeout(() => {
-            fetchCounts()
-          }, 500)
         }).catch(err => {
           console.error('❌ Background Close Failed:', err)
           toast({
@@ -1833,14 +1770,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             variant: "destructive",
             duration: 5000
           })
-          // Revert local state on error - revert counts too
-          setTicketCounts(prev => ({
-            ...prev,
-            closed: Math.max(0, prev.closed - 1),
-            open: prev.open + 1,
-            assigned: wasAssigned ? prev.assigned + 1 : prev.assigned,
-            unassigned: wasUnassigned ? prev.unassigned + 1 : prev.unassigned,
-          }))
+          // Revert local state on error
           setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: previousStatus } : t))
         }).finally(() => {
           setUpdatingStatus(false)
@@ -1883,7 +1813,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       // Update with server data
       setTickets((prev) => prev.map((t) => (t.id === targetTicketId ? data.ticket : t)))
-      fetchCounts()
 
       // Use functional update to avoid stale closure issue
       // Only update the selected ticket if we are actually still viewing the one that was updated
@@ -1969,27 +1898,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         variant: failedCount ? "destructive" : "default"
       })
 
-      // If closing tickets, optimistically update counts based on success count
-      if (updates.status === "closed" && successCount > 0) {
-        // Count how many tickets were assigned to us vs unassigned among the closed ones
-        const closedIds = new Set((data.results || []).map((r: any) => r.ticketId))
-        const closedTickets = tickets.filter(t => closedIds.has(t.id))
-        const wasAssignedCount = closedTickets.filter(t => t.assigneeUserId === currentUserId).length
-        const wasUnassignedCount = closedTickets.filter(t => !t.assigneeUserId).length
-
-        setTicketCounts(prev => ({
-          ...prev,
-          closed: prev.closed + successCount,
-          open: Math.max(0, prev.open - successCount),
-          assigned: Math.max(0, prev.assigned - wasAssignedCount),
-          unassigned: Math.max(0, prev.unassigned - wasUnassignedCount),
-        }))
-      }
-
-      // Fetch counts from server after a delay to ensure accuracy
-      setTimeout(() => {
-        fetchCounts()
-      }, 500)
     } catch (err) {
       toast({
         title: "Error",
@@ -2351,17 +2259,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
 
-      // 3b. OPTIMISTICALLY UPDATE COUNTS immediately
-      // Determine which tab this ticket was in before closing
-      const wasAssigned = selectedTicket.assigneeUserId === currentUserId
-      const wasUnassigned = !selectedTicket.assigneeUserId
-      setTicketCounts(prev => ({
-        ...prev,
-        closed: prev.closed + 1,
-        open: Math.max(0, prev.open - 1),
-        assigned: wasAssigned ? Math.max(0, prev.assigned - 1) : prev.assigned,
-        unassigned: wasUnassigned ? Math.max(0, prev.unassigned - 1) : prev.unassigned,
-      }))
+      // 3b. Counts update automatically via useMemo on tickets change
 
       // 4. Navigate immediately
       if (nextTicket) {
@@ -2450,11 +2348,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               detail: { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId }
             }))
 
-            // Fetch counts after a delay to ensure DB has committed
-            // Don't fetch tickets to avoid overwriting optimistic state
-            setTimeout(() => {
-              fetchCounts()
-            }, 500)
 
             console.log('✅ Background Send & Close completed for:', activeTicketId);
           }
@@ -2491,16 +2384,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         if (opts?.closeTicket) {
           // Revert the ticket status in the list
           setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: 'open' } : t))
-          // Revert the counts - use selectedTicket captured at start of handler
-          const wasAssigned = selectedTicket.assigneeUserId === currentUserId
-          const wasUnassigned = !selectedTicket.assigneeUserId
-          setTicketCounts(prev => ({
-            ...prev,
-            closed: Math.max(0, prev.closed - 1),
-            open: prev.open + 1,
-            assigned: wasAssigned ? prev.assigned + 1 : prev.assigned,
-            unassigned: wasUnassigned ? prev.unassigned + 1 : prev.unassigned,
-          }))
+          // 3b. Counts update automatically via useMemo on tickets change
         }
       } finally {
         setSendingReply(false)
