@@ -1051,39 +1051,63 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [fetchTickets, fetchCounts, selectedTicket])
 
-  // Auto-poll for ticket updates every 10 seconds (silent refresh)
-  // CRITICAL FIX: Also trigger email sync to create tickets from new emails
-  // This makes tickets appear instantly like emails do in inbox
+  // CHECK: Adaptive polling based on visibility
+  // If tab is visible: Poll every 5 seconds (Super fast / Instant feel)
+  // If tab is hidden: Poll every 30 seconds (Background sync)
   useEffect(() => {
-    console.log('[Tickets] Starting auto-poll with email sync every 10 seconds')
-
     // Function to sync emails and fetch tickets
     const doSyncAndFetch = async () => {
-      console.log('[Tickets] Sync+Fetch: Starting...')
+      // Don't log on every poll to keep console clean, unless important
+      // console.log('[Tickets] Auto-poll executing...') 
+
       try {
-        // STEP 1: Trigger email sync to create tickets from any new emails
         await fetch('/api/emails?type=inbox&maxResults=5', {
           cache: 'no-store',
           headers: { 'Cache-Control': 'no-cache, no-store' }
         })
-        console.log('[Tickets] Sync+Fetch: Email sync done')
       } catch (err) {
-        console.error('[Tickets] Sync+Fetch: Email sync failed:', err)
+        // Ignore errors
       }
-      // STEP 2: Fetch updated tickets
+
       await fetchTickets({ silent: true })
-      console.log('[Tickets] Sync+Fetch: Complete')
     }
 
-    // Run IMMEDIATELY on mount (no waiting for first interval)
+    // Run immediately on mount
     doSyncAndFetch()
 
-    // Then run every 10 seconds
-    const pollInterval = setInterval(doSyncAndFetch, 10000) // 10 seconds
+    let intervalId: NodeJS.Timeout
+
+    const startPolling = () => {
+      // Clear existing interval if any
+      if (intervalId) clearInterval(intervalId)
+
+      const isVisible = document.visibilityState === 'visible'
+      const delay = isVisible ? 5000 : 30000 // 5s active, 30s background
+
+      console.log(`[Tickets] Polling started: ${isVisible ? 'FAST (5s)' : 'SLOW (30s)'}`)
+
+      intervalId = setInterval(doSyncAndFetch, delay)
+    }
+
+    // Start initial polling
+    startPolling()
+
+    // Listen for visibility changes
+    const handleVisibilityChange = () => {
+      startPolling()
+      // If becoming visible, ALSO trigger an immediate fetch
+      if (document.visibilityState === 'visible') {
+        console.log('[Tickets] Tab active - forcing immediate check')
+        doSyncAndFetch()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       console.log('[Tickets] Stopping auto-poll')
-      clearInterval(pollInterval)
+      clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [fetchTickets])
 
