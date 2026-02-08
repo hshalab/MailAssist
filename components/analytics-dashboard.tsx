@@ -20,9 +20,11 @@ import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Cart
 
 interface TicketAnalytics {
   byStatus: Record<string, number>
+  byDepartment: Record<string, number>
   totalTickets: number
   avgResponseTime: number
   avgResolutionTime: number
+  reopenedTickets: number
 }
 
 interface GuardrailStats {
@@ -76,6 +78,8 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
   const [agentAnalytics, setAgentAnalytics] = useState<AgentAnalytics[]>([])
   const [dateRange, setDateRange] = useState({ startDate: "", endDate: "" })
   const [error, setError] = useState<string | null>(null)
+  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [departments, setDepartments] = useState<Record<string, string>>({})
 
   const canViewAnalytics = currentUserRole === "admin" || currentUserRole === "manager"
 
@@ -94,7 +98,35 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
     })
 
     fetchAnalytics(startDate, endDate)
+    fetchDepartments()
   }, [canViewAnalytics])
+
+  // Auto-refresh effect
+  useEffect(() => {
+    if (!autoRefresh || !canViewAnalytics) return
+    const interval = setInterval(() => {
+      if (dateRange.startDate && dateRange.endDate) {
+        fetchAnalytics(new Date(dateRange.startDate), new Date(dateRange.endDate))
+      }
+    }, 60000) // Refresh every minute
+    return () => clearInterval(interval)
+  }, [autoRefresh, canViewAnalytics, dateRange])
+
+  const fetchDepartments = async () => {
+    try {
+      const res = await fetch('/api/departments')
+      if (res.ok) {
+        const data = await res.json()
+        const deptMap: Record<string, string> = {}
+        data.departments?.forEach((d: { id: string; name: string }) => {
+          deptMap[d.id] = d.name
+        })
+        setDepartments(deptMap)
+      }
+    } catch (e) {
+      console.error('Failed to fetch departments:', e)
+    }
+  }
 
   const fetchAnalytics = async (startDate: Date, endDate: Date) => {
     if (!canViewAnalytics) return
@@ -137,6 +169,68 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
     if (dateRange.startDate && dateRange.endDate) {
       fetchAnalytics(new Date(dateRange.startDate), new Date(dateRange.endDate))
     }
+  }
+
+  // Date preset helpers
+  const setDatePreset = (preset: 'today' | 'week' | 'month' | 'last30' | 'all') => {
+    const end = new Date()
+    let start: Date
+    switch (preset) {
+      case 'today':
+        start = new Date()
+        start.setHours(0, 0, 0, 0)
+        break
+      case 'week':
+        start = new Date()
+        start.setDate(start.getDate() - 7)
+        break
+      case 'month':
+        start = new Date()
+        start.setMonth(start.getMonth() - 1)
+        break
+      case 'last30':
+        start = new Date()
+        start.setDate(start.getDate() - 30)
+        break
+      case 'all':
+      default:
+        start = new Date('2000-01-01')
+    }
+    setDateRange({
+      startDate: start.toISOString().split('T')[0],
+      endDate: end.toISOString().split('T')[0],
+    })
+    fetchAnalytics(start, end)
+  }
+
+  // Export to CSV
+  const exportToCSV = () => {
+    if (!ticketAnalytics || !agentAnalytics.length) return
+
+    let csv = 'Metric,Value\n'
+    csv += `Total Tickets,${ticketAnalytics.totalTickets}\n`
+    csv += `Reopened Tickets,${ticketAnalytics.reopenedTickets}\n`
+    csv += `Avg Response Time (min),${ticketAnalytics.avgResponseTime.toFixed(1)}\n`
+    csv += `Avg Resolution Time (min),${ticketAnalytics.avgResolutionTime.toFixed(1)}\n\n`
+
+    csv += 'Status,Count\n'
+    Object.entries(ticketAnalytics.byStatus).forEach(([status, count]) => {
+      csv += `${status},${count}\n`
+    })
+    csv += '\n'
+
+    csv += 'Agent,Tickets Assigned,Tickets Closed,Drafts Sent\n'
+    agentAnalytics.forEach(a => {
+      csv += `${a.userName},${a.ticketsAssigned},${a.ticketsClosed},${a.draftsSent}\n`
+    })
+
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `analytics-${dateRange.startDate}-${dateRange.endDate}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
   }
 
   if (!canViewAnalytics) {
@@ -261,32 +355,59 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <input
-            type="date"
-            value={dateRange.startDate}
-            onChange={(e) => setDateRange({ ...dateRange, startDate: e.target.value })}
-            className="px-3 py-1.5 border rounded-md text-sm bg-background hover:border-foreground/20 transition-all shadow-sm"
-          />
-          <span className="text-sm text-muted-foreground">to</span>
-          <input
-            type="date"
-            value={dateRange.endDate}
-            onChange={(e) => setDateRange({ ...dateRange, endDate: e.target.value })}
-            className="px-3 py-1.5 border rounded-md text-sm bg-background hover:border-foreground/20 transition-all shadow-sm"
-          />
-          <button
-            onClick={handleDateChange}
-            className="px-4 py-1.5 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 transition-all shadow-md hover:shadow-lg"
-          >
-            Update
-          </button>
+        <div className="flex flex-col gap-2">
+          {/* Date Presets */}
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="text-xs text-muted-foreground mr-1">Quick:</span>
+            <button onClick={() => setDatePreset('today')} className="px-2 py-1 text-xs rounded border hover:bg-muted transition-colors">Today</button>
+            <button onClick={() => setDatePreset('week')} className="px-2 py-1 text-xs rounded border hover:bg-muted transition-colors">7 Days</button>
+            <button onClick={() => setDatePreset('month')} className="px-2 py-1 text-xs rounded border hover:bg-muted transition-colors">30 Days</button>
+            <button onClick={() => setDatePreset('all')} className="px-2 py-1 text-xs rounded border hover:bg-muted transition-colors">All Time</button>
+          </div>
+          {/* Custom Date Range */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="date"
+              value={dateRange.startDate}
+              onChange={(e) => setDateRange({ ...dateRange, startDate: e.target.value })}
+              className="px-3 py-1.5 border rounded-md text-sm bg-background hover:border-foreground/20 transition-all shadow-sm"
+            />
+            <span className="text-sm text-muted-foreground">to</span>
+            <input
+              type="date"
+              value={dateRange.endDate}
+              onChange={(e) => setDateRange({ ...dateRange, endDate: e.target.value })}
+              className="px-3 py-1.5 border rounded-md text-sm bg-background hover:border-foreground/20 transition-all shadow-sm"
+            />
+            <button
+              onClick={handleDateChange}
+              className="px-4 py-1.5 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 transition-all shadow-md hover:shadow-lg"
+            >
+              Update
+            </button>
+            <button
+              onClick={exportToCSV}
+              className="px-3 py-1.5 border rounded-md text-sm font-medium hover:bg-muted transition-all"
+              title="Export to CSV"
+            >
+              📥 Export
+            </button>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={autoRefresh}
+                onChange={(e) => setAutoRefresh(e.target.checked)}
+                className="rounded"
+              />
+              Auto-refresh
+            </label>
+          </div>
         </div>
       </div>
 
       {/* Key Metrics Overview - Colorful KPI Cards */}
       {ticketAnalytics && aiUsageStats && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
           <Card className="hover:shadow-lg transition-all hover:scale-[1.02] border-[var(--status-info)]/30 bg-gradient-to-br from-[var(--status-info-bg)] to-transparent">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 pt-6 px-6">
               <CardTitle className="text-sm font-medium">Total Tickets</CardTitle>
@@ -349,6 +470,21 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
               <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
                 <span className="inline-block w-2 h-2 rounded-full bg-[var(--status-success)]" />
                 {agentAnalytics.filter(a => a.ticketsAssigned > 0).length} with active tickets
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card className="hover:shadow-lg transition-all hover:scale-[1.02] border-[var(--status-high)]/30 bg-gradient-to-br from-[var(--status-high-bg)] to-transparent">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 pt-6 px-6">
+              <CardTitle className="text-sm font-medium">Reopened Tickets</CardTitle>
+              <div className="w-8 h-8 rounded-lg bg-[var(--status-high)]/20 flex items-center justify-center">
+                <TrendingUp className="h-4 w-4 text-[var(--status-high)]" />
+              </div>
+            </CardHeader>
+            <CardContent className="px-6 pb-6">
+              <div className="text-3xl font-bold tracking-tight text-foreground">{ticketAnalytics.reopenedTickets}</div>
+              <p className="text-xs text-muted-foreground mt-2">
+                Closed tickets reopened by customer
               </p>
             </CardContent>
           </Card>

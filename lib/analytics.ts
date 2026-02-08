@@ -95,23 +95,27 @@ export async function getTicketAnalytics(
   businessId?: string | null
 ): Promise<{
   byStatus: Record<string, number>;
+  byDepartment: Record<string, number>;
   totalTickets: number;
   avgResponseTime: number;
   avgResolutionTime: number;
+  reopenedTickets: number;
 }> {
   if (!supabase || !userEmail) {
     return {
       byStatus: {},
+      byDepartment: {},
       totalTickets: 0,
       avgResponseTime: 0,
       avgResolutionTime: 0,
+      reopenedTickets: 0,
     };
   }
 
   try {
     let query = supabase
       .from('tickets')
-      .select('status, created_at, updated_at, last_customer_reply_at, last_agent_reply_at')
+      .select('status, created_at, updated_at, last_customer_reply_at, last_agent_reply_at, department_id, was_reopened')
       .gte('created_at', startDate.toISOString())
       .lte('created_at', endDate.toISOString());
 
@@ -129,18 +133,22 @@ export async function getTicketAnalytics(
           // No connected accounts found, return empty
           return {
             byStatus: {},
+            byDepartment: {},
             totalTickets: 0,
             avgResponseTime: 0,
             avgResolutionTime: 0,
+            reopenedTickets: 0,
           };
         }
       } else {
         // No connected accounts found, return empty
         return {
           byStatus: {},
+          byDepartment: {},
           totalTickets: 0,
           avgResponseTime: 0,
           avgResolutionTime: 0,
+          reopenedTickets: 0,
         };
       }
     } else {
@@ -152,20 +160,30 @@ export async function getTicketAnalytics(
 
     if (error) throw error;
 
-    // Count by status
+    // Count by status and department
     const byStatus: Record<string, number> = {};
+    const byDepartment: Record<string, number> = {};
     let totalTickets = 0;
+    let reopenedTickets = 0;
     let totalResponseTime = 0;
     let totalResolutionTime = 0;
     let responseTimeCount = 0;
     let resolutionTimeCount = 0;
 
-    tickets?.forEach((ticket) => {
-      // Count by status - group open/pending/on_hold together as "open" to match Tickets page
-      const rawStatus = ticket.status || 'open';
-      const status = rawStatus === 'closed' ? 'closed' : 'open';
+    tickets?.forEach((ticket: any) => {
+      // Count by actual status for detailed breakdown
+      const status = ticket.status || 'open';
       byStatus[status] = (byStatus[status] || 0) + 1;
       totalTickets++;
+
+      // Count by department
+      const deptId = ticket.department_id || 'unassigned';
+      byDepartment[deptId] = (byDepartment[deptId] || 0) + 1;
+
+      // Count reopened tickets
+      if (ticket.was_reopened) {
+        reopenedTickets++;
+      }
 
       // Calculate response time (time from customer reply to agent reply)
       if (ticket.last_customer_reply_at && ticket.last_agent_reply_at) {
@@ -197,17 +215,21 @@ export async function getTicketAnalytics(
 
     return {
       byStatus,
+      byDepartment,
       totalTickets,
       avgResponseTime: responseTimeCount > 0 ? totalResponseTime / responseTimeCount : 0,
       avgResolutionTime: resolutionTimeCount > 0 ? totalResolutionTime / resolutionTimeCount : 0,
+      reopenedTickets,
     };
   } catch (error) {
     console.error('[Analytics] Error fetching ticket analytics:', error);
     return {
       byStatus: {},
+      byDepartment: {},
       totalTickets: 0,
       avgResponseTime: 0,
       avgResolutionTime: 0,
+      reopenedTickets: 0,
     };
   }
 }

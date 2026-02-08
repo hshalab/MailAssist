@@ -254,7 +254,7 @@ export async function GET(request: NextRequest) {
               to: email.to,
               date: email.date,
               ownerEmail: email.ownerEmail
-            }, !!isFromAgent);
+            }, !!isFromAgent, email.body); // Pass body for AI classification
           }
         }));
       } catch (smartSyncError) {

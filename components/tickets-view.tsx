@@ -1070,6 +1070,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
 
       await fetchTickets({ silent: true })
+      // Also update counts immediately to prevent mismatch between list and badges
+      fetchCounts()
     }
 
     // Run immediately on mount

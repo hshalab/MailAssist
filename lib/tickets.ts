@@ -443,6 +443,7 @@ export async function ensureTicketForEmail(
       if (ticket.status === 'closed') {
         console.log(`[Ticket] Auto-reopening closed ticket ${ticket.id} due to NEW customer reply (email: ${dateIso}, last update: ${ticket.updatedAt})`);
         updates.status = 'open';
+        updates.was_reopened = true; // Track reopened tickets for analytics
       }
       // If ticket is already open/pending, do NOT change the status
     } else {
