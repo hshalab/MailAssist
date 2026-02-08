@@ -581,7 +581,7 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
                     }}
                     className="h-[280px]"
                   >
-                    <BarChart data={aiWorkflowData}>
+                    <BarChart data={aiWorkflowData} barCategoryGap="20%" margin={{ top: 10, right: 10, left: 10, bottom: 10 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.3} />
                       <XAxis
                         dataKey="name"
@@ -591,12 +591,13 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
                       <YAxis
                         tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
                         axisLine={{ stroke: "hsl(var(--border))" }}
+                        width={40}
                       />
                       <ChartTooltip
                         content={<ChartTooltipContent />}
                         cursor={{ fill: "hsl(var(--muted))", opacity: 0.1 }}
                       />
-                      <Bar dataKey="value" radius={[6, 6, 0, 0]} fill="#8884d8">
+                      <Bar dataKey="value" radius={[6, 6, 0, 0]} fill="#8884d8" maxBarSize={80}>
                         {aiWorkflowData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.fill} />
                         ))}

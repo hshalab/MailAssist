@@ -1,65 +1,98 @@
---- Deep Dive Audit ---
-
-Ticket Distribution:
-{
-  "unclassified": 241,
-  "df8b0b4b-5a33-4ec0-af82-574406abced2": 6
-}
-Sample Classified Tickets:
-[
-  {
-    "id": "7e045a38-82eb-4362-bdf4-6fa653d5692f",
-    "subject": "Seating Plan of Final Exam for Saturday (December 20, 2025) - Fall-2025",
-    "deptId": "df8b0b4b-5a33-4ec0-af82-574406abced2",
-    "userEmail": "i221885@nu.edu.pk",
-    "ownerEmail": "i221885@nu.edu.pk",
-    "assignee": null
-  },
-  {
-    "id": "0ce23d70-bc81-4e03-b9d2-bcc798051185",
-    "subject": "Seating Plan of Final Exam for Tuesday, December 30, 2025 (Morning 09:00-12:00) - Fall-2025",
-    "deptId": "df8b0b4b-5a33-4ec0-af82-574406abced2",
-    "userEmail": "i221885@nu.edu.pk",
-    "ownerEmail": "i221885@nu.edu.pk",
-    "assignee": null
-  },
-  {
-    "id": "ead244f2-3ca0-4fc4-8035-443b0c18e062",
-    "subject": "New announcement: \"Dear Students,\n\n\nThe marks for…\"",
-    "deptId": "df8b0b4b-5a33-4ec0-af82-574406abced2",
-    "userEmail": "i221885@nu.edu.pk",
-    "ownerEmail": "i221885@nu.edu.pk",
-    "assignee": null
-  },
-  {
-    "id": "f8526986-e17a-4a4b-92ae-fee06babff50",
-    "subject": "Bank The Unbanked Ideathon (No-code Hackathon)",
-    "deptId": "df8b0b4b-5a33-4ec0-af82-574406abced2",
-    "userEmail": "i221885@nu.edu.pk",
-    "ownerEmail": "i221885@nu.edu.pk",
-    "assignee": null
-  },
-  {
-    "id": "6d3d4b63-8c81-4954-97d5-577c62e522ed",
-    "subject": "Your Year in Code",
-    "deptId": "df8b0b4b-5a33-4ec0-af82-574406abced2",
-    "userEmail": "i221885@nu.edu.pk",
-    "ownerEmail": "i221885@nu.edu.pk",
-    "assignee": null
-  }
-]
-
-Agent: Muhammad Salman (muhammad.salman1205@gmail.com)
-Agent User Email (Scope): null
-Assigned Dept IDs: ["df8b0b4b-5a33-4ec0-af82-574406abced2","05eafb28-1c6b-4bbc-a5ff-55e57d24b58d"]
-Should see 0 automatic tickets (Dept match + Scope match)
-(Dept match only count: 6)
-
-Active Tokens:
+﻿Checking tokens table...
+Tokens found: 5
 [
   {
     "user_email": "i221885@nu.edu.pk",
-    "business_id": "109846d9-803b-4550-8142-43171c6d19bb",
-    "updated_at": "2026-01-06T16:12:27.682754+00:00"
+    "business_id": "ac3d1124-752b-42c3-aaed-d5ccb2b61d50",
+    "provider": "gmail",
+    "updated_at": "2026-01-13T12:01:51.414743+00:00"
+  },
+  {
+    "user_email": "support@carifex.com",
+    "business_id": "f7d1f145-2a5b-4e5d-ba14-a4fe8617e601",
+    "provider": "gmail",
+    "updated_at": "2026-02-08T11:40:18.356876+00:00"
+  },
+  {
+    "user_email": "support@carifex.com",
+    "business_id": null,
+    "provider": "gmail",
+    "updated_at": "2026-02-02T17:40:36.434149+00:00"
+  },
+  {
+    "user_email": "muhammad.salman3372@gmail.com",
+    "business_id": null,
+    "provider": "gmail",
+    "updated_at": "2026-02-08T11:42:47.103617+00:00"
+  },
+  {
+    "user_email": "i221885@nu.edu.pk",
+    "business_id": null,
+    "provider": "gmail",
+    "updated_at": "2026-01-12T14:11:36.678861+00:00"
+  }
+]
+
+Checking users table for context...
+[
+  {
+    "id": "c21b056e-6db8-4292-8c05-2396e20c4e40",
+    "email": "notion0832@gmail.com",
+    "role": "admin",
+    "business_id": "fb7a1777-3c9a-4c7b-94ff-da12eb7fe922"
+  },
+  {
+    "id": "70fb93f9-e5e9-4ae3-abc7-ffa2648c8b57",
+    "email": "estyjb4@gmail.com",
+    "role": "manager",
+    "business_id": "f7d1f145-2a5b-4e5d-ba14-a4fe8617e601"
+  },
+  {
+    "id": "bae8ce94-b260-4e6b-838b-0d362126bf92",
+    "email": "muhammad.salman3372@gmail.com",
+    "role": "admin",
+    "business_id": null
+  },
+  {
+    "id": "145560d7-0366-46bf-b0e3-63052ed12de7",
+    "email": "tinesalaysay@gmail.com",
+    "role": "agent",
+    "business_id": "f7d1f145-2a5b-4e5d-ba14-a4fe8617e601"
+  },
+  {
+    "id": "0e38ddf4-e126-49dc-b4e0-82231d939a0c",
+    "email": "agbelayi.esther@gmail.com",
+    "role": "manager",
+    "business_id": "f7d1f145-2a5b-4e5d-ba14-a4fe8617e601"
+  },
+  {
+    "id": "19f5fc7f-2750-44a2-a415-09e36e728674",
+    "email": "muhammad.salman1205@gmail.com",
+    "role": "agent",
+    "business_id": "f7d1f145-2a5b-4e5d-ba14-a4fe8617e601"
+  },
+  {
+    "id": "145845fd-e086-459f-9372-44dba465c50f",
+    "email": "muhammad.salman1203@gmail.com",
+    "role": "admin",
+    "business_id": null
+  },
+  {
+    "id": "d1b9627a-c977-4278-afaa-8a957b91611f",
+    "email": "support@carifex.com",
+    "role": "admin",
+    "business_id": "f7d1f145-2a5b-4e5d-ba14-a4fe8617e601"
+  },
+  {
+    "id": "70269cf8-dbae-4fd4-9b1e-57abcac5480c",
+    "email": "muhammad.salman1205@gmail.com",
+    "role": "agent",
+    "business_id": "ac3d1124-752b-42c3-aaed-d5ccb2b61d50"
+  },
+  {
+    "id": "02aa3ee0-2619-4e58-b376-991180b64f71",
+    "email": "i221885@nu.edu.pk",
+    "role": "admin",
+    "business_id": "ac3d1124-752b-42c3-aaed-d5ccb2b61d50"
   }
 ]

@@ -113,11 +113,15 @@ export async function getTicketAnalytics(
   }
 
   try {
+    // Set end date to end of day to include the full day
+    const endDateWithTime = new Date(endDate);
+    endDateWithTime.setHours(23, 59, 59, 999);
+
     let query = supabase
       .from('tickets')
-      .select('status, created_at, updated_at, last_customer_reply_at, last_agent_reply_at, department_id, was_reopened')
+      .select('status, created_at, updated_at, last_customer_reply_at, last_agent_reply_at, department_id')
       .gte('created_at', startDate.toISOString())
-      .lte('created_at', endDate.toISOString());
+      .lte('created_at', endDateWithTime.toISOString());
 
     // For business accounts, get all tickets for connected Gmail accounts in this business
     // For personal accounts, filter by user_email
@@ -180,10 +184,7 @@ export async function getTicketAnalytics(
       const deptId = ticket.department_id || 'unassigned';
       byDepartment[deptId] = (byDepartment[deptId] || 0) + 1;
 
-      // Count reopened tickets
-      if (ticket.was_reopened) {
-        reopenedTickets++;
-      }
+      // Note: was_reopened tracking requires schema migration
 
       // Calculate response time (time from customer reply to agent reply)
       if (ticket.last_customer_reply_at && ticket.last_agent_reply_at) {
