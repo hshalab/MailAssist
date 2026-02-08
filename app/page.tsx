@@ -903,7 +903,13 @@ function PageContent() {
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveView(tab.id)}
+              onClick={() => {
+                // CRITICAL: Force fresh ticket data when navigating to tickets page
+                if (tab.id === 'tickets') {
+                  setTicketsVersion(v => v + 1)
+                }
+                setActiveView(tab.id)
+              }}
               className={`flex-1 py-3 text-sm font-medium ${activeView === tab.id ? "text-primary border-b-2 border-primary" : "text-muted-foreground"
                 }`}
             >
@@ -1107,7 +1113,13 @@ function PageContent() {
           {isConnected && (
             <Sidebar
               activeView={activeView}
-              setActiveView={setActiveView}
+              setActiveView={(view) => {
+                // CRITICAL: Force fresh ticket data when navigating to tickets page
+                if (view === 'tickets') {
+                  setTicketsVersion(v => v + 1)
+                }
+                setActiveView(view)
+              }}
               onLogout={handleLogout}
               currentUser={currentUser}
             />
