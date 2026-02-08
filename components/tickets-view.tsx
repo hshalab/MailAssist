@@ -843,20 +843,32 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         },
         (payload) => {
           console.log('[Realtime] Ticket updated:', payload.new)
-          // Update the ticket in state if it exists
           const updatedTicket = payload.new as any
-          setTickets(prev => prev.map(t =>
-            t.id === updatedTicket.id
-              ? { ...t, ...updatedTicket, departmentName: t.departmentName } // Keep joined fields
-              : t
-          ))
-          // Also update selected ticket if it's the one being updated
-          setSelectedTicket(prev =>
-            prev?.id === updatedTicket.id
-              ? { ...prev, ...updatedTicket }
-              : prev
-          )
-          fetchCounts()
+
+          // Check if department_id was updated (classification happened)
+          const oldTicket = tickets.find(t => t.id === updatedTicket.id)
+          const deptChanged = oldTicket && oldTicket.departmentId !== updatedTicket.department_id
+
+          if (deptChanged) {
+            // Department was updated - refetch to get JOINed departmentName
+            console.log('[Realtime] Department changed for ticket', updatedTicket.id, '- refetching tickets to get department name...')
+            fetchTickets({ silent: true })
+            fetchCounts()
+          } else {
+            // Other field updated - just merge the changes
+            setTickets(prev => prev.map(t =>
+              t.id === updatedTicket.id
+                ? { ...t, ...updatedTicket }
+                : t
+            ))
+            // Also update selected ticket if it's the one being updated
+            setSelectedTicket(prev =>
+              prev?.id === updatedTicket.id
+                ? { ...prev, ...updatedTicket }
+                : prev
+            )
+            fetchCounts()
+          }
         }
       )
       .subscribe((status) => {
@@ -992,9 +1004,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     window.addEventListener('ticketsForceFresh', handleTicketsForceFresh)
     console.log('✅ Event listeners attached')
 
-    // Trigger initial refresh when component mounts/re-mounts (navigation)
-    // This ensures fresh data when navigating back to tickets page
-    debouncedFetch(100)
+    // NOTE: No need to fetch here - tickets are already fetched in the main initialization effect (line 786-794)
+    // This prevents duplicate fetches that can cause flickering
 
     return () => {
       console.log('🔇 Removing event listeners')

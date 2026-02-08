@@ -161,23 +161,46 @@ export async function getOrCreateTicketForThread(
 
   const ticket = mapRowToTicket(data);
 
-  // 2) Classify ticket to department (async, non-blocking)
+  // 2) Classify ticket to department (SYNCHRONOUS - wait for classification to complete)
+  // This ensures tickets appear with their workstream already assigned
   // Pass customer email and thread ID for enhanced classification context
-  // Note: Email body is stored in the emails table, not a separate messages table
-
   if (emailBody) {
-    classifyTicketToDepartmentAsync(
-      ticket.id,
-      seed.subject,
-      emailBody,
-      userEmail,
-      seed.customerEmail, // Customer email for history lookup
-      threadId // Thread ID for context
-    ).catch(err => {
-      console.error('[Ticket] Department classification failed (non-blocking):', err);
-    });
-  }
+    console.log(`[Ticket] Starting synchronous classification for ticket ${ticket.id}...`);
+    try {
+      await classifyTicketToDepartmentAsync(
+        ticket.id,
+        seed.subject,
+        emailBody,
+        userEmail,
+        seed.customerEmail, // Customer email for history lookup
+        threadId // Thread ID for context
+      );
+      console.log(`[Ticket] Classification completed for ticket ${ticket.id}`);
 
+      // Refetch the ticket to get the updated department info
+      const { data: updatedData } = await supabase
+        .from('tickets')
+        .select(`
+          *,
+          assignee:users!tickets_assignee_user_id_fkey(id, name, is_active),
+          department:departments(id, name)
+        `)
+        .eq('id', ticket.id)
+        .single();
+
+      if (updatedData) {
+        const updatedTicket = mapRowToTicket(updatedData);
+        // Extract department name from JOIN
+        if (updatedData.department && typeof updatedData.department === 'object' && updatedData.department.name) {
+          updatedTicket.departmentName = updatedData.department.name;
+        }
+        return updatedTicket;
+      }
+    } catch (err) {
+      console.error('[Ticket] Department classification failed:', err);
+      // Continue anyway - ticket is created, just without classification
+    }
+  }
 
   return ticket;
 }
