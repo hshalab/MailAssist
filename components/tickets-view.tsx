@@ -792,30 +792,38 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     // This ensures email sync completes BEFORE fetching tickets
     (async () => {
       try {
-        // STEP 1: LOAD DB IMMEDIATELY (Atomic with counts via useMemo)
-        // This ensures the user sees something within milliseconds
-        console.log('[Tickets] STEP 1: Fetching initial DB data...')
-        await Promise.all([
-          fetchTickets(),
+        // STEP 1: FETCH TICKETS FIRST (Instant UI)
+        // This is the most critical data - show the list ASAP
+        console.log('[Tickets] STEP 1: Fetching tickets (priority)...')
+        await fetchTickets()
+        console.log('[Tickets] Tickets loaded - UI visible now')
+
+        // STEP 2: Load secondary data in parallel (non-blocking)
+        // This runs after tickets are visible, so user sees list immediately
+        console.log('[Tickets] STEP 2: Loading secondary data (background)...')
+        Promise.all([
           fetchUsers(),
           fetchTicketViews(),
           fetchAccounts(),
           fetchAgentDepartments(),
           ...(currentUserId ? [fetchQuickReplies()] : [])
-        ])
-        console.log('[Tickets] Initial DB load complete - UI updated')
+        ]).then(() => {
+          console.log('[Tickets] Secondary data loaded')
+        }).catch(err => {
+          console.error('[Tickets] Secondary data failed:', err)
+        })
 
-        // STEP 2: Trigger Gmail sync in the background
-        // This is the slower part (can take 1-3 seconds)
-        console.log('[Tickets] STEP 2: Triggering background Gmail sync...')
+        // STEP 3: Trigger Gmail sync in the background
+        // This is the slowest part (can take 1-3 seconds) - runs after UI is visible
+        console.log('[Tickets] STEP 3: Triggering background Gmail sync...')
         try {
           await fetch('/api/emails?type=inbox&maxResults=10', {
             cache: 'no-store',
             headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
           })
-          console.log('[Tickets] Background sync completed - new tickets should now exist')
+          console.log('[Tickets] Background sync completed - checking for new tickets...')
 
-          // STEP 3: SILENT REFRESH
+          // STEP 4: SILENT REFRESH
           // If the sync created new tickets, fetch them again silently to update the UI
           await fetchTickets({ silent: true })
           console.log('[Tickets] Silent refresh complete')
