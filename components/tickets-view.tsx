@@ -564,7 +564,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       const syncCheckPromise = checkSyncStatus()
 
       const timestamp = Date.now()
-      let url = `/api/tickets?_=${timestamp}`
+      // Add navigation timestamp to force fresh data on every page visit
+      // This prevents cached/stale data from being shown when navigating to tickets page
+      const navTimestamp = typeof window !== 'undefined' ? sessionStorage.getItem('__ticketsNavTime') || timestamp : timestamp
+
+      let url = `/api/tickets?_=${timestamp}&nav=${navTimestamp}`
       if (selectedAccount !== 'all') {
         url += `&account=${encodeURIComponent(selectedAccount)}`
       }
@@ -778,6 +782,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     // Ensure loading state is set before fetch
     setLoading(true)
+
+    // Set navigation timestamp to force fresh data on this page visit
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('__ticketsNavTime', Date.now().toString())
+    }
 
     // OPTIMIZED: Fetch all data in parallel instead of sequentially
     // This makes initial page load much faster

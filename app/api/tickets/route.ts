@@ -11,6 +11,10 @@ import { canViewAllTickets } from '@/lib/permissions';
 import { getCurrentUserEmail } from '@/lib/storage';
 import { validateBusinessSession } from '@/lib/session';
 
+// Force dynamic to prevent Next.js from caching this route
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET(request: NextRequest) {
   try {
     // CRITICAL FIX: Check for userId in header first (from sessionStorage, per-tab)
