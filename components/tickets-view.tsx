@@ -122,6 +122,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
   const [activeTab, setActiveTab] = useState<"assigned" | "unassigned" | "open" | "closed">("unassigned")
 
+  // Track if component has mounted to prevent double-fetch
+  const hasMountedRef = useRef(false)
+  const mountTimeRef = useRef(Date.now())
+
   // Clear global search on unmount
   useEffect(() => {
     return () => {
@@ -1047,28 +1051,40 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [fetchTickets, fetchCounts, selectedTicket])
 
-  // Auto-poll for ticket updates every 15 seconds (silent refresh)
+  // Auto-poll for ticket updates every 10 seconds (silent refresh)
   // CRITICAL FIX: Also trigger email sync to create tickets from new emails
   // This makes tickets appear instantly like emails do in inbox
   useEffect(() => {
-    const pollInterval = setInterval(async () => {
-      console.log('[Tickets] Auto-polling: triggering email sync and fetching tickets...')
+    console.log('[Tickets] Starting auto-poll with email sync every 10 seconds')
 
-      // STEP 1: Trigger email sync to create tickets from any new emails
+    // Function to sync emails and fetch tickets
+    const doSyncAndFetch = async () => {
+      console.log('[Tickets] Sync+Fetch: Starting...')
       try {
+        // STEP 1: Trigger email sync to create tickets from any new emails
         await fetch('/api/emails?type=inbox&maxResults=5', {
           cache: 'no-store',
-          headers: { 'Cache-Control': 'no-cache' }
+          headers: { 'Cache-Control': 'no-cache, no-store' }
         })
+        console.log('[Tickets] Sync+Fetch: Email sync done')
       } catch (err) {
-        console.error('[Tickets] Email sync during poll failed:', err)
+        console.error('[Tickets] Sync+Fetch: Email sync failed:', err)
       }
-
       // STEP 2: Fetch updated tickets
-      fetchTickets({ silent: true })
-    }, 15000) // 15 seconds - fast enough to feel instant
+      await fetchTickets({ silent: true })
+      console.log('[Tickets] Sync+Fetch: Complete')
+    }
 
-    return () => clearInterval(pollInterval)
+    // Run IMMEDIATELY on mount (no waiting for first interval)
+    doSyncAndFetch()
+
+    // Then run every 10 seconds
+    const pollInterval = setInterval(doSyncAndFetch, 10000) // 10 seconds
+
+    return () => {
+      console.log('[Tickets] Stopping auto-poll')
+      clearInterval(pollInterval)
+    }
   }, [fetchTickets])
 
   // Apply deep-linked ticket selection once tickets are loaded
