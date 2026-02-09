@@ -575,9 +575,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setError(null)
       console.log(`[Tickets] Fetching tickets (id: ${currentFetchId})...`)
 
-      // Check if sync is running (tickets being created) - do this in parallel with ticket fetch
-      const syncCheckPromise = checkSyncStatus()
-
       const timestamp = Date.now()
       // Add navigation timestamp to force fresh data on every page visit
       // This prevents cached/stale data from being shown when navigating to tickets page
@@ -613,11 +610,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         headers['x-user-id'] = currentUserId;
       }
 
-      // Fetch tickets and check sync status in parallel
-      const [response, syncRunning] = await Promise.all([
-        fetch(url, { cache: "no-store", headers }),
-        syncCheckPromise
-      ])
+      // Fetch tickets and check sync status
+      // OPTIMIZATION: Start both requests but don't let sync check block ticket display
+      // We want to show tickets AS SOON AS they are ready
+      const ticketsPromise = fetch(url, { cache: "no-store", headers })
+      const syncCheckPromise = checkSyncStatus()
+
+      // Await tickets first - CRITICAL for UI performance
+      const response = await ticketsPromise
 
       // Check for stale request
       if (currentFetchId !== fetchIdRef.current) {
@@ -628,12 +628,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (!response.ok) {
         throw new Error("Failed to fetch tickets")
       }
+
       const data = await response.json()
-      console.log('[Tickets] Received tickets:', data.tickets?.length || 0, 'Sync running:', syncRunning)
+      console.log('[Tickets] Received tickets:', data.tickets?.length || 0)
 
       // Extract unique owner emails for the filter dropdown if we don't have them
-      // CRITICAL: Only add emails from tickets that are from currently connected accounts
-      // The API already filters tickets by connected accounts, so we can trust the emails here
       if (data.tickets && data.tickets.length > 0) {
         const uniqueEmails = Array.from(new Set(data.tickets.map((t: Ticket) => t.ownerEmail).filter(Boolean))) as string[]
         setEmails(prev => {
@@ -641,12 +640,19 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           return combined.sort()
         })
       } else {
-        // If no tickets, clear emails list (might have been disconnected)
         setEmails([])
       }
 
       const list = data.tickets || []
       setTickets(list)
+
+      // TICKETS LOADED - Stop loading spinner immediately so user can see data
+      if (!silent) setLoading(false)
+
+      // Now check sync status (non-blocking for UI)
+      const syncRunning = await syncCheckPromise
+      console.log('[Tickets] Sync status check complete:', syncRunning)
+
 
       // If sync is running, keep showing creating indicator and poll for updates
       if (syncRunning) {
@@ -674,7 +680,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                 const refreshData = await refreshResponse.json()
                 setTickets(refreshData.tickets || [])
               }
-              if (!silent) setLoading(false)
+              // Loading is already false
             }
           } else {
             // Refresh tickets while sync is running
@@ -694,12 +700,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             clearInterval(pollIntervalRef.current)
             pollIntervalRef.current = null
             setIsCreatingTickets(false)
-            if (!silent) setLoading(false)
+            // Loading is already false
           }
         }, 60000)
       } else {
         setIsCreatingTickets(false)
-        if (!silent) setLoading(false)
+        // Loading is already false
       }
 
       if (returnData) return list
@@ -2535,10 +2541,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       // within the "Open" bucket that the server returned.
       console.log('[Filter] Applying tab filter (' + activeTab + '):', filtered.length)
       if (activeTab === "assigned") {
-        filtered = filtered.filter(t => t.assigneeUserId === currentUserId)
+        // assigned tab: assigned to me AND not closed
+        filtered = filtered.filter(t => t.assigneeUserId === currentUserId && t.status !== "closed")
         console.log('[Filter] Assigned filter:', filtered.length)
       } else if (activeTab === "unassigned") {
-        filtered = filtered.filter(t => t.assigneeUserId === null)
+        // unassigned tab: no assignee AND not closed
+        filtered = filtered.filter(t => t.assigneeUserId === null && t.status !== "closed")
         console.log('[Filter] Unassigned filter:', filtered.length)
       } else if (activeTab === "open") {
         // "Open" tab usually means "All Open" (or maybe "Open + Unassigned"?). 

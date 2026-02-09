@@ -427,11 +427,19 @@ export async function ensureTicketForEmail(
       return ticket;
     }
   } else {
+    console.log(`[Ticket] Processing customer email for ticket ${ticket.id} (Status: ${ticket.status})`);
+
     // CRITICAL FIX: Check if email is newer than ticket's last update (including status changes)
     // This prevents old emails from reopening tickets that were closed AFTER the email arrived
     if (ticketUpdatedAt && incomingDate <= ticketUpdatedAt) {
       // Email is older than or equal to the ticket's last update - ignore it
-      console.log(`[Ticket] Ignoring old customer email ${email.id} for ticket ${ticket.id} (email: ${dateIso}, ticket updated: ${ticket.updatedAt})`);
+      console.log(`[Ticket] Ignoring old customer email ${email.id} for ticket ${ticket.id}`, {
+        emailDate: dateIso,
+        ticketUpdated: ticket.updatedAt,
+        incomingTimestamp: incomingDate.getTime(),
+        ticketTimestamp: ticketUpdatedAt.getTime(),
+        diff: incomingDate.getTime() - ticketUpdatedAt.getTime()
+      });
       return ticket;
     }
 
@@ -441,14 +449,20 @@ export async function ensureTicketForEmail(
 
       // ONLY re-open if ticket is CLOSED - do NOT touch status for open/pending tickets
       if (ticket.status === 'closed') {
-        console.log(`[Ticket] Auto-reopening closed ticket ${ticket.id} due to NEW customer reply (email: ${dateIso}, last update: ${ticket.updatedAt})`);
+        console.log(`[Ticket] Auto-reopening closed ticket ${ticket.id} due to NEW customer reply`, {
+          emailDate: dateIso,
+          lastUpdate: ticket.updatedAt
+        });
         updates.status = 'open';
         updates.was_reopened = true; // Track reopened tickets for analytics
       }
       // If ticket is already open/pending, do NOT change the status
     } else {
       // Email is older than our last known customer reply - ignore it
-      console.log(`[Ticket] Ignoring old customer email ${email.id} for ticket ${ticket.id} (already have newer reply)`);
+      console.log(`[Ticket] Ignoring old customer email ${email.id} for ticket ${ticket.id} (already have newer reply)`, {
+        emailDate: dateIso,
+        lastCustomerReply: ticket.lastCustomerReplyAt
+      });
       return ticket;
     }
   }
