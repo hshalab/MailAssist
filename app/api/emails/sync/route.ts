@@ -138,19 +138,20 @@ export async function POST(request: NextRequest) {
       queued: currentSyncState.queued
     });
 
-    // OPTIMIZED: Only check for emails with embeddings using a lightweight query
-    // Instead of loading all emails, just get IDs that have embeddings
+    // OPTIMIZED: Only check for emails with embeddings AND ownerEmail using a lightweight query
+    // Emails without ownerEmail need to be regenerated for account-specific learning
     let emailsWithEmbeddings = new Set<string>();
 
     if (supabase && userEmail) {
       try {
-        // Only fetch IDs that have embeddings (much lighter query)
+        // Only fetch IDs that have embeddings AND ownerEmail (properly scoped)
         const { data: existingEmails } = await supabase
           .from('emails')
-          .select('id')
+          .select('id, owner_email')
           .eq('is_sent', true)
           .eq('user_email', userEmail)
-          .not('embedding', 'is', null); // Has embedding
+          .not('embedding', 'is', null) // Has embedding
+          .not('owner_email', 'is', null); // Has ownerEmail (account scoped)
 
         if (existingEmails) {
           emailsWithEmbeddings = new Set(existingEmails.map((e: any) => e.id));
@@ -161,13 +162,14 @@ export async function POST(request: NextRequest) {
         const storedEmails = await loadStoredEmails();
         emailsWithEmbeddings = new Set(
           storedEmails
-            .filter(e => e.embedding && e.embedding.length > 0)
+            .filter(e => e.embedding && e.embedding.length > 0 && e.ownerEmail)
             .map(e => e.id)
         );
       }
     }
 
-    // Filter out only emails that already have embeddings
+    // Filter out emails that already have embeddings AND ownerEmail
+    // Emails without ownerEmail will be regenerated with proper account scoping
     const newEmails = sentEmails.filter(e => !emailsWithEmbeddings.has(e.id));
 
     if (newEmails.length === 0) {
@@ -507,9 +509,14 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
           return normalized.length <= maxLength ? normalized : normalized.slice(0, maxLength);
         };
 
+        // Import intent extraction function
+        const { extractEmailIntent, createEmailContextWithIntent } = await import('@/lib/ai-draft');
+        
         const contexts = batch.map(email => {
           const trimmedBody = sanitizeEmailBody(email.body || '', 2000);
-          return createEmailContext(email.subject, trimmedBody);
+          // Use new intent-based context for better email type matching
+          const intent = extractEmailIntent(email.subject, trimmedBody);
+          return createEmailContextWithIntent(email.subject, trimmedBody, intent);
         });
 
         // Generate all embeddings in one API call (much faster!)
@@ -524,12 +531,21 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
             const isReply = email.isReply ?? /^(re|fwd?):\s*/i.test(email.subject || '');
             const trimmedBody = sanitizeEmailBody(email.body || '', 2000);
 
+            // Extract owner email from the 'from' field (the account that sent this email)
+            // This ensures embeddings are scoped per account for custom learning
+            const extractEmailAddress = (emailStr: string): string => {
+              const match = emailStr?.match(/<([^>]+)>/) || emailStr?.match(/([^\s<>]+@[^\s<>]+)/);
+              return match ? match[1].toLowerCase() : emailStr?.toLowerCase() || '';
+            };
+            const ownerEmail = email.from ? extractEmailAddress(email.from) : undefined;
+
             const storedEmail = {
               ...email,
               body: trimmedBody,
               embedding,
               isSent: true,
               isReply: isReply,
+              ownerEmail: ownerEmail, // Set owner email for account-specific scoping
             };
 
             // Save to database using upsert (more efficient than loading all emails)

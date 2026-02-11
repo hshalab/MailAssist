@@ -616,8 +616,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   }, [fetchTicketCounts])
 
   // Define fetchTickets before it's used in effects
-  const fetchTickets = useCallback(async (options?: { silent?: boolean, returnData?: boolean, pageNum?: number, limit?: number }) => {
-    const { silent = false, returnData = false, pageNum = 1, limit } = options || {}
+  const fetchTickets = useCallback(async (options?: { silent?: boolean, returnData?: boolean, pageNum?: number, limit?: number, forceTab?: 'closed' | 'active' }) => {
+    const { silent = false, returnData = false, pageNum = 1, limit, forceTab } = options || {}
     // If loading more (pageNum > 1), don't set main loading state
     const isLoadMore = pageNum > 1
 
@@ -632,8 +632,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     try {
       // Check cache for instant load (Page 1 only)
+      // Use forceTab if provided (for prefetching), otherwise use activeTab
+      const effectiveTab = forceTab || activeTab
       let initialCachedData: Ticket[] | null = null
-      const targetMode = activeTab === 'closed' ? 'closed' : 'active'
+      const targetMode = effectiveTab === 'closed' ? 'closed' : 'active'
 
       // Only use cache if we are fetching page 1, have no search/filters, and have cached data
       if (pageNum === 1 && !activeSearchQuery && statusFilter === 'all' && assigneeFilter === 'all' && departmentFilter === 'all' && tagsFilter === 'all') {
@@ -685,9 +687,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       // Determine filters based on activeTab and dropdowns
       // OPTIMIZATION: Group Open/Assigned/Unassigned into a single "Active" fetch
       // This allows instant tab switching without network requests
+      // Note: effectiveTab is already defined above (line 636)
 
-      const isActiveTab = ['open', 'assigned', 'unassigned'].includes(activeTab)
-      const isClosedTab = activeTab === 'closed'
+      const isActiveTab = ['open', 'assigned', 'unassigned'].includes(effectiveTab)
+      const isClosedTab = effectiveTab === 'closed'
 
       // 1. Status Filter
       if (statusFilter !== 'all') {
@@ -787,12 +790,19 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       const list = data.tickets || []
 
       if (pageNum === 1) {
-        setTickets(list)
+        // Only update displayed tickets if this is NOT a prefetch (forceTab)
+        // Prefetches should only update the cache, not the displayed tickets
+        if (!forceTab) {
+          setTickets(list)
+        }
         // Update cache
-        const cacheKey = activeTab === 'closed' ? 'closed' : 'active'
+        const cacheKey = effectiveTab === 'closed' ? 'closed' : 'active'
         // Only update cache if we are not searching/filtering
         if (!activeSearchQuery && statusFilter === 'all' && assigneeFilter === 'all') {
           ticketCache.current[cacheKey] = list
+          if (forceTab) {
+            console.log(`[Tickets] Prefetched and cached ${list.length} ${cacheKey} tickets`)
+          }
         }
       } else {
         setTickets(prev => [...prev, ...list])
@@ -944,6 +954,43 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // Keep ref to latest fetchTickets to avoid effect dependencies
   const fetchTicketsRef = useRef(fetchTickets)
   useEffect(() => { fetchTicketsRef.current = fetchTickets }, [fetchTickets])
+
+  // Prefetch closed tickets in background for instant tab switching
+  useEffect(() => {
+    // Only prefetch if:
+    // 1. We have active tickets loaded (component is ready)
+    // 2. Closed cache is empty (not already prefetched)
+    // 3. Not currently loading
+    // 4. No active search/filters (to avoid unnecessary fetches)
+    if (
+      tickets.length > 0 && 
+      ticketCache.current['closed'].length === 0 &&
+      activeTab !== 'closed' && // Don't prefetch if already on closed tab
+      !loading &&
+      !activeSearchQuery &&
+      statusFilter === 'all' &&
+      assigneeFilter === 'all' &&
+      departmentFilter === 'all' &&
+      tagsFilter === 'all'
+    ) {
+      console.log('[Tickets] Prefetching closed tickets in background for instant tab switching')
+      // Prefetch closed tickets silently in background
+      // Use a timeout to avoid interfering with current operations
+      const prefetchTimer = setTimeout(() => {
+        // Use forceTab to fetch closed tickets without changing activeTab
+        fetchTickets({ 
+          silent: true, // Silent fetch - no loading spinner
+          pageNum: 1,
+          limit: 200, // Same limit as normal fetch
+          forceTab: 'closed' // Force fetch closed tickets
+        }).catch(() => {
+          // Ignore errors in prefetch - it's just a background optimization
+        })
+      }, 1000) // Wait 1 second after active tickets load
+
+      return () => clearTimeout(prefetchTimer)
+    }
+  }, [tickets.length, activeTab, loading, activeSearchQuery, statusFilter, assigneeFilter, departmentFilter, tagsFilter, selectedAccount, fetchTickets])
 
   useEffect(() => {
     const fetchAgentDepartments = async () => {

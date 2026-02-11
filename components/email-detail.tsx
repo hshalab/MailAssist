@@ -524,8 +524,11 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     try {
       setGenerating(true)
       setError(null)
+      // Show loading state immediately (UI updates synchronously)
+      // The API call will happen asynchronously
       const response = await fetch(`/api/emails/${emailId}/draft`, {
-        method: 'POST'
+        method: 'POST',
+        // Add signal for potential cancellation (future enhancement)
       })
 
       if (!response.ok) {

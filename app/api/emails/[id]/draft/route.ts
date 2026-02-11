@@ -136,9 +136,69 @@ export async function POST(
     // Get current user ID for logging
     const userId = getCurrentUserIdFromRequest(request);
 
+    // Get current user's name for replacing placeholders in draft
+    let userName: string | null = null;
+    try {
+      const { validateBusinessSession } = await import('@/lib/session');
+      const businessSession = await validateBusinessSession();
+      if (businessSession?.name) {
+        userName = businessSession.name;
+      } else if (userId) {
+        const { getUserById } = await import('@/lib/users');
+        const user = await getUserById(userId);
+        if (user?.name) {
+          userName = user.name;
+        }
+      }
+    } catch (nameError) {
+      console.warn('[Draft] Could not get user name for placeholder replacement:', nameError);
+    }
+
     // OPTIMIZATION: Parallelize all data loading operations for faster draft generation
     // Load conversation thread, past emails, knowledge, guardrails, and ticket lookup in parallel
     const threadIdForContext = incomingEmail.threadId || incomingEmail.id;
+
+    // Determine which account this incoming email belongs to
+    // CRITICAL: For business accounts with multiple connected emails, we need to match
+    // the incoming email's 'to' field against all connected accounts
+    const extractEmailAddress = (emailStr: string): string => {
+      const match = emailStr?.match(/<([^>]+)>/) || emailStr?.match(/([^\s<>]+@[^\s<>]+)/);
+      return match ? match[1].toLowerCase() : emailStr?.toLowerCase() || '';
+    };
+
+    let accountEmail: string | null = null;
+    
+    // First, check if incoming email already has ownerEmail set (from sync)
+    if ((incomingEmail as any).ownerEmail) {
+      accountEmail = (incomingEmail as any).ownerEmail;
+    } else {
+      // Extract from 'to' field and match against connected accounts
+      const incomingToEmail = incomingEmail.to ? extractEmailAddress(incomingEmail.to) : null;
+      
+      // For business accounts, check all connected accounts
+      const { validateBusinessSession } = await import('@/lib/session');
+      const businessSession = await validateBusinessSession();
+      
+      if (businessSession?.businessId) {
+        const { loadBusinessTokens } = await import('@/lib/storage');
+        const connectedAccounts = await loadBusinessTokens(businessSession.businessId, businessSession.email);
+        
+        // Find which connected account matches the incoming email's 'to' field
+        if (incomingToEmail) {
+          const matchingAccount = connectedAccounts.find(acc => {
+            const accEmail = extractEmailAddress(acc.email);
+            return accEmail === incomingToEmail || incomingToEmail.includes(accEmail) || accEmail.includes(incomingToEmail);
+          });
+          accountEmail = matchingAccount ? extractEmailAddress(matchingAccount.email) : incomingToEmail;
+        } else {
+          // Fallback: use first connected account or userEmail
+          accountEmail = connectedAccounts.length > 0 ? extractEmailAddress(connectedAccounts[0].email) : userEmail;
+        }
+      } else {
+        // Personal account: use incomingToEmail or userEmail
+        accountEmail = incomingToEmail || userEmail;
+      }
+    }
 
     const [
       pastEmailsResult,
@@ -147,16 +207,29 @@ export async function POST(
       guardrailsResult,
       ticketResult
     ] = await Promise.allSettled([
-      // Get past sent emails for style matching (limit to recent 100 for performance)
+      // Get past sent emails for style matching (limit to recent 50 for faster performance)
+      // CRITICAL: Only load emails from the same account (ownerEmail) for custom per-account learning
       (async () => {
-        const storedEmails = await loadStoredEmails({ limit: 100, includeReceived: false });
+        const storedEmails = await loadStoredEmails({ 
+          limit: 50, // Reduced from 100 to 50 for faster loading
+          includeReceived: false,
+          ownerEmail: accountEmail || undefined // Filter by account email for custom embeddings
+        });
         return storedEmails.filter((email) => email.isSent && email.embedding.length > 0);
       })(),
       // Load conversation history (full thread) for better context
+      // IMPORTANT: Always try to load thread to allow AI to reference past conversations
       (async () => {
         try {
-          const thread = await getThreadById(tokens, threadIdForContext);
-          return thread.messages || [];
+          // Try to load thread - use threadId if available, otherwise try emailId as threadId
+          const threadIdToLoad = incomingEmail.threadId || incomingEmail.id;
+          if (threadIdToLoad) {
+            const thread = await getThreadById(tokens, threadIdToLoad);
+            const messages = thread.messages || [];
+            // Filter out the current incoming email from the history (we'll show it separately)
+            return messages.filter(msg => msg.id !== incomingEmail.id);
+          }
+          return [];
         } catch (threadError) {
           console.warn('[Draft] Could not load conversation thread for context:', threadError);
           return [];
@@ -316,6 +389,7 @@ IMPORTANT: Use this information to personalize your response. Reference their or
           draftId: existingDraftId || null, // Use existing draft ID if available
           isRegeneration: isRegeneration || !!existingDraftId, // Mark as regeneration if param set or existing draft found
           shopifyContext, // Pass Shopify context to AI
+          userName, // Pass user name for placeholder replacement
         }
       );
     } catch (draftError) {

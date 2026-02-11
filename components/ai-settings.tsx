@@ -3,13 +3,61 @@
 import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
+import { useToast } from "@/hooks/use-toast"
 import KnowledgeBaseManager from "@/components/knowledge-base"
 import GuardrailsManager from "@/components/guardrails-manager"
-import { BookOpen, Shield, Sparkles, Zap } from "lucide-react"
+import { BookOpen, Shield, Sparkles, Zap, RefreshCw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 
 export default function AISettings() {
   const [activeTab, setActiveTab] = useState("overview")
+  const [regenerating, setRegenerating] = useState(false)
+  const { toast } = useToast()
+
+  const handleRegenerateEmbeddings = async () => {
+    if (!confirm('This will regenerate embeddings for all your past emails with the new intent-based system. This may take a few minutes. Continue?')) {
+      return
+    }
+
+    setRegenerating(true)
+    try {
+      const response = await fetch('/api/emails/regenerate-embeddings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          auto: true,
+          force: true, // Force regeneration of all emails to include intent
+          limit: 1000,
+        }),
+      })
+
+      const result = await response.json()
+
+      if (response.ok) {
+        toast({
+          title: "✅ Embeddings Regenerated",
+          description: `Processed ${result.processed} emails. ${result.errors > 0 ? `${result.errors} errors occurred.` : ''}`,
+        })
+      } else {
+        toast({
+          title: "❌ Error",
+          description: result.error || 'Failed to regenerate embeddings',
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "❌ Error",
+        description: error instanceof Error ? error.message : 'Failed to regenerate embeddings',
+        variant: "destructive",
+      })
+    } finally {
+      setRegenerating(false)
+    }
+  }
 
   return (
     <div className="bg-background h-full overflow-y-auto">
@@ -138,6 +186,34 @@ export default function AISettings() {
                     </div>
                   </div>
                 </div>
+
+                {/* Regenerate Embeddings Section */}
+                <Card className="border-2 border-amber-500/20 bg-gradient-to-br from-amber-500/5 to-transparent">
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <RefreshCw className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                      Regenerate Email Embeddings
+                    </CardTitle>
+                    <CardDescription>
+                      Update all past email embeddings with the new intent-based system for better AI matching accuracy
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      After updating the AI system, regenerate embeddings to ensure your past emails use the new intent-based matching. 
+                      This improves how the AI learns from your email history.
+                    </p>
+                    <Button
+                      onClick={handleRegenerateEmbeddings}
+                      disabled={regenerating}
+                      className="w-full sm:w-auto"
+                      variant="outline"
+                    >
+                      <RefreshCw className={`w-4 h-4 mr-2 ${regenerating ? 'animate-spin' : ''}`} />
+                      {regenerating ? 'Regenerating...' : 'Regenerate Embeddings'}
+                    </Button>
+                  </CardContent>
+                </Card>
               </CardContent>
             </Card>
           </TabsContent>

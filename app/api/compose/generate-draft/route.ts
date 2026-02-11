@@ -29,6 +29,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get current user's name for replacing placeholders in draft
+    let userName: string | null = null;
+    try {
+      const { validateBusinessSession } = await import('@/lib/session');
+      const businessSession = await validateBusinessSession();
+      if (businessSession?.name) {
+        userName = businessSession.name;
+      } else if (userId) {
+        const { getUserById } = await import('@/lib/users');
+        const user = await getUserById(userId);
+        if (user?.name) {
+          userName = user.name;
+        }
+      }
+    } catch (nameError) {
+      console.warn('[Compose Draft] Could not get user name for placeholder replacement:', nameError);
+    }
+
     const body = await request.json();
     const { recipientEmail, recipientName, subject, context } = body;
 
@@ -67,6 +85,7 @@ export async function POST(request: NextRequest) {
       {
         userEmail,
         userId,
+        userName, // Pass user name for placeholder replacement
       }
     );
 

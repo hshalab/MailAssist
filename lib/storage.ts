@@ -130,6 +130,7 @@ export async function loadStoredEmails(options?: {
   emailId?: string;
   limit?: number;
   includeReceived?: boolean;
+  ownerEmail?: string; // Filter by owner email for account-specific embeddings
 }): Promise<StoredEmail[]> {
   if (!supabase) {
     return [];
@@ -151,7 +152,21 @@ export async function loadStoredEmails(options?: {
     }
   }
 
-  // Only filter by user_email if we have it and column exists
+  // CRITICAL: Filter by owner_email for account-specific embeddings
+  // This ensures each account learns from its own emails only
+  if (options?.ownerEmail) {
+    // Filter by owner_email for account-specific learning
+    // Also include emails without owner_email set (backward compatibility for old emails)
+    // We'll filter these in memory after fetching to avoid complex OR queries
+    query = query.or(`owner_email.eq.${options.ownerEmail},owner_email.is.null`);
+  } else if (userEmail) {
+    // Fallback: if no ownerEmail specified, include emails with owner_email = userEmail
+    // or emails without owner_email (old emails) - we'll filter by user_email below
+    query = query.or(`owner_email.eq.${userEmail},owner_email.is.null`);
+  }
+
+  // Also filter by user_email for additional scoping (for business accounts)
+  // This ensures we only see emails the user has access to
   if (userEmail) {
     query = query.eq('user_email', userEmail);
   }
@@ -169,7 +184,7 @@ export async function loadStoredEmails(options?: {
   }
 
   // Map DB columns (snake_case) to StoredEmail (camelCase)
-  return (data || []).map((row: any) => ({
+  let emails = (data || []).map((row: any) => ({
     id: row.id,
     threadId: row.thread_id ?? undefined,
     subject: row.subject,
@@ -184,6 +199,30 @@ export async function loadStoredEmails(options?: {
     snippet: row.snippet,
     ownerEmail: row.owner_email,
   }));
+
+  // Post-filter: If ownerEmail was specified, filter out old emails without owner_email
+  // that don't match the specified account (for backward compatibility, we include
+  // emails without owner_email only if they match userEmail)
+  if (options?.ownerEmail && userEmail) {
+    emails = emails.filter(email => {
+      // Keep emails with matching ownerEmail
+      if (email.ownerEmail && email.ownerEmail.toLowerCase() === options.ownerEmail!.toLowerCase()) {
+        return true;
+      }
+      // Keep old emails without ownerEmail only if they match userEmail (backward compatibility)
+      if (!email.ownerEmail && userEmail && email.from) {
+        const extractEmailAddress = (emailStr: string): string => {
+          const match = emailStr?.match(/<([^>]+)>/) || emailStr?.match(/([^\s<>]+@[^\s<>]+)/);
+          return match ? match[1].toLowerCase() : emailStr?.toLowerCase() || '';
+        };
+        const emailFrom = extractEmailAddress(email.from);
+        return emailFrom === userEmail.toLowerCase();
+      }
+      return false;
+    });
+  }
+
+  return emails;
 }
 
 /**
@@ -433,8 +472,13 @@ export async function storeSentEmail(email: {
 
       const { data: existingEmail } = await query.limit(1).maybeSingle();
 
-      // If email exists and has embedding, return early (skip re-embedding)
-      if (existingEmail && existingEmail.embedding && Array.isArray(existingEmail.embedding) && existingEmail.embedding.length > 0) {
+      // If email exists and has embedding AND ownerEmail, return early (skip re-embedding)
+      // Emails without ownerEmail need to be regenerated for account-specific scoping
+      if (existingEmail && 
+          existingEmail.embedding && 
+          Array.isArray(existingEmail.embedding) && 
+          existingEmail.embedding.length > 0 &&
+          existingEmail.owner_email) { // Must have ownerEmail too
         // Return the existing email structure (we'll need to load it fully if needed)
         return {
           id: email.id,
@@ -462,17 +506,30 @@ export async function storeSentEmail(email: {
   // Determine if this is a reply (check email.isReply or infer from subject)
   const isReply = email.isReply ?? /^(re|fwd?):\s*/i.test(email.subject || '');
 
-  // Double-check: if existing email has embedding, skip
-  if (existing && existing.embedding.length > 0) {
-    return existing; // Already processed with embedding
+  // Double-check: if existing email has embedding AND ownerEmail, skip
+  // Emails without ownerEmail need to be regenerated for account-specific scoping
+  if (existing && existing.embedding.length > 0 && existing.ownerEmail) {
+    return existing; // Already processed with embedding and ownerEmail
   }
 
   const trimmedBody = sanitizeEmailBody(email.body || '', 2000);
 
+  // Extract owner email from the 'from' field (the account that sent this email)
+  // This ensures embeddings are scoped per account
+  const extractEmailAddress = (emailStr: string): string => {
+    const match = emailStr?.match(/<([^>]+)>/) || emailStr?.match(/([^\s<>]+@[^\s<>]+)/);
+    return match ? match[1].toLowerCase() : emailStr?.toLowerCase() || '';
+  };
+  const ownerEmail = extractEmailAddress(email.from);
+
   // Generate embeddings for ALL sent emails (not just replies)
   // This allows the AI to learn from the user's complete writing style
+  // Each account gets its own custom embeddings with intent-based context
   try {
-    const context = createEmailContext(email.subject, trimmedBody);
+    // Use new intent-based context for better email type matching
+    const { extractEmailIntent, createEmailContextWithIntent } = await import('./ai-draft');
+    const intent = extractEmailIntent(email.subject, trimmedBody);
+    const context = createEmailContextWithIntent(email.subject, trimmedBody, intent);
     // Use direct embedding generation (batch processing is handled at sync level)
     const embedding = await generateEmbeddingWithRetry(context);
 
@@ -482,6 +539,7 @@ export async function storeSentEmail(email: {
       embedding,
       isSent: true,
       isReply: isReply,
+      ownerEmail: ownerEmail || undefined, // Set owner email for account-specific scoping
     };
 
     // Save the email (upsert will handle existing)
@@ -495,12 +553,19 @@ export async function storeSentEmail(email: {
 
     // Store without embedding if embedding generation fails
     // This allows the app to continue working even if some embeddings fail
+    const extractEmailAddress = (emailStr: string): string => {
+      const match = emailStr?.match(/<([^>]+)>/) || emailStr?.match(/([^\s<>]+@[^\s<>]+)/);
+      return match ? match[1].toLowerCase() : emailStr?.toLowerCase() || '';
+    };
+    const ownerEmail = extractEmailAddress(email.from);
+
     const storedEmail: StoredEmail = {
       ...email,
       body: trimmedBody,
       embedding: [],
       isSent: true,
       isReply: isReply,
+      ownerEmail: ownerEmail || undefined, // Set owner email even if embedding fails
     };
 
     // Save the email (upsert will handle existing)
@@ -914,7 +979,7 @@ export async function findSimilarEmailsVector(
   return data || [];
 }
 
-async function generateEmbeddingWithRetry(text: string, attempts = 3): Promise<number[]> {
+export async function generateEmbeddingWithRetry(text: string, attempts = 3): Promise<number[]> {
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
