@@ -248,7 +248,7 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
     }
 
     // Check if session exists and is not expired
-    const { data: session, error: sessionError } = await validationClient
+    const { data: session, error: sessionError } = await validationClient!
       .from('user_sessions')
       .select('user_id, expires_at')
       .eq('session_token', sessionToken)
@@ -291,25 +291,13 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
     // RELAXED MODE: checking current_user_id is helpful but shouldn't invalidate a valid session_token
     // If current_user_id is missing (e.g. cookie cleared by browser/extension), we should trust the session_token
     if (!currentUserId) {
-      console.log(`[Session] No current_user_id cookie found - trusting session_token`);
+      // console.log(`[Session] No current_user_id cookie found - trusting session_token`);
       // Do NOT delete the session. The session_token is HttpOnly and secure, so it's the source of truth.
     } else if (session.user_id !== currentUserId) {
-      console.log(`[Session] MISMATCH: Session user_id (${session.user_id}) does not match current_user_id (${currentUserId}) - DELETING INVALID SESSION`);
-      // CRITICAL: Delete the invalid session from database immediately (blocking)
-      // This prevents the old session from being reused
-      if (supabase) {
-        const { error: deleteError } = await supabase
-          .from('user_sessions')
-          .delete()
-          .eq('session_token', sessionToken);
-
-        if (deleteError) {
-          console.error('[Session] Error deleting invalid session:', deleteError);
-        } else {
-          console.log('[Session] Invalid session deleted from database successfully');
-        }
-      }
-      return null;
+      console.warn(`[Session] MISMATCH: Session user_id (${session.user_id}) does not match current_user_id (${currentUserId}) - Trusting secure session_token`);
+      // DO NOT delete the session here. The session_token is more secure than the client-readable current_user_id.
+      // If they mismatch, it's likely the client cookie is stale or from a previous login, but the HttpOnly token is valid.
+      // We should return the user associated with the session_token.
     }
 
     // Get user details

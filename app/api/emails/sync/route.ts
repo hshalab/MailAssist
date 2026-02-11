@@ -106,6 +106,13 @@ export async function POST(request: NextRequest) {
       const { fetchInboxEmails } = await import('@/lib/gmail');
       inboxEmails = await fetchInboxEmails(tokens, maxResults);
 
+      // CRITICAL FIX: Add ownerEmail context for personal accounts so tickets are scoped correctly
+      // For business accounts, fetchAllInboxEmails already does this
+      const currentUserEmail = await getCurrentUserEmail();
+      if (currentUserEmail) {
+        inboxEmails = inboxEmails.map((e: any) => ({ ...e, ownerEmail: currentUserEmail }));
+      }
+
       // Filter out spam/trash
       inboxEmails = inboxEmails.filter((email: any) => {
         const labels = email.labels || [];
@@ -405,6 +412,7 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
               from: email.from,
               to: email.to,
               date: email.date,
+              ownerEmail: email.ownerEmail, // CRITICAL FIX: Pass owner email for correct scoping
             },
             isFromAgent,
             email.body // Pass email body for AI classification

@@ -103,6 +103,19 @@ export async function GET(request: NextRequest) {
     // Parse search query
     const searchQuery = request.nextUrl.searchParams.get('q') || undefined;
 
+    // PAGINATION: Parse page and limit
+    const page = parseInt(request.nextUrl.searchParams.get('page') || '1');
+    const limit = parseInt(request.nextUrl.searchParams.get('limit') || '50');
+    const offset = (page - 1) * limit;
+
+    // FILTERS: Parse new server-side filters
+    const assigneeParam = request.nextUrl.searchParams.get('assignee'); // "me", "unassigned", or UUID
+    const priorityParam = request.nextUrl.searchParams.get('priority');
+    const priorityFilter = priorityParam ? (priorityParam.split(',') as any[]) : undefined;
+    const tagsParam = request.nextUrl.searchParams.get('tags');
+    const tagsFilter = tagsParam ? tagsParam.split(',') : undefined;
+    const departmentParam = request.nextUrl.searchParams.get('department'); // "unclassified" or UUID
+
     // Get tickets with role-based filtering and optional account scope
     let tickets = await getTickets(
       userId,
@@ -112,7 +125,14 @@ export async function GET(request: NextRequest) {
       businessId,
       sortOrder,
       statusFilter,
-      searchQuery
+      searchQuery,
+      { offset, limit },
+      {
+        assigneeUserId: assigneeParam || undefined,
+        priority: priorityFilter,
+        tags: tagsFilter,
+        departmentId: departmentParam || undefined
+      }
     );
 
     // CRITICAL FIX: Filter tickets to only show those from connected accounts
