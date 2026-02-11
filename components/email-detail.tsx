@@ -643,116 +643,157 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
 
     setSendSuccess(false)
 
-    try {
-      setSending(true)
-      setSendingAction(opts?.closeTicket ? 'send-close' : 'send')
-      setError(null)
+    // OPTIMISTIC UI UPDATE - Do this BEFORE the API call to make it feel instant
+    setSending(true)
+    setSendingAction(opts?.closeTicket ? 'send-close' : 'send')
+    setError(null)
 
-      const response = await fetch(`/api/emails/${emailId}/reply`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          draftText: textValue,
-          draftHtml: htmlValue,
-          draftId: draftId || null,
-          attachments: attachments.map(att => ({ filename: att.name, mimeType: att.type, data: att.data })),
-          assignToUser: true, // Auto-assign to self
-          closeTicket: opts?.closeTicket // Close if requested
-        }),
-      })
-
-      const data = await response.json().catch(() => ({}))
-
-      if (!response.ok || !data?.success) {
-        throw new Error(data?.error || "Failed to send reply")
-      }
-
-      setSendSuccess(true)
-
-      // Add sent message to thread immediately (optimistic UI update)
-      const userEmail = threadMessages[0]?.to || emailSummary?.to || 'You'
-      const newMessage: EmailMessage = {
-        id: `sent-${Date.now()}`,
-        threadId: emailSummary?.threadId,
-        subject: emailSummary?.subject || '(No subject)',
-        from: userEmail,
-        to: emailSummary?.from || '',
-        date: new Date().toISOString(),
-        body: htmlValue,
-        snippet: textValue.substring(0, 100)
-      }
-      setThreadMessages(prev => [...prev, newMessage])
-
-      // Clear draft UI and autosaved data
-      try {
-        localStorage.removeItem(`draft_${emailId}`)
-      } catch {
-        // Ignore localStorage errors
-      }
-      setDraftText("")
-      setDraftHtml("")
-      setDraftId(null)
-      setShowDraft(false)
-      setDraftMinimized(false)
-
-      if (sendResetTimer) {
-        clearTimeout(sendResetTimer)
-      }
-      setSendResetTimer(
-        setTimeout(() => {
-          setSendSuccess(false)
-          setSendResetTimer(null)
-        }, 5000)
-      )
-
-      toast({
-        title: opts?.closeTicket ? "Reply sent & Ticket closed" : "Reply sent",
-        description: "Your reply was delivered via Gmail.",
-      })
-
-      // Use the ticketId returned from the reply API
-      const activeTicketId = data?.ticketId || ticketId
-
-      if (activeTicketId) {
-        // If we requested close, broadcast closed event immediately
-        if (opts?.closeTicket) {
-          console.log('✅ Ticket closed via single-request:', activeTicketId);
-          window.dispatchEvent(new CustomEvent('ticketUpdated', {
-            detail: {
-              ticketId: activeTicketId,
-              status: 'closed',
-              assigneeUserId: currentUserId
-            }
-          }));
-        } else {
-          // Otherwise just assigned
-          console.log('✅ Ticket assigned via single-request:', activeTicketId);
-          window.dispatchEvent(new CustomEvent('ticketUpdated', {
-            detail: {
-              ticketId: activeTicketId,
-              assigneeUserId: currentUserId,
-              status: 'pending' // Status might not have changed, but assignment did
-            }
-          }));
-        }
-        // Force refresh list to be safe
-        window.dispatchEvent(new Event('ticketsForceRefresh'));
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to send reply"
-      setError(message)
-      setSendSuccess(false)
-      toast({
-        title: "Couldn't send reply",
-        description: message,
-        variant: "destructive",
-      })
-    } finally {
-      setSending(false)
-      setSendingAction(null)
+    // Add sent message to thread immediately (optimistic UI update)
+    const userEmail = threadMessages[0]?.to || emailSummary?.to || 'You'
+    const newMessage: EmailMessage = {
+      id: `sent-${Date.now()}`,
+      threadId: emailSummary?.threadId,
+      subject: emailSummary?.subject || '(No subject)',
+      from: userEmail,
+      to: emailSummary?.from || '',
+      date: new Date().toISOString(),
+      body: htmlValue,
+      snippet: textValue.substring(0, 100)
     }
+    setThreadMessages(prev => [...prev, newMessage])
+
+    // Clear draft UI and autosaved data immediately
+    try {
+      localStorage.removeItem(`draft_${emailId}`)
+    } catch {
+      // Ignore localStorage errors
+    }
+    setDraftText("")
+    setDraftHtml("")
+    setDraftId(null)
+    setShowDraft(false)
+    setDraftMinimized(false)
+
+    // Show success toast immediately
+    toast({
+      title: opts?.closeTicket ? "Reply sent & Ticket closed" : "Reply sent",
+      description: "Your reply was delivered via Gmail.",
+    })
+
+    // Broadcast ticket updates optimistically
+    if (ticketId) {
+      if (opts?.closeTicket) {
+        console.log('✅ Optimistic ticket close:', ticketId);
+        window.dispatchEvent(new CustomEvent('ticketUpdated', {
+          detail: {
+            ticketId: ticketId,
+            status: 'closed',
+            assigneeUserId: currentUserId
+          }
+        }));
+      } else {
+        console.log('✅ Optimistic ticket assignment:', ticketId);
+        window.dispatchEvent(new CustomEvent('ticketUpdated', {
+          detail: {
+            ticketId: ticketId,
+            assigneeUserId: currentUserId,
+            status: 'pending'
+          }
+        }));
+      }
+      window.dispatchEvent(new Event('ticketsForceRefresh'));
+    }
+
+    // Perform actual send in background (non-blocking)
+    const performSend = async () => {
+      try {
+        const response = await fetch(`/api/emails/${emailId}/reply`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            draftText: textValue,
+            draftHtml: htmlValue,
+            draftId: draftId || null,
+            attachments: attachments.map(att => ({ filename: att.name, mimeType: att.type, data: att.data })),
+            assignToUser: true, // Auto-assign to self
+            closeTicket: opts?.closeTicket // Close if requested
+          }),
+        })
+
+        const data = await response.json().catch(() => ({}))
+
+        if (!response.ok || !data?.success) {
+          throw new Error(data?.error || "Failed to send reply")
+        }
+
+        setSendSuccess(true)
+
+        if (sendResetTimer) {
+          clearTimeout(sendResetTimer)
+        }
+        setSendResetTimer(
+          setTimeout(() => {
+            setSendSuccess(false)
+            setSendResetTimer(null)
+          }, 5000)
+        )
+
+        // Use the ticketId returned from the reply API
+        const activeTicketId = data?.ticketId || ticketId
+
+        if (activeTicketId) {
+          // If we requested close, broadcast closed event
+          if (opts?.closeTicket) {
+            console.log('✅ Ticket closed via API:', activeTicketId);
+            window.dispatchEvent(new CustomEvent('ticketUpdated', {
+              detail: {
+                ticketId: activeTicketId,
+                status: 'closed',
+                assigneeUserId: currentUserId
+              }
+            }));
+          } else {
+            // Otherwise just assigned
+            console.log('✅ Ticket assigned via API:', activeTicketId);
+            window.dispatchEvent(new CustomEvent('ticketUpdated', {
+              detail: {
+                ticketId: activeTicketId,
+                assigneeUserId: currentUserId,
+                status: 'pending'
+              }
+            }));
+          }
+          // Force refresh list to be safe
+          window.dispatchEvent(new Event('ticketsForceRefresh'));
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to send reply"
+        setError(message)
+        setSendSuccess(false)
+        
+        // Remove optimistic message on error
+        setThreadMessages(prev => prev.filter(msg => msg.id !== newMessage.id))
+        
+        // Restore draft on error
+        setDraftText(textValue)
+        setDraftHtml(htmlValue)
+        setShowDraft(true)
+        
+        toast({
+          title: "Couldn't send reply",
+          description: message,
+          variant: "destructive",
+        })
+      } finally {
+        setSending(false)
+        setSendingAction(null)
+      }
+    }
+
+    // Execute send in background (non-blocking)
+    performSend()
   }
 
   const handleEditorInput = () => {

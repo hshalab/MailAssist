@@ -2551,8 +2551,40 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     setSendingReply(true)
     setSendingAction(opts?.closeTicket ? 'send-close' : 'send')
 
-    // OPTIMISTIC NAVIGATION & UPDATE FOR "SEND & CLOSE"
+    // OPTIMISTIC UI UPDATE FOR BOTH "SEND" AND "SEND & CLOSE"
     // We do this BEFORE the slow email send to make it feel instant
+    // Add sent message to thread immediately (optimistic)
+    // Get user email from thread messages (the 'to' field of customer messages is usually the agent email)
+    const userEmailFromThread = threadMessages.find(msg => msg.from !== threadMessages[0]?.from)?.to || 
+                                 threadMessages[0]?.to || 
+                                 'You'
+    const optimisticMessage = {
+      id: `sent-${Date.now()}`,
+      threadId: selectedTicket.threadId,
+      subject: threadMessages[0]?.subject || selectedTicket.subject,
+      from: userEmailFromThread,
+      to: threadMessages[0]?.from || '',
+      date: new Date().toISOString(),
+      body: contentToSend.html,
+      snippet: contentToSend.text.substring(0, 100)
+    }
+    setThreadMessages(prev => [...prev, optimisticMessage])
+
+    // Clear editor state immediately
+    setReplyHtml("")
+    setReplyText("")
+    setReplyAttachments([])
+    setDraftText("")
+    setDraftId(null)
+    setShowDraft(false)
+
+    // Show success toast immediately
+    toast({
+      title: opts?.closeTicket ? "Reply sending..." : "Reply sent",
+      description: opts?.closeTicket ? "Ticket closed. Processing in background." : "Your reply was sent.",
+    })
+
+    // OPTIMISTIC NAVIGATION & UPDATE FOR "SEND & CLOSE"
     if (opts?.closeTicket) {
       console.log('🚀 Optimistic "Send & Close" started for:', targetTicketId)
 
@@ -2567,15 +2599,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         nextTicket = null as any; // No other tickets
       }
 
-      // 2. Clear editor state immediately so it's ready for the next ticket
-      setReplyHtml("")
-      setReplyText("")
-      setReplyAttachments([])
-      setDraftText("")
-      setDraftId(null)
-      setShowDraft(false)
-
-      // 3. Optimistically mark current as closed in the list
+      // 2. Optimistically mark current as closed in the list
       // This ensures it drops out of the "Open" filter instantly if applicable
       const closedTicketState = {
         ...selectedTicket,
@@ -2587,7 +2611,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       // 3b. Counts update automatically via useMemo on tickets change
 
-      // 4. Navigate immediately
+      // 3. Navigate immediately
       if (nextTicket) {
         console.log('➡️ Optimistically navigating to next ticket:', nextTicket.id)
         setSelectedTicket(nextTicket)
@@ -2596,12 +2620,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         console.log('🏁 No next ticket, clearing selection')
         setSelectedTicket(null)
       }
-
-      // 5. Show toast immediately
-      toast({
-        title: "Reply sending...",
-        description: "Ticket closed. Processing in background.",
-      })
     }
 
     // Perform the actual work (Background if closed, Foreground if just send)
@@ -2629,24 +2647,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         const data = await response.json().catch(() => ({}))
         const activeTicketId = data?.ticketId || targetTicketId
 
-        // If we DIDN'T optimistcally navigate (Send only), clear state here
-        if (!opts?.closeTicket) {
-          setReplyHtml("")
-          setReplyAttachments([])
-          setReplyText("")
-          setDraftText("")
-          setDraftId(null)
-          setShowDraft(false)
-          toast({ title: "Reply sent successfully" })
-
-          // Refresh stuff
-          await fetchThread({ silent: true })
-          await fetchTickets({ silent: true })
-        } else {
-          // We already navigated. Just ensuring background sync matches up.
-          // Maybe silence the duplicate success toast?
-          // But if it failed, we'd want to know.
-        }
+        // Refresh stuff in background (non-blocking) for both send and send-close
+        fetchThread({ silent: true }).catch(err => console.warn('Background thread refresh failed:', err))
+        fetchTickets({ silent: true }).catch(err => console.warn('Background tickets refresh failed:', err))
 
         // Handle Assignment & Closing (Server-side)
         if (activeTicketId && currentUserId) {
@@ -2706,11 +2709,21 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           variant: "destructive",
           duration: 10000
         })
-        // If we optimistically closed, revert the local state changes
+        // Revert optimistic updates on error
+        // Remove optimistic message from thread
+        setThreadMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id))
+        
+        // Restore editor state
+        setReplyHtml(contentToSend.html)
+        setReplyText(contentToSend.text)
+        setReplyAttachments(contentToSend.attachments)
+        if (contentToSend.draftId) {
+          setDraftId(contentToSend.draftId)
+        }
+        
+        // If we optimistically closed, revert the ticket status in the list
         if (opts?.closeTicket) {
-          // Revert the ticket status in the list
           setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: 'open' } : t))
-          // 3b. Counts update automatically via useMemo on tickets change
         }
       } finally {
         setSendingReply(false)
@@ -2719,11 +2732,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
 
     // Execute!
-    // If optimistic, we don't await this function to block UI
-    if (opts?.closeTicket) {
-      performSend();
-    } else {
-    }
+    // Always run in background (non-blocking) for fast UI response
+    performSend();
   }
 
   const getStatusColor = (status: Ticket["status"]) => {

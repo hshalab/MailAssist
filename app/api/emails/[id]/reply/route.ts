@@ -348,6 +348,22 @@ export async function POST(
           let ticket = await ensureTicketForEmail(ticketEmailLike, true); // true = isFromAgent
           if (ticket) {
             ticketId = ticket.id;
+            
+            // CRITICAL: If ticket is closed, reopen it when agent sends a reply
+            // This allows agents to continue conversations on closed tickets
+            if (ticket.status === 'closed') {
+              console.log(`[Reply] Reopening closed ticket ${ticket.id} due to agent reply`);
+              const { validateBusinessSession } = await import('@/lib/session');
+              const businessSession = await validateBusinessSession();
+              const businessId = businessSession?.businessId || null;
+              await updateTicketStatus(ticket.id, 'open', userEmail, businessId);
+              // Refresh ticket object after status update
+              const { getTicketById } = await import('@/lib/tickets');
+              const refreshedTicket = await getTicketById(ticket.id, userEmail, businessId);
+              if (refreshedTicket) {
+                ticket = refreshedTicket;
+              }
+            }
           }
 
           // 2. Auto-assign if unassigned OR if requested explicitly
