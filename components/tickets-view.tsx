@@ -299,6 +299,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const conversationScrollRef = useRef<HTMLDivElement>(null)
   const savedScrollPositionRef = useRef<number>(0)
   const ticketListRef = useRef<HTMLDivElement>(null)
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null)
 
   // Panel width preferences - load from localStorage with proper state management
   const getInitialPanelSizes = (): number[] => {
@@ -836,6 +837,31 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setLoadingMore(false)
     }
   }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery, activeTab === 'closed' ? 'closed' : 'active', statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, fetchTicketCounts])
+
+  // IntersectionObserver for infinite scroll (load more on scroll)
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current
+    if (!sentinel || !hasMore || loading || loadingMore || tickets.length === 0) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        console.log('[Tickets] Sentinel intersection:', entry.isIntersecting, 'Page:', page, 'HasMore:', hasMore, 'Loading:', loading, 'LoadingMore:', loadingMore)
+
+        if (entry.isIntersecting && !loadingMore && !loading && hasMore) {
+          console.log('[Tickets] Sentinel visible - triggering load more. Next Page:', page + 1)
+          fetchTickets({ pageNum: page + 1 })
+        }
+      },
+      { threshold: 0.1, rootMargin: '200px' }
+    )
+
+    observer.observe(sentinel)
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [hasMore, loading, loadingMore, page, fetchTickets, tickets.length])
 
   // Removed derived ticketCounts useMemo - now using state
 
@@ -3483,23 +3509,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               {hasMore && tickets.length > 0 && (
                 <div
                   className="pt-4 pb-8 px-4 flex justify-center py-8" // Added padding to ensure visibility
-                  ref={(node) => {
-                    // Critical: if loadingMore is true, we might still want to observe? No, safeguard against double trigger.
-                    if (!node) return;
-
-                    const observer = new IntersectionObserver((entries) => {
-                      // Debug log to check what's happening
-                      console.log('[Tickets] Sentinel intersection:', entries[0].isIntersecting, 'Page:', page, 'HasMore:', hasMore, 'Loading:', loading, 'LoadingMore:', loadingMore)
-
-                      if (entries[0].isIntersecting && !loadingMore && !loading && hasMore) {
-                        console.log('[Tickets] Sentinel visible - triggering load more. Next Page:', page + 1)
-                        // Trigger next page load
-                        fetchTickets({ pageNum: page + 1 })
-                      }
-                    }, { threshold: 0.1, rootMargin: '200px' }); // Increased rootMargin for earlier trigger
-                    observer.observe(node);
-                    return () => observer.disconnect();
-                  }}
+                  ref={loadMoreSentinelRef}
                 >
                   <Button
                     variant="ghost"
