@@ -998,8 +998,14 @@ function sanitizeEmailBody(text: string, maxLength: number): string {
   if (!text) return '';
   const withoutScripts = text.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ');
   const withoutTags = withoutScripts.replace(/<\/?[^>]+>/g, ' ');
-  const normalized = withoutTags.replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
-  return truncateText(normalized, maxLength);
+  // Preserve paragraph breaks (double newlines) and single newlines, but normalize other whitespace
+  // Replace HTML line breaks with newlines first
+  const withLineBreaks = withoutTags.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n').replace(/<p[^>]*>/gi, '');
+  // Normalize multiple spaces but preserve newlines
+  const normalized = withLineBreaks.replace(/[ \t]+/g, ' ').replace(/&nbsp;/gi, ' ');
+  // Clean up excessive newlines (more than 2 consecutive) but preserve paragraph breaks
+  const cleaned = normalized.replace(/\n{3,}/g, '\n\n').trim();
+  return truncateText(cleaned, maxLength);
 }
 
 function truncateText(text: string, maxLength: number): string {

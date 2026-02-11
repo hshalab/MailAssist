@@ -183,8 +183,13 @@ export async function generateDraftReply(
   }
 ): Promise<string> {
   // Validate required fields
-  if (!incomingEmail?.subject || !incomingEmail?.body || !incomingEmail?.from || !incomingEmail?.to) {
-    throw new Error('Invalid email: missing required fields (subject, body, from, to)');
+  if (!incomingEmail?.body || !incomingEmail?.from || !incomingEmail?.to) {
+    throw new Error('Invalid email: missing required fields (body, from, to)');
+  }
+  
+  // Handle missing subject - use default if not provided
+  if (!incomingEmail.subject || incomingEmail.subject.trim() === '') {
+    incomingEmail.subject = '(no subject)';
   }
 
   // Validate API key early
@@ -530,14 +535,21 @@ Recipient: ${recipientEmail}${recipientNameText}
 Subject: ${subject}
 Context/Instructions: ${context}
 
-USER'S PAST EMAIL STYLE EXAMPLES (use these to match tone and style):
+USER'S PAST EMAIL STYLE EXAMPLES (match BOTH tone/style AND formatting - paragraph breaks, spacing, structure):
 ${styleExamples || 'No past examples available. Use a professional, friendly tone.'}
+
+CRITICAL - FORMATTING MATCH: Pay close attention to how the user formats their emails above. Match:
+- Paragraph breaks and spacing (single vs double line breaks)
+- How they structure their emails (greeting, body, closing)
+- Line length and wrapping
+- Use of lists, bullets, or numbered items (if they use them)
+- Overall email structure and flow
 
 ${knowledgeSection}
 
 INSTRUCTIONS:
 1. Generate a new email based on the provided context and subject.
-2. Match the tone and style of the user's past emails shown above.
+2. Match the tone, style, AND FORMATTING of the user's past emails shown above. Pay attention to paragraph breaks, spacing, structure, and how they organize their emails. Use the same formatting patterns (single vs double line breaks, paragraph structure, etc.).
 3. Address the recipient appropriately (use their name if provided).
 4. Make the email professional, clear, and appropriate for the context provided.
 5. Keep it SHORT and concise: Aim for 2-4 sentences for simple emails, 4-6 for complex ones. Avoid unnecessary elaboration.
@@ -578,7 +590,9 @@ function selectKnowledgeForNewEmail(subject: string, context: string, items: Kno
  * Uses semantic patterns rather than business-specific terms
  */
 export function extractEmailIntent(subject: string, body: string): string {
-  const text = `${subject} ${body}`.toLowerCase();
+  // Handle missing or empty subject
+  const safeSubject = subject || '';
+  const text = `${safeSubject} ${body}`.toLowerCase();
   
   // Generic email intents/types - semantic patterns that work across industries
   const intentPatterns: { [key: string]: RegExp[] } = {
@@ -614,7 +628,9 @@ export function extractEmailIntent(subject: string, body: string): string {
  * Create email context with intent for better embedding matching
  */
 export function createEmailContextWithIntent(subject: string, body: string, intent: string): string {
-  return `Intent: ${intent}\nSubject: ${subject}\n\nBody: ${body}`.trim();
+  // Handle missing or empty subject
+  const safeSubject = subject || '(no subject)';
+  return `Intent: ${intent}\nSubject: ${safeSubject}\n\nBody: ${body}`.trim();
 }
 
 /**
@@ -986,15 +1002,22 @@ ${guardrailRules || "Keep responses accurate, polite, and helpful."}
 ${topicRulesSection}${bannedSection}
 
 INCOMING EMAIL TO REPLY TO:
-Subject: ${incomingEmail.subject}
+Subject: ${incomingEmail.subject || '(no subject)'}
 From: ${incomingEmail.from}
 Body:
 ${incomingEmail.body}
 
 ${truncatedHistory}
 
-USER'S PAST EMAIL STYLE EXAMPLES (use these to match tone and style):
+USER'S PAST EMAIL STYLE EXAMPLES (match BOTH tone/style AND formatting - paragraph breaks, spacing, structure):
 ${truncatedStyleExamples}
+
+CRITICAL - FORMATTING MATCH: Pay close attention to how the user formats their emails above. Match:
+- Paragraph breaks and spacing (single vs double line breaks)
+- How they structure their emails (greeting, body, closing)
+- Line length and wrapping
+- Use of lists, bullets, or numbered items (if they use them)
+- Overall email structure and flow
 
 ${truncatedKnowledge}
 
@@ -1007,12 +1030,12 @@ INSTRUCTIONS:
 4. If the incoming email uses vague/generic references (e.g., "I need an update on it", "what about that", "the [item]", "my issue"), use the conversation history and context summary to understand what they're referring to. Infer the meaning from previous messages, but DO NOT infer statuses or outcomes that weren't explicitly stated.
 5. If the incoming email references something from the conversation history (e.g., "as we discussed", "you mentioned", "the [item] I asked about"), check if an agent actually said that. If no agent replied, acknowledge their previous email but do NOT make up what was discussed.
 6. Look at the "Email Type/Intent" in the style examples above to learn what types of responses work for different email types.
-7. Match the tone and style of the user's past emails shown above.
+7. Match the tone, style, AND FORMATTING of the user's past emails shown above. Pay attention to paragraph breaks, spacing, structure, and how they organize their emails. Use the same formatting patterns (single vs double line breaks, paragraph structure, etc.).
 8. Generate a draft reply that:
    - Addresses the key points in the incoming email
    - References relevant information from PREVIOUS AGENT REPLIES (if any) when appropriate
    - If no agent has replied yet, acknowledge the customer's previous email(s) and provide a helpful response without making up statuses
-   - Matches the user's writing style and tone
+   - Matches the user's writing style, tone, AND formatting (paragraph breaks, spacing, structure)
    - Is professional and appropriate for the email type
    - Uses similar response patterns as shown in the style examples for this email type
    - Is CONCISE: Keep it short and to the point. Aim for 2-4 sentences for simple inquiries, 4-6 sentences for complex issues. Avoid unnecessary elaboration or repetition.

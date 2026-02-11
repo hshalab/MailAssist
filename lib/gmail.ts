@@ -124,11 +124,16 @@ export async function sendReplyMessage(
   const altBoundary = `alt-${Date.now()}`
   const mixedBoundary = `mixed-${Date.now()}`
 
+  // CRITICAL: Ensure plain text body has no HTML tags
+  const cleanBody = body && /<[^>]+>/.test(body) 
+    ? body.replace(/<[^>]+>/g, '').trim() 
+    : body;
+
   const textPart = [
     `--${altBoundary}`,
     'Content-Type: text/plain; charset="UTF-8"',
     '',
-    body.replace(/\r?\n/g, '\r\n'),
+    cleanBody.replace(/\r?\n/g, '\r\n'),
     '',
   ].join('\r\n')
 
@@ -173,7 +178,11 @@ export async function sendReplyMessage(
     message += htmlPart
     message += altClosing
   } else {
-    message += `${headers}\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n${body.replace(/\r?\n/g, '\r\n')}`
+    // CRITICAL: Ensure plain text body has no HTML tags
+    const cleanBody = body && /<[^>]+>/.test(body) 
+      ? body.replace(/<[^>]+>/g, '').trim() 
+      : body;
+    message += `${headers}\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n${cleanBody.replace(/\r?\n/g, '\r\n')}`
   }
 
   const encodedMessage = encodeBase64Url(message)
@@ -782,11 +791,16 @@ export async function sendNewEmail(
   const hasHtml = Boolean(bodyHtml);
   const altBoundary = `alt-${Date.now()}`;
 
+  // CRITICAL: Ensure plain text body has no HTML tags
+  const cleanBody = body && /<[^>]+>/.test(body) 
+    ? body.replace(/<[^>]+>/g, '').trim() 
+    : body;
+  
   const textPart = [
     `--${altBoundary}`,
     'Content-Type: text/plain; charset="UTF-8"',
     '',
-    body.replace(/\r?\n/g, '\r\n'),
+    cleanBody.replace(/\r?\n/g, '\r\n'),
     '',
   ].join('\r\n');
 
@@ -810,8 +824,11 @@ export async function sendNewEmail(
     message += htmlPart;
     message += altClosing;
   } else {
-    // Plain text only
-    message += `${headers}\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n${body.replace(/\r?\n/g, '\r\n')}`;
+    // Plain text only - CRITICAL: Ensure no HTML tags
+    const cleanBody = body && /<[^>]+>/.test(body) 
+      ? body.replace(/<[^>]+>/g, '').trim() 
+      : body;
+    message += `${headers}\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n${cleanBody.replace(/\r?\n/g, '\r\n')}`;
   }
 
   const encodedMessage = encodeBase64Url(message);

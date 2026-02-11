@@ -38,20 +38,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Convert HTML to plain text if only HTML is provided
+    // CRITICAL: Always ensure plain text body has NO HTML tags
+    // Import htmlToText for proper HTML to text conversion
+    const { htmlToText } = await import('@/lib/html-to-text');
+    
     let plainTextBody = emailBody;
     let htmlBody = bodyHtml;
     
-    // If emailBody contains HTML tags but no bodyHtml was provided, extract plain text
-    if (!htmlBody && /<[^>]+>/.test(emailBody)) {
-      // Import htmlToText to convert HTML to plain text
-      const { htmlToText } = await import('@/lib/html-to-text');
-      plainTextBody = htmlToText(emailBody);
-      htmlBody = emailBody; // Use the original as HTML
-    } else if (htmlBody && !plainTextBody) {
-      // If only HTML is provided, extract plain text
-      const { htmlToText } = await import('@/lib/html-to-text');
+    // If emailBody contains HTML tags, strip them completely
+    if (plainTextBody && /<[^>]+>/.test(plainTextBody)) {
+      // Use htmlToText for proper conversion, preserving formatting
+      plainTextBody = htmlToText(plainTextBody);
+      // If no separate HTML body was provided, use original as HTML
+      if (!htmlBody) {
+        htmlBody = emailBody;
+      }
+    }
+    
+    // If only HTML is provided, extract plain text
+    if (htmlBody && (!plainTextBody || plainTextBody.trim() === '')) {
       plainTextBody = htmlToText(htmlBody);
+    }
+    
+    // Final safety check: ensure plain text has no HTML tags
+    if (plainTextBody && /<[^>]+>/.test(plainTextBody)) {
+      // Strip any remaining HTML tags
+      plainTextBody = plainTextBody.replace(/<[^>]+>/g, '').trim();
     }
 
     // Send email and create ticket
