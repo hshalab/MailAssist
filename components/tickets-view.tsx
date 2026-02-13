@@ -364,8 +364,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // Actually, ResizablePanelGroup with 3 panels handles this, but the issue is when we add/remove 3rd panel, the 1st/2nd reset.
   // Fix: We must dynamically calculate defaultSize for all panels whenever the layout changes (sidebar toggles).
 
-  // Default: narrower ticket list, wider detail view
-  const [mainSplit, setMainSplit] = useState<number[]>([20, 80])
+  // Default: slightly wider ticket list, still detail-focused
+  const [mainSplit, setMainSplit] = useState<number[]>([25, 75])
   const [isLoaded, setIsLoaded] = useState(false)
 
   // Load saved split from local storage on mount
