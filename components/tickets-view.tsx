@@ -635,7 +635,25 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
   const fetchTicketCounts = useCallback(async () => {
     try {
-      const res = await fetch('/api/tickets/counts')
+      const params = new URLSearchParams()
+      // Keep counts in sync with the currently selected account
+      if (selectedAccount !== 'all') {
+        params.set('account', selectedAccount)
+      }
+
+      const headers: Record<string, string> = {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+      }
+      // Ensure the API receives the same per-tab user context as the tickets list
+      if (currentUserId) {
+        headers['x-user-id'] = currentUserId
+      }
+
+      const query = params.toString()
+      const url = query ? `/api/tickets/counts?${query}` : '/api/tickets/counts'
+
+      const res = await fetch(url, { cache: 'no-store', headers })
       if (res.ok) {
         const data = await res.json()
         setTicketCounts(data.counts || data)
@@ -643,7 +661,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     } catch (e) {
       console.error("Failed to fetch ticket counts", e)
     }
-  }, [])
+  }, [selectedAccount, currentUserId])
 
   const fetchSingleTicket = useCallback(async (ticketId: string) => {
     try {
