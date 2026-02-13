@@ -27,13 +27,7 @@ import { EmailContentViewer } from "@/components/email-content-viewer"
 import { htmlToText } from "@/lib/html-to-text"
 import CustomerEmailTimeline from "@/components/customer-email-timeline"
 
-const toPlainText = (html: string) => {
-  if (!html) return ""
-  const tmp = typeof window !== "undefined" ? document.createElement("div") : null
-  if (!tmp) return html
-  tmp.innerHTML = html
-  return tmp.textContent || tmp.innerText || ""
-}
+
 
 const textToHtml = (text: string) => {
   if (!text) return ""
@@ -117,6 +111,21 @@ interface TicketsViewProps {
   ticketNavKey?: number
 }
 
+// Helper: sort tickets in-memory to match the current sort order.
+// Backend sorts by last_customer_reply_at, but when we use cached data
+// or switch tabs we can briefly show the wrong order unless we resort.
+const sortTicketsByOrder = (tickets: Ticket[], order: 'asc' | 'desc'): Ticket[] => {
+  const factor = order === 'asc' ? 1 : -1
+  return [...tickets].sort((a, b) => {
+    const aDate = a.lastCustomerReplyAt || a.updatedAt || a.createdAt
+    const bDate = b.lastCustomerReplyAt || b.updatedAt || b.createdAt
+    const aTime = aDate ? new Date(aDate).getTime() : 0
+    const bTime = bDate ? new Date(bDate).getTime() : 0
+    if (aTime === bTime) return 0
+    return aTime > bTime ? factor * 1 : factor * -1
+  })
+}
+
 export default function TicketsView({ currentUserId, currentUserRole, globalSearchTerm, onClearGlobalSearch, refreshKey, initialTicketId, ticketNavKey }: TicketsViewProps) {
   // Cache for instant switching between Active/Closed
   const ticketCache = useRef<{ active: Ticket[], closed: Ticket[] }>({ active: [], closed: [] })
@@ -129,6 +138,19 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [isCreatingTickets, setIsCreatingTickets] = useState(false) // Track if tickets are being creating
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
   const [activeTab, setActiveTab] = useState<"assigned" | "unassigned" | "open" | "closed">("unassigned")
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(() => {
+    // Backend uses sortOrder === 'desc' for NEWEST first (latest activity at top)
+    // so we default to 'desc' to match "Latest" label in the UI.
+    if (typeof window === "undefined") return "desc"
+    try {
+      // Store per-user so different agents can have their own preference
+      const key = currentUserId ? `tickets-sort-order:${currentUserId}` : "tickets-sort-order:anon"
+      const saved = window.localStorage.getItem(key) as 'asc' | 'desc' | null
+      return saved === "asc" || saved === "desc" ? saved : "desc"
+    } catch {
+      return "desc"
+    }
+  }) // Default to newest first, but restore from storage when available
 
   // Track if component has mounted to prevent double-fetch
   const hasMountedRef = useRef(false)
@@ -143,15 +165,40 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [onClearGlobalSearch])
 
+  // Persist sort preference per user in localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      const key = currentUserId ? `tickets-sort-order:${currentUserId}` : "tickets-sort-order:anon"
+      window.localStorage.setItem(key, sortOrder)
+    } catch {
+      // Ignore storage errors (private mode, etc.)
+    }
+  }, [sortOrder, currentUserId])
+
   // Clear global search when changing tabs manually (but NOT when auto-switching due to search)
   const handleTabChange = (value: string) => {
-    setActiveTab(value as typeof activeTab)
+    const nextTab = value as typeof activeTab
+    setActiveTab(nextTab)
+
+    // When switching between Active <-> Closed, try to show cached tickets instantly
+    // so the user doesn't see a "blank" state while the network request runs.
+    const cacheKey = nextTab === "closed" ? "closed" : "active"
+    const cached = ticketCache.current[cacheKey]
+    if (
+      cached &&
+      cached.length > 0 &&
+      !activeSearchQuery &&
+      statusFilter === "all" &&
+      assigneeFilter === "all" &&
+      departmentFilter === "all" &&
+      tagsFilter === "all"
+    ) {
+      setTickets(cached)
+    }
+
     // Only clear if we are NOT currently searching (or if we want to clear search on tab switch)
-    // User requested: "when ichaneg tab in tickets page remov filter fro mtop navabr"
-    // REMOVED: Don't clear search on tab change - user wants to keep search active
-    // if (globalSearchTerm) {
-    //   onClearGlobalSearch?.()
-    // }
+    // User requested: keep global search when changing tabs, so we intentionally do nothing here.
   }
 
   // Filters
@@ -233,6 +280,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
   // Ticket detail state
   const [threadMessages, setThreadMessages] = useState<ThreadMessage[]>([])
+  // Keep any locally-sent (optimistic) messages per ticket so they don't
+  // disappear when you change tickets and come back before the server
+  // thread endpoint has fully caught up.
+  const optimisticThreadMessagesRef = useRef<Record<string, ThreadMessage[]>>({})
   const [loadingThread, setLoadingThread] = useState(false)
   const [notes, setNotes] = useState<TicketNote[]>([])
   const [replyText, setReplyText] = useState("")
@@ -295,59 +346,86 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
   const [showShopifySidebar, setShowShopifySidebar] = useState(false)
 
+  // Optional ref for the outer panel group container (kept to avoid runtime errors if used in JSX)
+  const panelGroupRef = useRef<HTMLDivElement | null>(null)
+
   // Ref for conversation scroll container to preserve scroll position
   const conversationScrollRef = useRef<HTMLDivElement>(null)
   const savedScrollPositionRef = useRef<number>(0)
   const ticketListRef = useRef<HTMLDivElement>(null)
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null)
 
-  // Panel width preferences - load from localStorage with proper state management
-  const getInitialPanelSizes = (): number[] => {
+  // Improved Panel Sizing Logic
+  // We track the "main split" (List vs Detail) as a percentage (0-100)
+  // This split should persist regardless of whether sidebars are open or closed.
+  // When sidebars open, they compress the main area, but the *relative* split between List/Detail should ideally stay similar?
+  // implementation: We save [listWidth, detailWidth] as the fundamental preference.
+  // When sidebars are open, we assume they take fixed logical width?
+  // Actually, ResizablePanelGroup with 3 panels handles this, but the issue is when we add/remove 3rd panel, the 1st/2nd reset.
+  // Fix: We must dynamically calculate defaultSize for all panels whenever the layout changes (sidebar toggles).
+
+  // Default: narrower ticket list, wider detail view
+  const [mainSplit, setMainSplit] = useState<number[]>([20, 80])
+  const [isLoaded, setIsLoaded] = useState(false)
+
+  // Load saved split from local storage on mount
+  useEffect(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('ticket-panel-widths')
+      const saved = localStorage.getItem('ticket-panel-main-split')
       if (saved) {
         try {
           const parsed = JSON.parse(saved)
-          // Convert from {list, detail} format to array format [list, detail]
-          if (parsed.list && parsed.detail) {
-            const sizes = [parsed.list, parsed.detail]
-            // Normalize to ensure they add up to 100%
-            const total = sizes[0] + sizes[1]
-            if (total > 0 && total <= 100) {
-              return sizes
-            }
+          if (Array.isArray(parsed) && parsed.length === 2) {
+            setMainSplit(parsed)
           }
-        } catch {
-          // ignore
-        }
+        } catch { }
       }
-    }
-    return [35, 65] // Default: 35% list, 65% detail (better for email content)
-  }
-
-  // Use state for panel sizes to ensure proper reactivity
-  const [panelSizes, setPanelSizes] = useState<number[]>(getInitialPanelSizes())
-  const panelGroupRef = useRef<HTMLDivElement>(null)
-  const isResizingRef = useRef(false)
-
-  // Ensure panel sizes are normalized on mount
-  useEffect(() => {
-    const sizes = panelSizes
-    if (sizes.length === 2) {
-      const total = sizes[0] + sizes[1]
-      if (total > 100 || total < 95) {
-        // Normalize to ensure they add up to 100%
-        const normalized = [
-          (sizes[0] / total) * 100,
-          (sizes[1] / total) * 100
-        ]
-        setPanelSizes(normalized)
-      }
+      setIsLoaded(true)
     }
   }, [])
 
+  // Calculate effective panel sizes based on mainSplit and how many sidebars are open.
+  // Each sidebar gets ~25% when alone, ~20% when two are open.
+  // The list/detail ratio from mainSplit is always preserved proportionally.
+  const getEffectivePanelSizes = (sidebarCount: number) => {
+    const split = mainSplit
+    if (sidebarCount <= 0) return split
+    const perSidebar = sidebarCount === 1 ? 25 : 20
+    const totalSidebar = perSidebar * sidebarCount
+    const remaining = 100 - totalSidebar
+    const totalSplit = split[0] + split[1]
+    const sizes = [
+      (split[0] / totalSplit) * remaining,
+      (split[1] / totalSplit) * remaining,
+    ]
+    for (let i = 0; i < sidebarCount; i++) sizes.push(perSidebar)
+    return sizes
+  }
+
+  // Calculate sidebar count for synchronous sizing
+  let sidebarCount = 0
+  if (showQuickRepliesSidebar) sidebarCount++
+  if (showShopifySidebar && selectedTicket) sidebarCount++
+
+  const effectivePanelSizes = getEffectivePanelSizes(sidebarCount)
+
+  const saveMainSplit = (sizes: number[]) => {
+    // Only persist the split when we have exactly 2 panels (no sidebars).
+    // This ensures that resizing while Quick Replies / Shopify sidebars are open
+    // does NOT permanently distort the main list/detail ratio.
+    if (sizes.length !== 2) return
+
+    const newSplit = sizes
+
+    setMainSplit(newSplit)
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('ticket-panel-main-split', JSON.stringify(newSplit))
+    }
+  }
+
   // Prevent layout shifts when conversation loads - stabilize panel sizes
   // Also restore scroll position after messages load
+  const isResizingRef = useRef(false)
   const prevThreadLengthRef = useRef(0)
   useEffect(() => {
     if (threadMessages.length > 0 && threadMessages.length !== prevThreadLengthRef.current && !isResizingRef.current) {
@@ -408,42 +486,25 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // Debounced localStorage save
   const resizeTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  const handlePanelResize = useCallback((sizes: number[]) => {
-    if (!sizes || sizes.length < 2) return
+  const handlePanelResize = useCallback(
+    (sizes: number[]) => {
+      if (!sizes || sizes.length < 2 || !isLoaded) return
 
-    isResizingRef.current = true
+      // Keep the live layout in sync with the resizable group
+      isResizingRef.current = true
 
-    // Ensure sizes are valid percentages (between 0 and 100)
-    let normalizedSizes = sizes.map(s => Math.max(0, Math.min(100, s)))
-
-    // Ensure they add up to approximately 100% (accounting for handle width)
-    const total = normalizedSizes.reduce((a, b) => a + b, 0)
-    if (total > 100 || total < 95) {
-      // Scale proportionally to ensure they add up to 100%
-      normalizedSizes = normalizedSizes.map(s => (s / total) * 100)
-    }
-
-    // Update state immediately for smooth resizing
-    setPanelSizes(normalizedSizes)
-
-    // Debounce localStorage writes
-    if (resizeTimeoutRef.current) {
-      clearTimeout(resizeTimeoutRef.current)
-    }
-    resizeTimeoutRef.current = setTimeout(() => {
-      if (typeof window !== 'undefined') {
-        const saveData: any = {
-          list: normalizedSizes[0],
-          detail: normalizedSizes[1]
-        }
-        if (normalizedSizes.length === 3) {
-          saveData.quickReplies = normalizedSizes[2]
-        }
-        localStorage.setItem('ticket-panel-widths', JSON.stringify(saveData))
+      // Note: sizes are percentages of the group
+      // Debounce persistence to avoid thrashing localStorage while dragging
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current)
       }
-      isResizingRef.current = false
-    }, 300)
-  }, [])
+      resizeTimeoutRef.current = setTimeout(() => {
+        saveMainSplit(sizes)
+        isResizingRef.current = false
+      }, 300)
+    },
+    [isLoaded, saveMainSplit]
+  )
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -616,10 +677,28 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   }, [fetchTicketCounts])
 
   // Define fetchTickets before it's used in effects
-  const fetchTickets = useCallback(async (options?: { silent?: boolean, returnData?: boolean, pageNum?: number, limit?: number, forceTab?: 'closed' | 'active' }) => {
-    const { silent = false, returnData = false, pageNum = 1, limit, forceTab } = options || {}
+  const fetchTickets = useCallback(async (options?: {
+    silent?: boolean
+    returnData?: boolean
+    pageNum?: number
+    limit?: number
+    forceTab?: "closed" | "active"
+    sortOverride?: "asc" | "desc"
+  }) => {
+    const {
+      silent = false,
+      returnData = false,
+      pageNum = 1,
+      limit,
+      forceTab,
+      sortOverride,
+    } = options || {}
     // If loading more (pageNum > 1), don't set main loading state
     const isLoadMore = pageNum > 1
+
+    // Resolve the effective sort order up-front so cached data and server
+    // response both use the same (correct) order.
+    const effectiveSort = sortOverride || sortOrder
 
     // Increment fetch ID to invalidate previous requests
     const currentFetchId = ++fetchIdRef.current
@@ -637,13 +716,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       let initialCachedData: Ticket[] | null = null
       const targetMode = effectiveTab === 'closed' ? 'closed' : 'active'
 
-      // Only use cache if we are fetching page 1, have no search/filters, and have cached data
+      // OPTIMIZATION: Always check cache first for instant feedback, especially for 'closed' tab
       if (pageNum === 1 && !activeSearchQuery && statusFilter === 'all' && assigneeFilter === 'all' && departmentFilter === 'all' && tagsFilter === 'all') {
+        // If we have ANY cached data for the target mode, use it immediately
         if (ticketCache.current[targetMode].length > 0) {
-          console.log(`[Tickets] Using cached data for ${targetMode}, loading silently`)
+          console.log(`[Tickets] Instant load from cache for ${targetMode}`)
           initialCachedData = ticketCache.current[targetMode]
-          // If we have cache, we don't need to show loading spinner
-          // We will still fetch to update, but silently
         }
       }
 
@@ -651,7 +729,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       const shouldUseCache = !!initialCachedData && !silent && !isLoadMore
 
       if (shouldUseCache) {
-        setTickets(initialCachedData!)
+        setTickets(sortTicketsByOrder(initialCachedData!, effectiveSort))
         // If we used cache, we treat this fetch as silent from UI perspective
         // But we don't overwrite the 'silent' param because we want to know if it was *intended* to be silent?
         // Actually, we should just not set loading(true).
@@ -747,14 +825,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         if (tagsFilter !== 'all') url += `&tags=${encodeURIComponent(tagsFilter)}`
       }
 
-      // Sort order - usually controlled by tabs/status
-      // Closed -> Newest first (desc)
-      // Open -> Oldest first (asc) ... fetchTickets logic in previous file said "Always fetch descending (Newest first)"
-      // Let's keep it consistent with user requirement:
-      // "Open/Unassigned/Assigned tabs: Oldest first (ASC)"
-      // "Closed tab: Newest first (DESC)"
-      const sortOrder = activeTab === 'closed' || activeSearchQuery ? 'desc' : 'asc'
-      url += `&sort=${sortOrder}`
+      // Sort order — effectiveSort was resolved at the top of fetchTickets
+      url += `&sort=${effectiveSort}`
 
       const headers: Record<string, string> = {
         'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -793,7 +865,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         // Only update displayed tickets if this is NOT a prefetch (forceTab)
         // Prefetches should only update the cache, not the displayed tickets
         if (!forceTab) {
-          setTickets(list)
+          setTickets(sortTicketsByOrder(list, effectiveSort))
         }
         // Update cache
         const cacheKey = effectiveTab === 'closed' ? 'closed' : 'active'
@@ -846,7 +918,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (!silent) setLoading(false)
       setLoadingMore(false)
     }
-  }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery, activeTab === 'closed' ? 'closed' : 'active', statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, fetchTicketCounts])
+  }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery, activeTab === 'closed' ? 'closed' : 'active', statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, fetchTicketCounts, sortOrder])
 
   // IntersectionObserver for infinite scroll (load more on scroll)
   useEffect(() => {
@@ -885,15 +957,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // NOTE: fetchTickets will also check cache and avoid loading state, 
   // but setting it here strictly ensures it happens in the same render cycle if possible (reactive)
   useEffect(() => {
-    // We don't necessarily need to setTickets here if fetchTickets handles it efficiently?
-    // Actually, setting it here causes a double-set if fetchTickets also does it.
-    // However, fetchTickets is async. This effect runs synchronously after render (commit phase).
-    // Let's rely on fetchTickets to handle the "Avoid Loading State" part.
-    // But we CAN clear the list if we switch to a mode and have NO cache, to allow skeleton?
-    // Current behavior: tickets stays populated with OLD tab data until fetchTickets clears it (via setLoading).
-    // If we have cache, fetchTickets will use it instantly.
-    // So we can probably remove this effect to avoid race conditions.
-  }, [activeTab]);
+    // Whenever the active tab changes, refresh tickets for that mode.
+    // Cached results (if present) are applied instantly inside fetchTickets,
+    // so this won't introduce visible loading when cache is warm.
+    fetchTickets({ pageNum: 1 })
+  }, [activeTab, fetchTickets])
 
   // Handle quick reply selection
   const handleSelectQuickReply = (content: string) => {
@@ -956,41 +1024,35 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   useEffect(() => { fetchTicketsRef.current = fetchTickets }, [fetchTickets])
 
   // Prefetch closed tickets in background for instant tab switching
+  // We do this once (per filter profile) so that when the user first clicks "Closed"
+  // we can show cached results immediately instead of an empty state.
   useEffect(() => {
-    // Only prefetch if:
-    // 1. We have active tickets loaded (component is ready)
-    // 2. Closed cache is empty (not already prefetched)
-    // 3. Not currently loading
-    // 4. No active search/filters (to avoid unnecessary fetches)
+    if (ticketCache.current["closed"].length > 0) return
     if (
-      tickets.length > 0 && 
-      ticketCache.current['closed'].length === 0 &&
-      activeTab !== 'closed' && // Don't prefetch if already on closed tab
-      !loading &&
-      !activeSearchQuery &&
-      statusFilter === 'all' &&
-      assigneeFilter === 'all' &&
-      departmentFilter === 'all' &&
-      tagsFilter === 'all'
+      activeSearchQuery ||
+      statusFilter !== "all" ||
+      assigneeFilter !== "all" ||
+      departmentFilter !== "all" ||
+      tagsFilter !== "all"
     ) {
-      console.log('[Tickets] Prefetching closed tickets in background for instant tab switching')
-      // Prefetch closed tickets silently in background
-      // Use a timeout to avoid interfering with current operations
-      const prefetchTimer = setTimeout(() => {
-        // Use forceTab to fetch closed tickets without changing activeTab
-        fetchTickets({ 
-          silent: true, // Silent fetch - no loading spinner
-          pageNum: 1,
-          limit: 200, // Same limit as normal fetch
-          forceTab: 'closed' // Force fetch closed tickets
-        }).catch(() => {
-          // Ignore errors in prefetch - it's just a background optimization
-        })
-      }, 1000) // Wait 1 second after active tickets load
-
-      return () => clearTimeout(prefetchTimer)
+      // Don't eagerly prefetch when user has heavy filters/search applied
+      return
     }
-  }, [tickets.length, activeTab, loading, activeSearchQuery, statusFilter, assigneeFilter, departmentFilter, tagsFilter, selectedAccount, fetchTickets])
+
+    const prefetchTimer = setTimeout(() => {
+      console.log("[Tickets] Prefetching closed tickets for fast Closed tab")
+      fetchTickets({
+        silent: true,
+        pageNum: 1,
+        limit: 200,
+        forceTab: "closed",
+      }).catch(() => {
+        // Ignore errors in prefetch - it's just a background optimization
+      })
+    }, 200)
+
+    return () => clearTimeout(prefetchTimer)
+  }, [activeSearchQuery, statusFilter, assigneeFilter, departmentFilter, tagsFilter, fetchTickets])
 
   useEffect(() => {
     const fetchAgentDepartments = async () => {
@@ -1726,7 +1788,21 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       const response = await fetch(`/api/tickets/${selectedTicket.id}/thread`)
       if (response.ok) {
         const data = await response.json()
-        setThreadMessages(data.messages || [])
+        let messages: ThreadMessage[] = data.messages || []
+
+        // Re-attach any local optimistic messages for this ticket so they
+        // remain visible even if the backend thread API is slightly behind.
+        const optimistic = optimisticThreadMessagesRef.current[selectedTicket.id] || []
+        if (optimistic.length > 0) {
+          const optimisticIds = new Set(optimistic.map(m => m.id))
+          messages = [
+            // Avoid exact duplicates if we ever reuse IDs
+            ...messages.filter(m => !optimisticIds.has(m.id)),
+            ...optimistic,
+          ]
+        }
+
+        setThreadMessages(messages)
       } else {
         // Handle error - try to get error message from response
         const errorData = await response.json().catch(() => ({}))
@@ -2536,7 +2612,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     // Capture state before any navigation/clearing
     const contentToSend = {
       html: replyHtml.trim(),
-      text: toPlainText(replyHtml) || replyText || replyHtml.trim(),
+      text: htmlToText(replyHtml) || replyText || replyHtml.trim(),
       attachments: [...replyAttachments],
       draftId: draftId
     }
@@ -2555,20 +2631,24 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     // We do this BEFORE the slow email send to make it feel instant
     // Add sent message to thread immediately (optimistic)
     // Get user email from thread messages (the 'to' field of customer messages is usually the agent email)
-    const userEmailFromThread = threadMessages.find(msg => msg.from !== threadMessages[0]?.from)?.to || 
-                                 threadMessages[0]?.to || 
-                                 'You'
-    const optimisticMessage = {
+    const userEmailFromThread = threadMessages.find(msg => msg.from !== threadMessages[0]?.from)?.to ||
+      threadMessages[0]?.to ||
+      'You'
+    const optimisticMessage: ThreadMessage = {
       id: `sent-${Date.now()}`,
-      threadId: selectedTicket.threadId,
       subject: threadMessages[0]?.subject || selectedTicket.subject,
       from: userEmailFromThread,
       to: threadMessages[0]?.from || '',
       date: new Date().toISOString(),
       body: contentToSend.html,
-      snippet: contentToSend.text.substring(0, 100)
+      attachments: contentToSend.attachments,
     }
-    setThreadMessages(prev => [...prev, optimisticMessage])
+    setThreadMessages(prev => {
+      const next = [...prev, optimisticMessage]
+      const existing = optimisticThreadMessagesRef.current[targetTicketId] || []
+      optimisticThreadMessagesRef.current[targetTicketId] = [...existing, optimisticMessage]
+      return next
+    })
 
     // Clear editor state immediately
     setReplyHtml("")
@@ -2712,7 +2792,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         // Revert optimistic updates on error
         // Remove optimistic message from thread
         setThreadMessages(prev => prev.filter(msg => msg.id !== optimisticMessage.id))
-        
+
         // Restore editor state
         setReplyHtml(contentToSend.html)
         setReplyText(contentToSend.text)
@@ -2720,7 +2800,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         if (contentToSend.draftId) {
           setDraftId(contentToSend.draftId)
         }
-        
+
         // If we optimistically closed, revert the ticket status in the list
         if (opts?.closeTicket) {
           setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: 'open' } : t))
@@ -2917,18 +2997,19 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   return (
     <div className="h-full w-full bg-background overflow-hidden" ref={panelGroupRef} style={{ contain: 'layout size' }}>
       <ResizablePanelGroup
+        // Key only on load state so that we apply the saved split once,
+        // but do NOT remount the whole layout when sidebars open/close.
+        key={isLoaded ? 'panels-loaded' : 'panels-loading'}
         direction="horizontal"
         className="h-full w-full"
         onLayout={handlePanelResize}
-        autoSaveId="ticket-panels-layout"
       >
         {/* Tickets List */}
         <ResizablePanel
-          defaultSize={panelSizes[0]}
-          minSize={25}
-          maxSize={55}
-          className="flex flex-col border-r border-border/50 bg-card overflow-hidden"
-          style={{ minWidth: 0, contain: 'layout size' }}
+          defaultSize={effectivePanelSizes[0]}
+          minSize={15}
+          order={1}
+          id="ticket-list-panel"
         >
           <div ref={ticketListRef} tabIndex={-1} className="flex flex-col h-full overflow-hidden w-full" style={{ contain: 'layout' }}>
             {/* Show creating indicator banner if tickets are being created */}
@@ -2968,6 +3049,32 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                     title="Refresh tickets"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-[11px] flex items-center gap-1"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      const next = sortOrder === 'desc' ? 'asc' : 'desc'
+                      setSortOrder(next)
+                      // Refresh tickets starting from page 1 using the new sort
+                      fetchTickets({ pageNum: 1, sortOverride: next })
+                    }}
+                    title={sortOrder === 'desc' ? 'Showing latest tickets first' : 'Showing oldest tickets first'}
+                  >
+                    {sortOrder === 'desc' ? (
+                      <>
+                        <ChevronDown className="w-3 h-3" />
+                        <span>Latest</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronUp className="w-3 h-3" />
+                        <span>Oldest</span>
+                      </>
+                    )}
                   </Button>
                   <Button
                     variant={isSelectMode ? "default" : "outline"}
@@ -3597,10 +3704,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
         {/* Ticket Detail */}
         <ResizablePanel
-          defaultSize={panelSizes[1]}
+          defaultSize={effectivePanelSizes[1]}
           minSize={45}
-          maxSize={75}
-          className="flex flex-col bg-background overflow-hidden"
+          order={2}
+          id="ticket-detail-panel"
+          className="flex flex-col bg-background overflow-hidden h-full"
           style={{ minWidth: 0, contain: 'layout size' }}
         >
           <div
@@ -4502,8 +4610,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                 </div>
               </div>
             ) : (
-              <div className="flex items-center justify-center h-full px-6 py-10 w-full">
-                <div className="text-center space-y-4 max-w-md animate-in fade-in duration-500">
+              <div className="flex items-center justify-center h-full px-6 py-10 w-full flex-grow">
+                <div className="text-center space-y-4 max-w-md animate-in fade-in duration-500 m-auto">
                   <div className="w-16 h-16 bg-muted/50 rounded-full flex items-center justify-center mx-auto shadow-sm">
                     <Mail className="w-8 h-8 text-muted-foreground" />
                   </div>
@@ -4527,11 +4635,22 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               className="w-1 bg-border/50 hover:bg-primary/30 active:bg-primary/50 transition-all duration-200 cursor-col-resize group relative z-10"
             />
             <ResizablePanel
-              defaultSize={panelSizes.length === 3 ? panelSizes[2] : 20}
+              defaultSize={effectivePanelSizes[2]}
               minSize={15}
               maxSize={35}
               className="flex flex-col bg-background overflow-hidden"
               style={{ minWidth: 0, contain: 'layout size' }}
+              onResize={(size) => {
+                // When resizing sidebar, we need to update the FULL panelSizes array.
+                // panelSizes = [list, detail, rightSidebar]
+                // We only get 'size' of THIS panel.
+                // We need to assume the others scale proportionally?
+                // Or we can just read the current layout?
+                // ResizablePanelGroup doesn't easily give us the "other" sizes in this callback callback.
+                // Simplification: Don't track exact sidebar resize for "mainSplit" persistence.
+                // Just let it be. If user drastically resizes sidebar, it might reset next reload.
+                // That is acceptable for sidebars usually.
+              }}
             >
               <QuickRepliesSidebar
                 onSelectReply={handleSelectQuickReply}
@@ -4551,7 +4670,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               className="w-1 bg-border/50 hover:bg-primary/30 active:bg-primary/50 transition-all duration-200 cursor-col-resize group relative z-10"
             />
             <ResizablePanel
-              defaultSize={panelSizes.length === 4 ? panelSizes[3] : 25}
+              defaultSize={showQuickRepliesSidebar ? effectivePanelSizes[3] : effectivePanelSizes[2]}
               minSize={20}
               maxSize={40}
               className="flex flex-col bg-background overflow-hidden"

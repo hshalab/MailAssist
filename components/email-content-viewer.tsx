@@ -14,6 +14,7 @@ interface EmailContentViewerProps {
 
 export function EmailContentViewer({ content, emailId, attachments, className }: EmailContentViewerProps) {
     const [processedContent, setProcessedContent] = useState("")
+    const [isPlainTextContent, setIsPlainTextContent] = useState(false)
     const [iframeHeight, setIframeHeight] = useState(200)
     const [loading, setLoading] = useState(false)
     const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(true)
@@ -38,6 +39,8 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
         // If message is plain text, preserve line breaks and auto-link URLs/emails
         const isPlainText = !/<\s*(p|div|br|table|img|ul|ol|li|span|style|body|html|blockquote)/i.test(content)
         let normalizedContent = content
+        // Track whether this content is plain text for CSS styling
+        setIsPlainTextContent(isPlainText)
 
         if (isPlainText) {
             // Escape HTML entities first
@@ -95,7 +98,7 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             attachments.forEach(att => {
                 const nameWithoutExt = att.filename?.replace(/\.[^.]+$/, '') || ''
                 const contentId = att.contentId || att.id
-                
+
                 // Build list of possible CID patterns this attachment might match
                 const patterns = [
                     `cid:${att.id}`,
@@ -167,17 +170,17 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             (match, attrs, href) => {
                 const isExternal = /^https?:\/\//i.test(href) && !href.includes(window.location.hostname)
                 const hasTarget = /target=/i.test(attrs)
-                
+
                 let newAttrs = attrs
                 if (!hasTarget) {
                     newAttrs += ' target="_blank" rel="noopener noreferrer"'
                 }
-                
+
                 // Add data attribute for external links (can be styled in CSS)
                 if (isExternal) {
                     newAttrs += ' data-external="true"'
                 }
-                
+
                 return `<a ${newAttrs}>`
             }
         )
@@ -337,6 +340,22 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 }
                 .email-body {
                     max-width: 100%;
+                    /* Preserve user-intended line breaks and spacing for plain-text style emails
+                       while still allowing HTML emails to render normally. */
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                }
+                /* Add paragraph-like spacing for simple div-based layouts (common in Gmail),
+                   but only when the email itself hasn't set custom styles. */
+                .email-body > div:not([style]) {
+                    margin: 0 0 1em 0;
+                }
+                /* Some providers (like Gmail) add inline left margins on the
+                   first line only. Normalize those so all lines align the same. */
+                .email-body > div[style*="margin-left"] {
+                    margin-left: 0 !important;
+                    padding-left: 0 !important;
+                    text-indent: 0 !important;
                 }
                 /* Only apply spacing if email doesn't have its own */
                 .email-body > p:not([style]) { margin: 0 0 1em 0; }
@@ -431,9 +450,7 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             </style>
         </head>
         <body>
-            <div class="email-body">
-                ${processedContent}
-            </div>
+<div class="email-body${isPlainTextContent ? ' plain-text' : ''}">${processedContent}</div>
         </body>
         </html>
     `

@@ -125,8 +125,8 @@ export async function sendReplyMessage(
   const mixedBoundary = `mixed-${Date.now()}`
 
   // CRITICAL: Ensure plain text body has no HTML tags
-  const cleanBody = body && /<[^>]+>/.test(body) 
-    ? body.replace(/<[^>]+>/g, '').trim() 
+  const cleanBody = body && /<[^>]+>/.test(body)
+    ? body.replace(/<[^>]+>/g, '').trim()
     : body;
 
   const textPart = [
@@ -179,8 +179,8 @@ export async function sendReplyMessage(
     message += altClosing
   } else {
     // CRITICAL: Ensure plain text body has no HTML tags
-    const cleanBody = body && /<[^>]+>/.test(body) 
-      ? body.replace(/<[^>]+>/g, '').trim() 
+    const cleanBody = body && /<[^>]+>/.test(body)
+      ? body.replace(/<[^>]+>/g, '').trim()
       : body;
     message += `${headers}\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n${cleanBody.replace(/\r?\n/g, '\r\n')}`
   }
@@ -700,8 +700,9 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
       }
     }
 
-    // Use HTML if no plain text, keep the HTML for proper rendering
-    if (!bodyText && bodyHtml) {
+    // Prefer HTML body if available, as it preserves formatting matches the sent email better.
+    // Plain text is often an auto-generated fallback that might strip newlines.
+    if (bodyHtml) {
       bodyText = bodyHtml;
     }
   } else {
@@ -792,10 +793,10 @@ export async function sendNewEmail(
   const altBoundary = `alt-${Date.now()}`;
 
   // CRITICAL: Ensure plain text body has no HTML tags
-  const cleanBody = body && /<[^>]+>/.test(body) 
-    ? body.replace(/<[^>]+>/g, '').trim() 
+  const cleanBody = body && /<[^>]+>/.test(body)
+    ? body.replace(/<[^>]+>/g, '').trim()
     : body;
-  
+
   const textPart = [
     `--${altBoundary}`,
     'Content-Type: text/plain; charset="UTF-8"',
@@ -825,8 +826,8 @@ export async function sendNewEmail(
     message += altClosing;
   } else {
     // Plain text only - CRITICAL: Ensure no HTML tags
-    const cleanBody = body && /<[^>]+>/.test(body) 
-      ? body.replace(/<[^>]+>/g, '').trim() 
+    const cleanBody = body && /<[^>]+>/.test(body)
+      ? body.replace(/<[^>]+>/g, '').trim()
       : body;
     message += `${headers}\r\nContent-Type: text/plain; charset="UTF-8"\r\n\r\n${cleanBody.replace(/\r?\n/g, '\r\n')}`;
   }
