@@ -434,19 +434,12 @@ export async function ensureTicketForEmail(
   } else {
     console.log(`[Ticket] Processing customer email for ticket ${ticket.id} (Status: ${ticket.status})`);
 
-    // CRITICAL FIX: Check if email is newer than ticket's last update (including status changes)
-    // This prevents old emails from reopening tickets that were closed AFTER the email arrived
-    if (ticketUpdatedAt && incomingDate <= ticketUpdatedAt) {
-      // Email is older than or equal to the ticket's last update - ignore it
-      console.log(`[Ticket] Ignoring old customer email ${email.id} for ticket ${ticket.id}`, {
-        emailDate: dateIso,
-        ticketUpdated: ticket.updatedAt,
-        incomingTimestamp: incomingDate.getTime(),
-        ticketTimestamp: ticketUpdatedAt.getTime(),
-        diff: incomingDate.getTime() - ticketUpdatedAt.getTime()
-      });
-      return ticket;
-    }
+    // CHECK REMOVED: We previously checked if incomingDate <= ticketUpdatedAt and ignored it.
+    // This caused issues where:
+    // 1. Emails processed with a delay (after ticket closure) were ignored if they were sent before closure.
+    // 2. Tickets updated by other means (e.g. system tasks) ignored subsequent legitimate emails.
+    // The correct logic is to strictly rely on lastCustomerReplyAt to determine if this is a "new" message.
+
 
     // Only update if this is a NEWER customer reply than what we've seen before
     if (!lastCustomerReplyDate || incomingDate > lastCustomerReplyDate) {

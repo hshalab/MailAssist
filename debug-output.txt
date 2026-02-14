@@ -1,0 +1,502 @@
+Fetching recent tickets (last 7 days)...
+Found 50 tickets:
+------------------------------------------------
+ID: ae165fec-c01d-4afd-8fe0-8f2b4dc0ed6e
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89675 placed by Lee Dickhausen
+Status: open
+Created At: 2026-02-14T18:02:12.317+00:00
+Updated At: 2026-02-14T18:02:20.559+00:00
+Last Customer Reply: 2026-02-14T17:07:05+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 22e20d9a-5d17-4995-96a6-c66b37275af0
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89674 placed by RITHY SAR
+Status: open
+Created At: 2026-02-14T18:02:12.082+00:00
+Updated At: 2026-02-14T18:02:20.025+00:00
+Last Customer Reply: 2026-02-14T16:28:47+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 9c5dd165-abf6-40bd-8297-a8e079c6b6d5
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89672 placed by Oscar Elvir
+Status: open
+Created At: 2026-02-14T18:02:12.005+00:00
+Updated At: 2026-02-14T18:02:19.825+00:00
+Last Customer Reply: 2026-02-14T16:10:48+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 6b4e59a2-cb02-4431-b3d9-9814792062af
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89673 placed by Anton Rotty
+Status: open
+Created At: 2026-02-14T18:02:11.902+00:00
+Updated At: 2026-02-14T18:02:20.214+00:00
+Last Customer Reply: 2026-02-14T16:26:51+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 372bb325-7396-402b-905c-ec46d7cf75ba
+Customer: null <Carifex <no-reply@goaffpro.com>>
+Subject: A new affiliate has signed up
+Status: closed
+Created At: 2026-02-14T07:03:29.904+00:00
+Updated At: 2026-02-14T07:17:49.565+00:00
+Last Customer Reply: 2026-02-12T22:23:01+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: fdce8ef0-75e0-4f89-820b-5a1871f8cdd4
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89647 placed by billy lewis
+Status: closed
+Created At: 2026-02-14T07:03:29.329+00:00
+Updated At: 2026-02-14T07:17:49.11+00:00
+Last Customer Reply: 2026-02-12T22:23:53+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 84f4f5e9-2206-4f63-818d-4bb7779de2b0
+Customer: null <CloudwaysBot Notifications <success@cloudways.com>>
+Subject: Alert: Server Carifex server resources are running low
+Status: closed
+Created At: 2026-02-14T07:03:29.325+00:00
+Updated At: 2026-02-14T07:17:48.648+00:00
+Last Customer Reply: 2026-02-12T22:31:43+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 19942aed-5fa8-48d9-8e5b-6680b3e92382
+Customer: null <George Diaz <lpescao@gmail.com>>
+Subject: low beam bulbs for headlights
+Status: closed
+Created At: 2026-02-14T07:03:19.237+00:00
+Updated At: 2026-02-14T07:26:44.212+00:00
+Last Customer Reply: 2026-02-13T19:31:26+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: b95dd01b-aba9-4b63-8b6a-609137277b64
+Customer: null <Frank Flores <fflores1664@gmail.com>>
+Subject: Re: Order CRF89371, how did it go?
+Status: closed
+Created At: 2026-02-14T07:03:19.22+00:00
+Updated At: 2026-02-14T07:24:21.638+00:00
+Last Customer Reply: 2026-02-13T20:09:07+00:00
+Last Agent Reply: 2026-02-14T07:24:15.072+00:00
+------------------------------------------------
+------------------------------------------------
+ID: 2b0f1fa0-f34f-45a4-a0ef-b65db4ee34da
+Customer: null <"Carifex (Shopify)" <mailer@shopify.com>>
+Subject: New customer message on February 13, 2026 at 1:19 pm
+Status: closed
+Created At: 2026-02-14T07:03:18.865+00:00
+Updated At: 2026-02-14T07:26:08.508+00:00
+Last Customer Reply: 2026-02-13T19:19:31+00:00
+Last Agent Reply: 2026-02-14T07:26:01.326+00:00
+------------------------------------------------
+------------------------------------------------
+ID: f63f3b7d-7af4-4415-b60e-2cc4e359ada3
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89657 placed by Rob Lichak
+Status: closed
+Created At: 2026-02-14T07:03:17.104+00:00
+Updated At: 2026-02-14T07:17:42.739+00:00
+Last Customer Reply: 2026-02-13T21:44:39+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 605566c3-a355-4d12-b794-1329c39be302
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89661 placed by Scott Hughes
+Status: closed
+Created At: 2026-02-14T07:03:16.404+00:00
+Updated At: 2026-02-14T07:17:42.274+00:00
+Last Customer Reply: 2026-02-14T00:42:25+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 7a5dc16b-68cf-40ee-b1c9-5f251adc8853
+Customer: null <Christopher Shaw <christophershaw2323@yahoo.com>>
+Subject: Re: Order CRF85503 confirmed
+Status: closed
+Created At: 2026-02-14T07:03:15.509+00:00
+Updated At: 2026-02-14T07:23:53.049+00:00
+Last Customer Reply: 2026-02-14T00:58:04+00:00
+Last Agent Reply: 2026-02-14T07:23:46.467+00:00
+------------------------------------------------
+------------------------------------------------
+ID: cd9b1874-509f-4913-831e-d875f5a471c7
+Customer: null <chad westfall <wolverine4lifeus@gmail.com>>
+Subject: Re: Order CRF89600 confirmed
+Status: closed
+Created At: 2026-02-14T07:03:13.977+00:00
+Updated At: 2026-02-14T07:26:38.801+00:00
+Last Customer Reply: 2026-02-14T01:33:02+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: cb2bdb9e-7560-491a-9869-7446b9e5c5ec
+Customer: null <"Carifex (Shopify)" <mailer@shopify.com>>
+Subject: Payout for Feb 14, 2026 ($271.14 USD)
+Status: closed
+Created At: 2026-02-14T06:59:43.571+00:00
+Updated At: 2026-02-14T07:17:40.402+00:00
+Last Customer Reply: 2026-02-14T06:16:57+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 4031899c-f369-4b97-8531-5a82b1cbf714
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89663 placed by Benjamin Owen
+Status: closed
+Created At: 2026-02-14T06:59:43.205+00:00
+Updated At: 2026-02-14T07:17:40.901+00:00
+Last Customer Reply: 2026-02-14T05:56:42+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: b6494e15-14fa-4059-993a-84e87b01aec6
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89662 placed by Brett Maxfield
+Status: closed
+Created At: 2026-02-14T06:59:43.168+00:00
+Updated At: 2026-02-14T07:17:41.806+00:00
+Last Customer Reply: 2026-02-14T02:18:09+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 0854679d-f78e-4117-8642-a62beca78c84
+Customer: null <Kaden Jacobs <kaden.jacobs@gmail.com>>
+Subject: Re: Order CRF89431 confirmed
+Status: closed
+Created At: 2026-02-14T06:59:43.153+00:00
+Updated At: 2026-02-14T07:17:41.356+00:00
+Last Customer Reply: 2026-02-14T05:31:37+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: feb67325-d374-4b4a-96a2-51bef1da166b
+Customer: null <Jim Garris <jgarris@edgesgroup.com>>
+Subject: Automatic reply: Happy Birthday from Carifex!🎊
+Status: closed
+Created At: 2026-02-13T16:30:53.038+00:00
+Updated At: 2026-02-14T07:17:43.678+00:00
+Last Customer Reply: 2026-02-13T16:01:18+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 1de04971-1b19-405a-924c-43d23dad5b3e
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89655 placed by Anthony Akridge
+Status: closed
+Created At: 2026-02-13T16:30:52.989+00:00
+Updated At: 2026-02-14T07:17:44.139+00:00
+Last Customer Reply: 2026-02-13T15:40:15+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 8fbb219c-6879-43a6-8e08-388c36182761
+Customer: null <Jim Garris <jgarris@edgesgroup.com>>
+Subject: Automatic reply: Happy Birthday from Carifex!🎊
+Status: closed
+Created At: 2026-02-13T16:30:52.979+00:00
+Updated At: 2026-02-14T07:17:43.192+00:00
+Last Customer Reply: 2026-02-13T16:01:18+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: c6eb0947-3802-4aa1-8d86-342ffc4dad7c
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89654 placed by Zach Langenegger
+Status: closed
+Created At: 2026-02-13T15:18:45.178+00:00
+Updated At: 2026-02-14T07:17:44.604+00:00
+Last Customer Reply: 2026-02-13T15:00:36+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: f0e49aa5-f113-4414-b484-010ca0225320
+Customer: null <patricia graham <pattiacinsurance@gmail.com>>
+Subject: Re: Patricia - Still Thinking About It?
+Status: closed
+Created At: 2026-02-13T15:18:44.84+00:00
+Updated At: 2026-02-14T07:19:52.768+00:00
+Last Customer Reply: 2026-02-13T15:03:07+00:00
+Last Agent Reply: 2026-02-14T07:19:35.705+00:00
+------------------------------------------------
+------------------------------------------------
+ID: c59efd6e-7310-48e0-8e5a-82a728d21078
+Customer: null <SeedProd <support@seedprod.com>>
+Subject: 🤫Your site's hidden privacy risk?
+Status: closed
+Created At: 2026-02-13T14:14:37.245+00:00
+Updated At: 2026-02-14T07:17:45.383+00:00
+Last Customer Reply: 2026-02-13T14:05:30+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 14519ac0-b8f8-4987-9055-997541f0b1ef
+Customer: null <TripleWhale <reports@triplewhale.com>>
+Subject: TripleWhale Daily Reports
+Status: closed
+Created At: 2026-02-13T14:14:36.705+00:00
+Updated At: 2026-02-14T07:17:45.855+00:00
+Last Customer Reply: 2026-02-13T13:46:01+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 901f87ac-79d3-49eb-9c96-091a9dde1bc5
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89653 placed by David Smith
+Status: closed
+Created At: 2026-02-13T13:19:35.481+00:00
+Updated At: 2026-02-14T07:17:46.316+00:00
+Last Customer Reply: 2026-02-13T13:19:08+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 55b551c4-faed-4a55-a4b1-f2cb3bf7469a
+Customer: null <"Carifex (Shopify)" <mailer@shopify.com>>
+Subject: Payout for Feb 13, 2026 ($932.23 USD)
+Status: closed
+Created At: 2026-02-13T12:12:19.232+00:00
+Updated At: 2026-02-14T07:17:48.193+00:00
+Last Customer Reply: 2026-02-13T02:08:45+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: cf011466-1687-4cf3-9a32-885ce17ce761
+Customer: null <HMRC help and support <no.reply@advice.hmrc.gov.uk>>
+Subject: Practical payrolling pointers for employees and directors
+Status: closed
+Created At: 2026-02-13T11:07:13.635+00:00
+Updated At: 2026-02-14T07:17:46.816+00:00
+Last Customer Reply: 2026-02-13T09:48:03+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: c1c395be-319f-4bd6-8d08-4fc9085a8839
+Customer: null <"WordPress.com" <hello@wordpress.com>>
+Subject: 30% off Jetpack-powered speed and reliability
+Status: open
+Created At: 2026-02-13T10:22:53.414+00:00
+Updated At: 2026-02-13T10:22:57.165+00:00
+Last Customer Reply: 2026-02-11T20:30:10+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 7bf53a25-f111-441d-aa70-7e243d9ecfdc
+Customer: null <"WordPress.com" <hello@wordpress.com>>
+Subject: 30% off Jetpack-powered speed and reliability
+Status: open
+Created At: 2026-02-13T10:22:53.369+00:00
+Updated At: 2026-02-13T10:22:57.131+00:00
+Last Customer Reply: 2026-02-11T20:30:10+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 6ce8b6c4-f038-43ae-933a-d698f22f35e6
+Customer: null <"WordPress.com" <hello@wordpress.com>>
+Subject: Reminder: Your 30% discount is waiting ⏱
+Status: open
+Created At: 2026-02-13T10:22:53.332+00:00
+Updated At: 2026-02-13T10:22:57.096+00:00
+Last Customer Reply: 2026-02-12T20:26:53+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 05c158b2-8671-440a-b387-39488e085655
+Customer: null <"WordPress.com" <hello@wordpress.com>>
+Subject: Reminder: Your 30% discount is waiting ⏱
+Status: open
+Created At: 2026-02-13T10:22:52.801+00:00
+Updated At: 2026-02-13T10:22:57.33+00:00
+Last Customer Reply: 2026-02-12T20:26:53+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 2f296f0d-4eba-456e-9499-6ceea0b2bfa4
+Customer: null <17TRACK <no-reply@bounce.17track.net>>
+Subject: Exception Alerts: Resolve Exception Shipments in Your Store
+Status: closed
+Created At: 2026-02-13T09:29:44.683+00:00
+Updated At: 2026-02-14T07:17:47.292+00:00
+Last Customer Reply: 2026-02-13T09:02:48+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 7453fb47-9477-4f0a-94cf-8b0dd4c32541
+Customer: null <Time Doctor <support@timedoctor.com>>
+Subject: Daily Work Summary (Thu, Feb 12, 2026)
+Status: closed
+Created At: 2026-02-13T09:29:44.279+00:00
+Updated At: 2026-02-14T07:17:47.741+00:00
+Last Customer Reply: 2026-02-13T07:05:50+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: d52535d4-9b9e-480a-a1eb-98c044b275b7
+Customer: null <E-Documents Online Signature Service Portal via Xerox Online Document Scanner on <sarah@chateausonoma.com>>
+Subject: FW: SUMMARY FW: February 2026 Payment Remittance_46R7TI7HD #RAD8364-26 Update
+Status: closed
+Created At: 2026-02-13T06:30:21.873+00:00
+Updated At: 2026-02-13T06:30:54.664+00:00
+Last Customer Reply: 2026-02-12T17:03:08+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: cfa6ee89-5c82-43fb-b006-ba690907f478
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89644 placed by Robert Shrout Jr.
+Status: closed
+Created At: 2026-02-13T06:30:20.759+00:00
+Updated At: 2026-02-13T06:30:52.33+00:00
+Last Customer Reply: 2026-02-12T17:54:16+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 06d410c2-84cf-424f-ac00-34f32e982445
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89642 placed by Robert Darnell
+Status: closed
+Created At: 2026-02-13T06:30:18.57+00:00
+Updated At: 2026-02-13T06:30:51.865+00:00
+Last Customer Reply: 2026-02-12T16:59:05+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 58c01116-968b-49a4-b288-0be1d5749739
+Customer: null <"Carifex (Shopify)" <mailer@shopify.com>>
+Subject: Payout for Feb 13, 2026 ($124.10 USD)
+Status: closed
+Created At: 2026-02-13T06:27:54.746+00:00
+Updated At: 2026-02-13T06:30:53.743+00:00
+Last Customer Reply: 2026-02-13T06:10:42+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 01d2130e-ac72-4b51-8a78-067d116e018d
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89652 placed by Arturo Andrade
+Status: closed
+Created At: 2026-02-13T06:27:54.458+00:00
+Updated At: 2026-02-13T06:30:54.175+00:00
+Last Customer Reply: 2026-02-13T06:17:50+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 325de71a-fea2-4602-b87f-54eff2b1bed7
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89651 placed by Al Salinas
+Status: closed
+Created At: 2026-02-13T06:27:54.445+00:00
+Updated At: 2026-02-13T06:30:53.29+00:00
+Last Customer Reply: 2026-02-13T04:42:06+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: f046efd1-da0c-4737-a7aa-ba69574d8b15
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89650 placed by Clifford Sertle
+Status: closed
+Created At: 2026-02-13T06:27:54.442+00:00
+Updated At: 2026-02-13T06:30:52.774+00:00
+Last Customer Reply: 2026-02-13T03:46:06+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 522ed7da-f22c-40b2-841a-e281ea295638
+Customer: null <Carifex <no-reply@goaffpro.com>>
+Subject: New referral order
+Status: closed
+Created At: 2026-02-12T21:26:40.898+00:00
+Updated At: 2026-02-12T21:27:26.312+00:00
+Last Customer Reply: 2026-02-12T01:51:13+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: eba8f392-7051-46a9-8e4a-2147db6c6abd
+Customer: null <Martin Martinez <mmartinez@ics-llc.net>>
+Subject: CRF89560
+Status: closed
+Created At: 2026-02-12T21:26:23.85+00:00
+Updated At: 2026-02-12T21:31:08.562+00:00
+Last Customer Reply: 2026-02-12T15:01:41+00:00
+Last Agent Reply: 2026-02-12T21:31:01.512+00:00
+------------------------------------------------
+------------------------------------------------
+ID: 64968afb-2d57-46ac-91f5-e2cc4ca5b935
+Customer: null <Etsy <email@email.etsy.com>>
+Subject: Raise a glass to love 🥂💍
+Status: closed
+Created At: 2026-02-12T21:26:22.711+00:00
+Updated At: 2026-02-12T21:27:26.797+00:00
+Last Customer Reply: 2026-02-12T15:07:19+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 07812519-419d-4540-8ba0-e067553845f9
+Customer: null <The Trustpilot Team <info@marketing.trustpilotinfo.com>>
+Subject: How to stay visible in the age of AI
+Status: closed
+Created At: 2026-02-12T21:26:22.211+00:00
+Updated At: 2026-02-12T21:27:27.308+00:00
+Last Customer Reply: 2026-02-12T16:04:59+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 42709eb1-bf60-4928-86e1-ee46a98ebe06
+Customer: null <BOOMER <boomerf176@aol.com>>
+Subject: Re: Your order LED Headlight Resistor Adapter  has a delivery exception.
+Status: closed
+Created At: 2026-02-12T21:26:21.02+00:00
+Updated At: 2026-02-12T21:28:23.253+00:00
+Last Customer Reply: 2026-02-12T14:23:00+00:00
+Last Agent Reply: 2026-02-12T21:28:16.882+00:00
+------------------------------------------------
+------------------------------------------------
+ID: e38a25c8-a16c-4477-9d8d-4de7b7c02883
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89632 placed by mike mccurry
+Status: closed
+Created At: 2026-02-12T21:26:19.244+00:00
+Updated At: 2026-02-12T21:27:25.804+00:00
+Last Customer Reply: 2026-02-12T01:50:39+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 546d4f4e-39d0-4077-a135-fc1475075069
+Customer: null <martin martinez <mmartinz26@hotmail.com>>
+Subject: CRF89560
+Status: closed
+Created At: 2026-02-12T21:26:18.899+00:00
+Updated At: 2026-02-12T21:29:08.102+00:00
+Last Customer Reply: 2026-02-12T15:02:57+00:00
+Last Agent Reply: 2026-02-12T21:29:01.187+00:00
+------------------------------------------------
+------------------------------------------------
+ID: 3babe41c-11ee-44c1-9753-645ff15eda99
+Customer: null <Carifex <store+3338666031@t.shopifyemail.com>>
+Subject: [Carifex] Order CRF89646 placed by Joel Peters
+Status: closed
+Created At: 2026-02-12T21:14:50.16+00:00
+Updated At: 2026-02-12T21:16:54.683+00:00
+Last Customer Reply: 2026-02-12T20:57:14+00:00
+Last Agent Reply: null
+------------------------------------------------
+------------------------------------------------
+ID: 63df285f-c916-43af-8e94-ff1706edcc7e
+Customer: null <EasyFulfillment Team <support@nexusmedia-ua.com>>
+Subject: EasyFulfillment: your orders have been processed.
+Status: closed
+Created At: 2026-02-12T21:14:50.027+00:00
+Updated At: 2026-02-12T21:16:55.635+00:00
+Last Customer Reply: 2026-02-12T21:07:08+00:00
+Last Agent Reply: null
+------------------------------------------------
