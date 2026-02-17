@@ -137,6 +137,7 @@ export async function POST(request: NextRequest) {
                             from: email.from,
                             to: email.to,
                             date: email.date,
+                            ownerEmail: notification.emailAddress, // Pass owner email for correct scoping
                         },
                         isFromAgent,
                         email.body // Pass email body for AI classification

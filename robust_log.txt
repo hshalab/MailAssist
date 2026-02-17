@@ -1,0 +1,12 @@
+Starting test...
+[Supabase] Initializing with Service Role Key
+Using ticket 4b303a77-72d8-4446-bc56-8449e726f34b bound to user support@carifex.com
+Ticket updated_at set to: 2025-01-01T12:00:00+00:00
+Ticket last_customer_reply_at set to: 2025-01-01T11:00:00+00:00
+
+--- TEST 3: Customer Email NEW (Real New Reply) ---
+[Ticket] Processing customer email for ticket 4b303a77-72d8-4446-bc56-8449e726f34b (Status: closed)
+[Ticket] Auto-reopening closed ticket 4b303a77-72d8-4446-bc56-8449e726f34b due to NEW customer reply {"emailDate":"2025-01-01T13:00:00.000Z","lastUpdate":"2025-01-01T12:00:00+00:00"}
+ensureTicketForEmail returned status: open, updated_at: 2026-02-17T18:35:20.612+00:00
+DB Ticket State: status=open, updated_at=2026-02-17T18:35:20.612+00:00
+PASS: Ticket REOPENED after new customer email

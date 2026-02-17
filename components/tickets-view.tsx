@@ -152,18 +152,23 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }) // Default to newest first, but restore from storage when available
 
-  // Track if component has mounted to prevent double-fetch
+  // Track if action is waiting for user confirmation
+
   const hasMountedRef = useRef(false)
   const mountTimeRef = useRef(Date.now())
   const fetchIdRef = useRef(0) // Track fetch requests to prevent race conditions
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null) // Track polling interval to clear on new fetch
 
   // Clear global search on unmount
+  // DISABLED: This causes issues if the component remounts (e.g. key change) while searching,
+  // causing the search to be lost and triggering a fetch loop.
+  /*
   useEffect(() => {
     return () => {
       onClearGlobalSearch?.()
     }
   }, [onClearGlobalSearch])
+  */
 
   // Persist sort preference per user in localStorage
   useEffect(() => {
@@ -226,6 +231,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
   // Use global search term if provided, otherwise fallback to local
   const activeSearchQuery = globalSearchTerm !== undefined ? globalSearchTerm : searchQuery
+
+
+  // Auto-switch to tab containing search results when searching
 
 
   // Auto-switch to tab containing search results when searching
@@ -711,6 +719,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       forceTab,
       sortOverride,
     } = options || {}
+
+    // Debug log
+    if (activeSearchQuery) {
+      console.log(`[TicketsView] fetchTickets called. Query: "${activeSearchQuery}", Page: ${pageNum}, Silent: ${silent}`)
+    }
+
     // If loading more (pageNum > 1), don't set main loading state
     const isLoadMore = pageNum > 1
 
@@ -753,14 +767,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         // Actually, we should just not set loading(true).
       }
 
-      if (!silent && !isLoadMore && !shouldUseCache) {
+      if (!silent && !isLoadMore && !shouldUseCache && !activeSearchQuery) {
         setLoading(true)
         setLoadingMore(false) // Fix race condition: ensure load-more state is cleared on full refresh
       }
       if (isLoadMore) setLoadingMore(true)
 
       // If we used cache, strictly force silent mode for the rest of this function so we don't trigger spinners
-      const effectiveSilent = silent || shouldUseCache
+      const effectiveSilent = silent || shouldUseCache || (!!activeSearchQuery && pageNum === 1)
 
       setError(null)
       if (!effectiveSilent && !isLoadMore) console.log(`[Tickets] Fetching tickets page ${pageNum} (id: ${currentFetchId})... ActiveTab: ${activeTab}`)
@@ -974,12 +988,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // BUT for switching between Active <-> Closed, we want instant feedback from cache
   // NOTE: fetchTickets will also check cache and avoid loading state, 
   // but setting it here strictly ensures it happens in the same render cycle if possible (reactive)
+  // Refresh tickets when filters change
   useEffect(() => {
+    console.log('[TicketsView] Filter/Search effect triggering fetchTickets. ActiveTab:', activeTab, 'Search:', activeSearchQuery)
     // Whenever the active tab changes, refresh tickets for that mode.
     // Cached results (if present) are applied instantly inside fetchTickets,
     // so this won't introduce visible loading when cache is warm.
     fetchTickets({ pageNum: 1 })
-  }, [activeTab, fetchTickets])
+  }, [activeTab, fetchTickets, activeSearchQuery]) // Explicitly added activeSearchQuery for debugging clarity (it was implicit via fetchTickets dependency)
 
   // Handle quick reply selection
   const handleSelectQuickReply = (content: string) => {
@@ -2899,8 +2915,18 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // Server-side filtering returns the correct data, but we apply lightweight
   // client-side filtering to handle optimistic updates instantly (e.g. closing a ticket)
   const filteredTickets = useMemo(() => {
-    // If searching, rely on API results (which include all matches)
-    if (activeSearchQuery) return tickets
+    // If searching, apply client-side filtering for instant feedback
+    // The server search will eventually update 'tickets' with more results,
+    // but this gives immediate feedback on what's already loaded.
+    if (activeSearchQuery) {
+      const query = activeSearchQuery.toLowerCase()
+      return tickets.filter(ticket =>
+        ticket.subject?.toLowerCase().includes(query) ||
+        ticket.customerEmail?.toLowerCase().includes(query) ||
+        ticket.customerName?.toLowerCase().includes(query) ||
+        ticket.id.includes(query)
+      )
+    }
 
     // For standard tabs, filter out tickets that don't belong
     // This ensures that if we change a ticket's status/assignee locally,
@@ -2960,7 +2986,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     })
   }, [selectedTicket, filteredTickets])
 
-  if (loading && tickets.length === 0) {
+  if (loading && tickets.length === 0 && !activeSearchQuery) {
     return (
       <div className="flex items-center justify-center h-full w-full bg-background animate-in fade-in duration-300">
         <div className="flex flex-col items-center gap-6 w-full max-w-md px-6">
@@ -3576,7 +3602,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                     const isSelected = selectedTicket?.id === ticket.id
                     const isUnread = hasNewCustomerReply(ticket)
                     const isChecked = selectedTicketIds.has(ticket.id)
-                    const isVisible = isTicketVisibleInTab(ticket, activeTab, currentUserId)
+                    const isVisible = activeSearchQuery ? true : isTicketVisibleInTab(ticket, activeTab, currentUserId)
 
                     if (!isVisible) return null // Or return hidden div? null unmounts. We want hidden div for speed?
                     // Actually, if we return null, React unmounts it.

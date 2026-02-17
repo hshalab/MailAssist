@@ -1,0 +1,14 @@
+Testing getTickets search logic (Granular)...
+User Context: support@carifex.com (d1b9627a-c977-4278-afaa-8a957b91611f)
+
+--- Test 1: Search "groq" ONLY (no userEmail) ---
+Found 0 tickets
+
+--- Test 2: Search user_email: muhammad.salman3372@gmail.com ONLY ---
+Found 0 tickets
+
+--- Test 3: Search BOTH "groq" AND user_email: muhammad.salman3372@gmail.com ---
+Found 0 tickets
+
+--- Test 4: Direct Supabase check with .or syntax ---
+Found 6 rows (Error: none)

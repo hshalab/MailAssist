@@ -1,0 +1,15 @@
+Starting checkBody...
+Users with Tokens: i221885@nu.edu.pk, support@carifex.com, muhammad.salman3372@gmail.com, muhammad.salman3372@gmail.com, support@carifex.com, i221885@nu.edu.pk
+Ticket Owner: support@carifex.com
+Trying initial email: support@carifex.com
+Attempting fetch with: support@carifex.com
+No valid tokens for support@carifex.com
+Attempting fetch with: i221885@nu.edu.pk
+No valid tokens for i221885@nu.edu.pk
+Attempting fetch with: muhammad.salman3372@gmail.com
+No valid tokens for muhammad.salman3372@gmail.com
+Attempting fetch with: muhammad.salman3372@gmail.com
+No valid tokens for muhammad.salman3372@gmail.com
+Attempting fetch with: i221885@nu.edu.pk
+No valid tokens for i221885@nu.edu.pk
+CRITICAL: Could not fetch thread from ANY account.

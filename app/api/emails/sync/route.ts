@@ -414,7 +414,7 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
               from: email.from,
               to: email.to,
               date: email.date,
-              ownerEmail: email.ownerEmail, // CRITICAL FIX: Pass owner email for correct scoping
+              ownerEmail: emailForAutoClassify || userEmail || undefined, // CRITICAL FIX: Pass owner email for correct scoping (email.ownerEmail is undefined)
             },
             isFromAgent,
             email.body // Pass email body for AI classification
@@ -511,7 +511,7 @@ async function processEmailsBatch(emails: any[], startedAt: number): Promise<{ p
 
         // Import intent extraction function
         const { extractEmailIntent, createEmailContextWithIntent } = await import('@/lib/ai-draft');
-        
+
         const contexts = batch.map(email => {
           const trimmedBody = sanitizeEmailBody(email.body || '', 2000);
           // Use new intent-based context for better email type matching

@@ -418,6 +418,15 @@ export async function ensureTicketForEmail(
   const lastAgentReplyDate = ticket.lastAgentReplyAt ? new Date(ticket.lastAgentReplyAt) : null;
   const ticketUpdatedAt = ticket.updatedAt ? new Date(ticket.updatedAt) : null;
 
+  // Safety check: If the email is from the ticket owner (the connected Gmail account),
+  // it MUST be treated as an agent reply, regardless of what the caller passed.
+  // This prevents agent replies from reopening tickets if isFromAgent was miscalculated.
+  if (ticket.user_email && email.from && email.from.toLowerCase().includes(ticket.user_email.toLowerCase())) {
+    isFromAgent = true;
+  }
+
+
+
   if (isFromAgent) {
     // Only update if this is a newer agent reply
     if (!lastAgentReplyDate || incomingDate > lastAgentReplyDate) {
@@ -434,25 +443,25 @@ export async function ensureTicketForEmail(
   } else {
     console.log(`[Ticket] Processing customer email for ticket ${ticket.id} (Status: ${ticket.status})`);
 
-    // CHECK REMOVED: We previously checked if incomingDate <= ticketUpdatedAt and ignored it.
-    // This caused issues where:
-    // 1. Emails processed with a delay (after ticket closure) were ignored if they were sent before closure.
-    // 2. Tickets updated by other means (e.g. system tasks) ignored subsequent legitimate emails.
-    // The correct logic is to strictly rely on lastCustomerReplyAt to determine if this is a "new" message.
-
-
     // Only update if this is a NEWER customer reply than what we've seen before
     if (!lastCustomerReplyDate || incomingDate > lastCustomerReplyDate) {
       updates.last_customer_reply_at = dateIso;
 
       // ONLY re-open if ticket is CLOSED - do NOT touch status for open/pending tickets
       if (ticket.status === 'closed') {
+        // Prevent reopening if the email is older than OR EQUAL TO the last ticket update (closure)
+        // This fixes the issue of background syncs reopening old closed tickets
+        // Using <= to be safe against duplicate events or slight clock skew
+        if (ticketUpdatedAt && incomingDate <= ticketUpdatedAt) {
+          console.log(`[Ticket] NOT reopening closed ticket ${ticket.id} - email (${dateIso}) is older/equal to last update (${ticket.updatedAt})`);
+          return ticket;
+        }
+
         console.log(`[Ticket] Auto-reopening closed ticket ${ticket.id} due to NEW customer reply`, {
           emailDate: dateIso,
           lastUpdate: ticket.updatedAt
         });
         updates.status = 'open';
-        updates.was_reopened = true; // Track reopened tickets for analytics
       }
       // If ticket is already open/pending, do NOT change the status
     } else {
@@ -469,16 +478,10 @@ export async function ensureTicketForEmail(
     updates.user_email = resolvedUserEmail;
   }
 
-  let query = supabase
+  const { data, error } = await supabase
     .from('tickets')
     .update(updates)
-    .eq('thread_id', threadId);
-
-  if (resolvedUserEmail) {
-    query = query.eq('user_email', resolvedUserEmail);
-  }
-
-  const { data, error } = await query
+    .eq('id', ticket.id)
     .select('*')
     .maybeSingle();
 
