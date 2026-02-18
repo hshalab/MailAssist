@@ -53,17 +53,30 @@ export async function GET(
 
     // Get tokens and fetch thread
     // First try the ticket's user_email, then fallback to current user's email
-    let tokens = await getValidTokens(ticket.userEmail);
+    // Get tokens and fetch thread
+    // CRITICAL FIX: Use ownerEmail (the connected account) to fetch the thread.
+    // The thread ID corresponds to the mailbox of ownerEmail.
+    const targetEmail = ticket.ownerEmail || ticket.userEmail;
+    console.log(`[Thread API] Fetching tokens for ${targetEmail} (Owner: ${ticket.ownerEmail}, User: ${ticket.userEmail})`);
 
-    // Fallback: If ticket's userEmail doesn't have tokens, try current user's email
-    if ((!tokens || !tokens.access_token) && userEmail && userEmail !== ticket.userEmail) {
-      console.log(`[Thread] Ticket userEmail ${ticket.userEmail} has no tokens, trying current user ${userEmail}`);
+    let tokens = await getValidTokens(targetEmail);
+
+    // Fallback: If target email doesn't have tokens, try current session email
+    // (Only if it's different from what we already tried)
+    if ((!tokens || !tokens.access_token) && userEmail && userEmail !== targetEmail) {
+      console.log(`[Thread] Target email ${targetEmail} has no tokens, trying current user ${userEmail}`);
       tokens = await getValidTokens(userEmail);
     }
 
     if (!tokens || !tokens.access_token) {
+      console.error(`[Thread API] Authentication failed for ${targetEmail}. Owner: ${ticket.ownerEmail}, User: ${ticket.userEmail}`);
+      // DEBUG: Verify directly if tokens exist
+      const { loadTokens } = await import('@/lib/storage');
+      const directCheck = await loadTokens(targetEmail);
+      console.log(`[Thread API] Direct token check for ${targetEmail}: ${directCheck ? 'Found' : 'Missing'}`);
+
       return NextResponse.json(
-        { error: `No valid Gmail tokens found. Please reconnect your Gmail account.` },
+        { error: `No valid Gmail tokens found for ${targetEmail}. Please reconnect your Gmail account.` },
         { status: 401 }
       );
     }

@@ -41,13 +41,11 @@ export function getAuthUrl(state?: string, forceConsent: boolean = false): strin
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: scopes,
-    // CRITICAL FIX: Only force consent when explicitly needed
-    // 'consent' - Forces consent screen and issues NEW refresh token (can invalidate old ones)
-    // 'select_account' - Allows account selection, reuses existing refresh token
-    // This prevents Google from hitting the refresh token limit (50 per user per client)
-    // and keeps tokens valid indefinitely unless manually revoked
-    prompt: forceConsent ? 'consent' : 'select_account',
+    // CRITICAL FIX: Always force consent to ensure we get a refresh token
+    // This prevents tokens from expiring permanently after 1 hour
+    prompt: 'consent',
     state: state,
+    include_granted_scopes: true // Merge with existing scopes
   });
 }
 

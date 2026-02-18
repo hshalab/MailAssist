@@ -231,11 +231,18 @@ function PageContent() {
   useEffect(() => {
     const ticketId = searchParams.get("ticketId")
     if (ticketId) {
-      setActiveView("tickets")
-      setDeepLinkTicketId(ticketId)
-      setTicketNavKey(prev => prev + 1) // Increment to force re-selection
+      if (ticketId !== deepLinkTicketId) {
+        setActiveView("tickets")
+        setDeepLinkTicketId(ticketId)
+        setTicketNavKey(prev => prev + 1) // Increment to force re-selection
+      }
+    } else {
+      // Clear deep link if removed from URL
+      if (deepLinkTicketId) {
+        setDeepLinkTicketId(null)
+      }
     }
-  }, [searchParams])
+  }, [searchParams, deepLinkTicketId])
 
   // Save active view to localStorage
   useEffect(() => {

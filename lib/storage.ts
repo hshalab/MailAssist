@@ -462,7 +462,7 @@ export async function storeSentEmail(email: {
       const userEmail = await getCurrentUserEmail();
       let query = supabase
         .from('emails')
-        .select('id, embedding')
+        .select('id, embedding, owner_email')
         .eq('id', email.id)
         .eq('is_sent', true);
 
@@ -474,11 +474,11 @@ export async function storeSentEmail(email: {
 
       // If email exists and has embedding AND ownerEmail, return early (skip re-embedding)
       // Emails without ownerEmail need to be regenerated for account-specific scoping
-      if (existingEmail && 
-          existingEmail.embedding && 
-          Array.isArray(existingEmail.embedding) && 
-          existingEmail.embedding.length > 0 &&
-          existingEmail.owner_email) { // Must have ownerEmail too
+      if (existingEmail &&
+        existingEmail.embedding &&
+        Array.isArray(existingEmail.embedding) &&
+        existingEmail.embedding.length > 0 &&
+        existingEmail.owner_email) { // Must have ownerEmail too
         // Return the existing email structure (we'll need to load it fully if needed)
         return {
           id: email.id,
@@ -641,7 +641,17 @@ export async function loadTokens(userEmail?: string | null, businessId?: string)
       targetUserEmail = await getSessionUserEmail();
     }
 
-    let query = supabase
+    // Use admin client if available to ensure we can find tokens even if RLS would hide them
+    // (e.g. invalid user_id mapping for legacy tokens)
+    let client = supabase;
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      // Create a fresh client with service key to bypass RLS
+      client = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { persistSession: false }
+      });
+    }
+
+    let query = client
       .from('tokens')
       .select('*')
       .order('updated_at', { ascending: false });
@@ -682,11 +692,64 @@ export async function loadTokens(userEmail?: string | null, businessId?: string)
       smtp_config: data.smtp_config,
     };
 
+    console.log(`[STORAGE] loadTokens success for ${targetUserEmail || 'N/A'}`);
     return tokens;
   } catch (error) {
     console.error('Error loading tokens:', error);
     return null;
   }
+}
+
+/**
+ * Helper to find tokens for a specific email within business accounts
+ * Used as a fallback when loadTokens fails to find a direct match
+ */
+export async function findTokenForEmail(targetEmail: string): Promise<StoredTokens | null> {
+  // Try direct lookup first
+  const directTokens = await loadTokens(targetEmail);
+  if (directTokens) return directTokens;
+
+  // If not found, it might be a connected account under a business
+  // We need to check all business tokens to find this specific email
+  if (!supabase) return null;
+
+  try {
+    // We can't easily filter by jsonb/relationship in this schema without a join
+    // But we can check if this email exists as a 'user_email' in the tokens table
+    // even if it's not the current session user.
+
+    // Use admin client to bypass RLS if needed
+    let client = supabase;
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      client = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { persistSession: false }
+      });
+    }
+
+    const { data } = await client
+      .from('tokens')
+      .select('*')
+      .eq('user_email', targetEmail) // Explicitly look for this email
+      .limit(1)
+      .maybeSingle();
+
+    if (data) {
+      return {
+        access_token: data.access_token,
+        refresh_token: data.refresh_token,
+        expiry_date: data.expiry_date,
+        token_type: data.token_type,
+        scope: data.scope,
+        provider: data.provider || 'gmail',
+        imap_config: data.imap_config,
+        smtp_config: data.smtp_config,
+      };
+    }
+  } catch (err) {
+    console.error('Error finding token for email:', err);
+  }
+
+  return null;
 }
 
 /**
@@ -700,6 +763,8 @@ async function fetchBusinessTokensFromDb(businessId: string | null, userEmail?: 
   }
 
   try {
+    // Use admin client if available to bypass RLS
+    // (Crucial for fetching tokens of connected accounts that might not match current session user ID)
     let adminClient = supabase;
     if (process.env.SUPABASE_SERVICE_ROLE_KEY && process.env.NEXT_PUBLIC_SUPABASE_URL) {
       adminClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {

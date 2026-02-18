@@ -61,6 +61,15 @@ export async function refreshTokenIfNeeded(userEmail?: string | null, businessId
  * @param businessId - Optional business ID to filter tokens for business accounts.
  */
 export async function getValidTokens(userEmail?: string | null, businessId?: string): Promise<StoredTokens | null> {
+  // If specific email provided, try to find it using enhanced lookup
+  if (userEmail) {
+    const { findTokenForEmail } = await import('./storage');
+    const tokens = await findTokenForEmail(userEmail);
+    if (tokens) {
+      // Check expiry and refresh if needed
+      return await refreshTokenIfNeeded(userEmail, businessId);
+    }
+  }
   return await refreshTokenIfNeeded(userEmail, businessId);
 }
 

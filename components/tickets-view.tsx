@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button"
+import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent } from "@/components/ui/card"
@@ -158,6 +159,41 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const mountTimeRef = useRef(Date.now())
   const fetchIdRef = useRef(0) // Track fetch requests to prevent race conditions
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null) // Track polling interval to clear on new fetch
+
+  // Ghost Ticket Suppression
+  // Stores IDs of tickets we've just closed, to FORCE hide them from "Open" lists
+  // even if the server returns them as "Open" (due to race conditions)
+  const [temporarilyHiddenIds, setTemporarilyHiddenIds] = useState<Set<string>>(new Set())
+
+  // URL Synchronization
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  // Sync URL with selected ticket
+  useEffect(() => {
+    // Determine the current ticket ID in the URL
+    const urlTicketId = searchParams.get('ticketId')
+    const currentTicketId = selectedTicket?.id
+
+    // If they match, do nothing (avoid loop)
+    if (urlTicketId === currentTicketId) return
+    if (!urlTicketId && !currentTicketId) return
+
+    // Create new search params
+    const params = new URLSearchParams(searchParams.toString())
+
+    if (currentTicketId) {
+      params.set('ticketId', currentTicketId)
+    } else {
+      params.delete('ticketId')
+    }
+
+    // Update URL without full page reload
+    // replace: true prevents growing history stack for every selection
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+
+  }, [selectedTicket?.id, pathname, router, searchParams])
 
   // Clear global search on unmount
   // DISABLED: This causes issues if the component remounts (e.g. key change) while searching,
@@ -1725,6 +1761,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
   useEffect(() => {
     if (selectedTicket) {
+      // Clear previous state immediately to avoid stale data
+      setThreadMessages([])
+      setNotes([])
+
       fetchThread()
       fetchNotes()
       setConversationSummary("")
@@ -1809,9 +1849,13 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
 
-  const fetchThread = async (options?: { silent?: boolean }) => {
-    const { silent = false } = options || {}
-    if (!selectedTicket) return
+  const fetchThread = async (options?: { silent?: boolean, ticketId?: string }) => {
+    const { silent = false, ticketId } = options || {}
+    // Use provided ticketId or fall back to selectedTicket
+    const targetTicketId = ticketId || selectedTicket?.id
+
+    if (!targetTicketId) return
+
     try {
       // Save current scroll position before loading
       if (conversationScrollRef.current) {
@@ -1819,14 +1863,24 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
 
       if (!silent) setLoadingThread(true)
-      const response = await fetch(`/api/tickets/${selectedTicket.id}/thread`)
+      const response = await fetch(`/api/tickets/${targetTicketId}/thread`)
+
+      // GUARD: If we moved to another ticket while fetching, ABORT
+      if (selectedTicket?.id !== targetTicketId) {
+        console.log('🛑 Aborting thread update: user switched tickets', {
+          wanted: targetTicketId,
+          current: selectedTicket?.id
+        })
+        return
+      }
+
       if (response.ok) {
         const data = await response.json()
         let messages: ThreadMessage[] = data.messages || []
 
         // Re-attach any local optimistic messages for this ticket so they
         // remain visible even if the backend thread API is slightly behind.
-        const optimistic = optimisticThreadMessagesRef.current[selectedTicket.id] || []
+        const optimistic = optimisticThreadMessagesRef.current[targetTicketId] || []
         if (optimistic.length > 0) {
           const optimisticIds = new Set(optimistic.map(m => m.id))
           messages = [
@@ -1847,9 +1901,13 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
     } catch (err) {
       console.error("Error fetching thread:", err)
-      setThreadMessages([])
+      if (selectedTicket?.id === targetTicketId) {
+        setThreadMessages([])
+      }
     } finally {
-      if (!silent) setLoadingThread(false)
+      if (selectedTicket?.id === targetTicketId) {
+        if (!silent) setLoadingThread(false)
+      }
     }
   }
 
@@ -2134,6 +2192,20 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         // 1. Update state immediately (Close it in the list)
         const closedTicketState = { ...selectedTicket, status: 'closed' as const }
         setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
+
+        // SUPPRESS GHOST REAPPEARANCE
+        setTemporarilyHiddenIds(prev => {
+          const next = new Set(prev)
+          next.add(targetTicketId)
+          return next
+        })
+        setTimeout(() => {
+          setTemporarilyHiddenIds(prev => {
+            const next = new Set(prev)
+            next.delete(targetTicketId)
+            return next
+          })
+        }, 10000)
 
 
         setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
@@ -2723,6 +2795,21 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
 
+      // SUPPRESS GHOST REAPPEARANCE
+      setTemporarilyHiddenIds(prev => {
+        const next = new Set(prev)
+        next.add(targetTicketId)
+        return next
+      })
+      // Clear suppression after 10s (safe enough for server to catch up)
+      setTimeout(() => {
+        setTemporarilyHiddenIds(prev => {
+          const next = new Set(prev)
+          next.delete(targetTicketId)
+          return next
+        })
+      }, 10000)
+
       // 3b. Counts update automatically via useMemo on tickets change
 
       // 3. Navigate immediately
@@ -2762,8 +2849,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         const activeTicketId = data?.ticketId || targetTicketId
 
         // Refresh stuff in background (non-blocking) for both send and send-close
-        fetchThread({ silent: true }).catch(err => console.warn('Background thread refresh failed:', err))
-        fetchTickets({ silent: true }).catch(err => console.warn('Background tickets refresh failed:', err))
+        // If closing, DO NOT fetch thread for the OLD ticket to avoid stale data race
+        if (!opts?.closeTicket) {
+          fetchThread({ silent: true, ticketId: activeTicketId }).catch(err => console.warn('Background thread refresh failed:', err))
+        }
+
+        // Only fetch tickets here if NOT closing (for standard reply)
+        // If closing, we want to fetch AFTER the close operation completes
+        if (!opts?.closeTicket) {
+          fetchTickets({ silent: true }).catch(err => console.warn('Background tickets refresh failed:', err))
+        }
 
         // Handle Assignment & Closing (Server-side)
         if (activeTicketId && currentUserId) {
@@ -2785,6 +2880,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ status: 'closed' }),
             });
+
+            // NOW fetch tickets to get the updated "closed" status
+            fetchTickets({ silent: true }).catch(err => console.warn('Background tickets refresh failed:', err))
 
             // Broadcast to ensure other tabs/components know
             window.dispatchEvent(new CustomEvent('ticketUpdated', {
@@ -2935,13 +3033,19 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       // Closed tab: must be closed
       if (activeTab === 'closed') return t.status === 'closed'
 
+      // GHOST FILTER: strict check for recently closed tickets
+      // If we flagged it as hidden, DO NOT show it in open/pending/etc tabs
+      if (temporarilyHiddenIds.has(t.id)) {
+        return false
+      }
+
       // Open/Assigned/Unassigned tabs: must NOT be closed (return SUPERSET)
       // Specific filtering is done via CSS in the render loop for instant switching
       if (t.status === 'closed') return false
 
       return true
     })
-  }, [tickets, activeTab, activeSearchQuery, currentUserId])
+  }, [tickets, activeTab, activeSearchQuery, currentUserId, temporarilyHiddenIds])
 
   // Trigger fetch when filters change (fetchTickets dependency changes)
   useEffect(() => {
