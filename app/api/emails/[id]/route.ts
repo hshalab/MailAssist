@@ -175,6 +175,10 @@ export async function GET(
     const emailFromLower = (email.from || '').toLowerCase();
     const isEmailFromAgent = targetEmail ? emailFromLower.includes(targetEmail.toLowerCase()) : false;
 
+    // NOTE: Do NOT pass ownerEmail here. Existing tickets may have user_email=null in the DB
+    // (created before ownerEmail scoping was added). Passing ownerEmail causes getTicketByThreadId
+    // to do a scoped lookup that misses those tickets → creates duplicates.
+    // The null fallback correctly finds any ticket with this threadId.
     ensureTicketForEmail(
       {
         id: email.id,
@@ -183,7 +187,6 @@ export async function GET(
         from: email.from,
         to: email.to,
         date: email.date,
-        ownerEmail: targetEmail || undefined, // Scope ticket lookup to the right account
       },
       isEmailFromAgent
     ).catch(err => console.error('Error creating ticket:', err));

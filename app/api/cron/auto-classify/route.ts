@@ -182,7 +182,9 @@ export async function GET(request: NextRequest) {
                                             from: email.from,
                                             to: email.to,
                                             date: email.date,
-                                            ownerEmail: userEmail, // CRITICAL: scope to this account so ticket lookup is correct
+                                            // NOTE: ownerEmail intentionally omitted — existing tickets may have
+                                            // user_email=null in DB. Scoped lookup misses them → creates duplicates.
+                                            // Gmail thread IDs are globally unique so unscoped lookup is safe.
                                         },
                                         isFromAgent,
                                         email.body // Pass email body for AI classification
