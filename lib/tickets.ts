@@ -370,7 +370,19 @@ export async function ensureTicketForEmail(
   const resolvedUserEmail = email.ownerEmail || (await getCurrentUserEmail());
 
   const threadId = email.threadId || email.id;
-  const dateIso = new Date(email.date).toISOString();
+  // Guard: if the email has no date, we cannot safely determine whether it is
+  // newer or older than recorded activity. Bail out — do NOT default to 'now'
+  // (that would make every undated email appear brand-new and reopen closed tickets).
+  if (!email.date) {
+    console.warn(`[Ticket] Skipping email ${email.id} — missing date field, cannot determine recency`);
+    return null;
+  }
+  const parsedEmailDate = new Date(email.date);
+  if (isNaN(parsedEmailDate.getTime())) {
+    console.warn(`[Ticket] Skipping email ${email.id} — unparseable date: "${email.date}"`);
+    return null;
+  }
+  const dateIso = parsedEmailDate.toISOString();
 
   // Guess customer email based on direction
   const customerEmail = isFromAgent ? email.to : email.from;
@@ -421,7 +433,7 @@ export async function ensureTicketForEmail(
   // Safety check: If the email is from the ticket owner (the connected Gmail account),
   // it MUST be treated as an agent reply, regardless of what the caller passed.
   // This prevents agent replies from reopening tickets if isFromAgent was miscalculated.
-  if (ticket.user_email && email.from && email.from.toLowerCase().includes(ticket.user_email.toLowerCase())) {
+  if (ticket.userEmail && email.from && email.from.toLowerCase().includes(ticket.userEmail.toLowerCase())) {
     isFromAgent = true;
   }
 
@@ -443,32 +455,44 @@ export async function ensureTicketForEmail(
   } else {
     console.log(`[Ticket] Processing customer email for ticket ${ticket.id} (Status: ${ticket.status})`);
 
-    // Only update if this is a NEWER customer reply than what we've seen before
-    if (!lastCustomerReplyDate || incomingDate > lastCustomerReplyDate) {
-      updates.last_customer_reply_at = dateIso;
+    // Compute the latest known activity on this ticket (customer OR agent reply).
+    // This is used as the reference for deciding if the incoming email is genuinely new.
+    // Key insight: a ticket closed after an agent reply will have lastAgentReplyDate = closure time.
+    // Any old customer email PRE-DATING that agent reply should NOT reopen the ticket.
+    const lastKnownActivityDate = (() => {
+      if (lastAgentReplyDate && lastCustomerReplyDate) {
+        return lastAgentReplyDate > lastCustomerReplyDate ? lastAgentReplyDate : lastCustomerReplyDate;
+      }
+      return lastAgentReplyDate || lastCustomerReplyDate || null;
+    })();
+
+    // Only update if this is a NEWER customer reply than ALL known activity on the ticket.
+    // This guards against:
+    //  - Old emails re-fetched by Gmail sync (same date as last reply → not newer)
+    //  - Emails from between last customer reply and agent closure (older than agent reply)
+    //  - Tickets with null lastCustomerReplyAt protected by lastAgentReplyDate
+    if (!lastKnownActivityDate || incomingDate > lastKnownActivityDate) {
+      // Only update last_customer_reply_at if it's actually newer than the recorded customer reply
+      if (!lastCustomerReplyDate || incomingDate > lastCustomerReplyDate) {
+        updates.last_customer_reply_at = dateIso;
+      }
 
       // ONLY re-open if ticket is CLOSED - do NOT touch status for open/pending tickets
       if (ticket.status === 'closed') {
-        // Prevent reopening if the email is older than OR EQUAL TO the last ticket update (closure)
-        // This fixes the issue of background syncs reopening old closed tickets
-        // Using <= to be safe against duplicate events or slight clock skew
-        if (ticketUpdatedAt && incomingDate <= ticketUpdatedAt) {
-          console.log(`[Ticket] NOT reopening closed ticket ${ticket.id} - email (${dateIso}) is older/equal to last update (${ticket.updatedAt})`);
-          return ticket;
-        }
-
         console.log(`[Ticket] Auto-reopening closed ticket ${ticket.id} due to NEW customer reply`, {
           emailDate: dateIso,
-          lastUpdate: ticket.updatedAt
+          lastKnownActivity: lastKnownActivityDate?.toISOString() ?? 'none',
         });
         updates.status = 'open';
       }
       // If ticket is already open/pending, do NOT change the status
     } else {
-      // Email is older than our last known customer reply - ignore it
-      console.log(`[Ticket] Ignoring old customer email ${email.id} for ticket ${ticket.id} (already have newer reply)`, {
+      // Email is not newer than the last known activity — old email, ignore completely
+      console.log(`[Ticket] Ignoring old customer email ${email.id} for ticket ${ticket.id}`, {
         emailDate: dateIso,
-        lastCustomerReply: ticket.lastCustomerReplyAt
+        lastKnownActivity: lastKnownActivityDate?.toISOString(),
+        lastCustomerReply: ticket.lastCustomerReplyAt,
+        lastAgentReply: ticket.lastAgentReplyAt,
       });
       return ticket;
     }

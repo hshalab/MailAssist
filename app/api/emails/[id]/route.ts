@@ -170,6 +170,11 @@ export async function GET(
     storeReceivedEmail(email).catch(err => console.error('Error storing email:', err));
 
     // OPTIMIZED: Ensure ticket exists/updated in background (non-blocking)
+    // Derive isFromAgent: if email is FROM the connected account, it's an agent email.
+    // Do NOT hardcode false — an old agent reply incorrectly treated as customer could reopen a closed ticket.
+    const emailFromLower = (email.from || '').toLowerCase();
+    const isEmailFromAgent = targetEmail ? emailFromLower.includes(targetEmail.toLowerCase()) : false;
+
     ensureTicketForEmail(
       {
         id: email.id,
@@ -178,8 +183,9 @@ export async function GET(
         from: email.from,
         to: email.to,
         date: email.date,
+        ownerEmail: targetEmail || undefined, // Scope ticket lookup to the right account
       },
-      false
+      isEmailFromAgent
     ).catch(err => console.error('Error creating ticket:', err));
 
     // Return email with attachments

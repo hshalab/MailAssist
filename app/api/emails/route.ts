@@ -226,37 +226,66 @@ export async function GET(request: NextRequest) {
     }
 
     // ============================================================
-    // SMART SYNC: Immediate Ticket Creation
+    // SMART SYNC: Immediate Ticket Creation (recent emails only)
     // ============================================================
-    // Check top 5 newest emails. If they don't have department info (meaning no ticket),
-    // create one immediately to ensure instant responsiveness.
+    // Only process emails that arrived within the last 7 days.
+    // This prevents old emails (10-34 days old) from being fed into
+    // ensureTicketForEmail on every page load, which was causing closed
+    // tickets to randomly reopen via the reopen guard in lib/tickets.ts.
     if (emails.length > 0) {
       try {
         const { ensureTicketForEmail } = await import('@/lib/tickets');
-        // Only check top 5 to keep response fast
-        const recentEmails = emails.slice(0, 5);
 
-        // Process in parallel
-        // usage of Promise.all allows this to be fast (concurrent)
-        await Promise.all(recentEmails.map(async (email: any) => {
-          // If we already found a department name, the ticket definitely exists and is classified
-          // If not, it might be missing OR just unclassified. 
-          // ensureTicketForEmail is safe to call (idempotent-ish) - it checks existence first.
-          if (!email.departmentName) {
-            // Heuristic: isFromAgent if sender matches owner
-            const isFromAgent = email.ownerEmail && email.from.includes(email.ownerEmail);
+        // Compute cutoff: only emails newer than 7 days ago
+        const SMART_SYNC_MAX_AGE_DAYS = 7;
+        const smartSyncCutoff = new Date();
+        smartSyncCutoff.setDate(smartSyncCutoff.getDate() - SMART_SYNC_MAX_AGE_DAYS);
 
-            await ensureTicketForEmail({
-              id: email.id,
-              threadId: email.threadId || email.id,
-              subject: email.subject,
-              from: email.from,
-              to: email.to,
-              date: email.date,
-              ownerEmail: email.ownerEmail
-            }, !!isFromAgent, email.body); // Pass body for AI classification
-          }
-        }));
+        // Check up to the 10 newest emails, but filter to only those within the cutoff window
+        const recentEmails = emails
+          .slice(0, 10)
+          .filter((email: any) => {
+            try {
+              return new Date(email.date) >= smartSyncCutoff;
+            } catch {
+              return false; // Skip emails with unparseable dates
+            }
+          });
+
+        if (recentEmails.length === 0) {
+          console.log('[EMAILS] Smart Sync: no emails newer than 7 days in top 10, skipping ticket creation');
+        } else {
+          console.log(`[EMAILS] Smart Sync: processing ${recentEmails.length} emails newer than ${SMART_SYNC_MAX_AGE_DAYS} days`);
+
+          // Process in parallel for speed
+          await Promise.all(recentEmails.map(async (email: any) => {
+            // If we already found a department name, the ticket definitely exists and is classified
+            // If not, it might be missing OR just unclassified.
+            // ensureTicketForEmail is safe to call (idempotent-ish) - it checks existence first.
+            if (!email.departmentName) {
+              // Extract bare email address from "Name <email@domain.com>" format before comparing.
+              // Raw .includes() on the full FROM string is unreliable and can throw on null.
+              const extractBareEmail = (s: string) => {
+                if (!s) return '';
+                const m = s.match(/<([^>]+)>/) || s.match(/([^\s<>]+@[^\s<>]+)/);
+                return m ? m[1].toLowerCase() : s.toLowerCase();
+              };
+              const fromBare = extractBareEmail(email.from || '');
+              const ownerBare = extractBareEmail(email.ownerEmail || '');
+              const isFromAgent = ownerBare && fromBare === ownerBare;
+
+              await ensureTicketForEmail({
+                id: email.id,
+                threadId: email.threadId || email.id,
+                subject: email.subject,
+                from: email.from,
+                to: email.to,
+                date: email.date,
+                ownerEmail: email.ownerEmail
+              }, !!isFromAgent, email.body); // Pass body for AI classification
+            }
+          }));
+        }
       } catch (smartSyncError) {
         // Non-blocking error handling
         console.error('[EMAILS] Smart Sync failed:', smartSyncError);
