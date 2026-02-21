@@ -132,6 +132,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const ticketCache = useRef<{ active: Ticket[], closed: Ticket[] }>({ active: [], closed: [] })
 
   const [tickets, setTickets] = useState<Ticket[]>([])
+  // Mirror tickets into a ref immediately after state change so effects that
+  // read tickets without subscribing to changes can always get the latest.
+  // (This is assigned in the render body, not inside useEffect, so it's always current.)
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -159,6 +162,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const mountTimeRef = useRef(Date.now())
   const fetchIdRef = useRef(0) // Track fetch requests to prevent race conditions
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null) // Track polling interval to clear on new fetch
+  // Keep a ref that always mirrors the tickets state so the deep-link effect
+  // can read the latest list without needing tickets as a dependency.
+  const ticketsRef = useRef<Ticket[]>([])
+  // After a plain Send, suppress the realtime ticket-list refresh for a few seconds.
+  // This prevents the Supabase INSERT handler from fetching tickets before the
+  // background assignment PATCH completes (which would return stale "unassigned"
+  // data and flip the tab back).
+  const suppressRealtimeFetchUntil = useRef<number>(0)
 
   // Ghost Ticket Suppression
   // Stores IDs of tickets we've just closed, to FORCE hide them from "Open" lists
@@ -543,7 +554,23 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         clearTimeout(resizeTimeoutRef.current)
       }
       resizeTimeoutRef.current = setTimeout(() => {
-        saveMainSplit(sizes)
+        if (sizes.length === 2) {
+          // No sidebars open — save directly
+          saveMainSplit(sizes)
+        } else {
+          // Sidebars are open — extract just the list+detail sizes and normalize
+          // to 100% so we can persist the main split ratio correctly.
+          // The first two panels are always list and detail.
+          const listSize = sizes[0]
+          const detailSize = sizes[1]
+          const total = listSize + detailSize
+          if (total > 0) {
+            saveMainSplit([
+              (listSize / total) * 100,
+              (detailSize / total) * 100,
+            ])
+          }
+        }
         isResizingRef.current = false
       }, 300)
     },
@@ -1500,71 +1527,67 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [fetchTickets])
 
-  // Apply deep-linked ticket selection once tickets are loaded
+  // Apply deep-linked ticket selection once tickets are loaded.
+  // IMPORTANT: Do NOT put `tickets` in the dependency array here.
+  // The effect reads the latest tickets via `ticketsRef` so it doesn't
+  // need to re-run every time tickets poll/refresh. It only needs to fire
+  // when the navigation target (initialTicketId / ticketNavKey) changes,
+  // or when the user context changes. This prevents the page from
+  // randomly re-selecting the URL ticket on every polling cycle.
   useEffect(() => {
-    console.log('🔗 Deep-link effect running:', {
-      initialTicketId,
-      ticketNavKey,
-      guardHandled: initialSelectHandledRef.current,
-      ticketsCount: tickets.length,
-      currentUserId
-    })
+    if (!initialTicketId) return
 
-    if (!initialTicketId) {
-      console.log('❌ No initialTicketId, skipping')
+    // Check if we already handled this navigation (guard set synchronously)
+    if (initialSelectHandledRef.current) return
+
+    const currentTickets = ticketsRef.current
+    if (!currentTickets.length) {
+      // Tickets not loaded yet — wait for them by watching a "tickets loaded"
+      // signal instead of depending on the tickets array directly.
+      // The ticketNavKey reset + this effect will re-run when ticketNavKey changes.
+      // If tickets aren't available on first run, set a short retry:
+      const retryId = setTimeout(() => {
+        const t = ticketsRef.current
+        if (!t.length || initialSelectHandledRef.current) return
+        const match = t.find(ticket => ticket.id === initialTicketId)
+        if (!match) return
+        initialSelectHandledRef.current = true // Set SYNCHRONOUSLY before any async work
+        let targetTab: typeof activeTab = 'open'
+        if (match.status === 'closed') targetTab = 'closed'
+        else if (match.assigneeUserId === currentUserId) targetTab = 'assigned'
+        else if (!match.assigneeUserId) targetTab = 'unassigned'
+        setActiveTab(targetTab)
+        setTimeout(() => {
+          setSelectedTicket(match)
+          setSelectedTicketIds(new Set([match.id]))
+        }, 150)
+      }, 500)
+      return () => clearTimeout(retryId)
+    }
+
+    const match = currentTickets.find(t => t.id === initialTicketId)
+    if (!match) {
+      console.warn('[DeepLink] Ticket not found in loaded list:', initialTicketId)
       return
     }
 
-    if (!tickets.length) {
-      console.log('❌ No tickets loaded yet, skipping')
-      return
-    }
+    // Set guard SYNCHRONOUSLY so that any concurrent ticket-list refresh
+    // cannot trigger this effect again before the setTimeout fires.
+    initialSelectHandledRef.current = true
 
-    // Check if we already handled this navigation
-    if (initialSelectHandledRef.current) {
-      console.log('❌ Already handled this navigation, skipping')
-      return
-    }
+    let targetTab: typeof activeTab = 'open'
+    if (match.status === 'closed') targetTab = 'closed'
+    else if (match.assigneeUserId === currentUserId) targetTab = 'assigned'
+    else if (!match.assigneeUserId) targetTab = 'unassigned'
+    setActiveTab(targetTab)
 
-    console.log('🔍 Looking for ticket with ID:', initialTicketId)
-    console.log('📋 First 5 ticket IDs:', tickets.slice(0, 5).map(t => ({ id: t.id, subject: t.subject })))
-
-    const match = tickets.find(t => t.id === initialTicketId)
-
-    if (match) {
-      console.log('✅ FOUND ticket:', match.id, 'Subject:', match.subject)
-      console.log('📊 Ticket details:', {
-        status: match.status,
-        assigneeUserId: match.assigneeUserId,
-        currentUserId
-      })
-
-      // Auto-switch to the correct tab based on ticket properties
-      let targetTab: typeof activeTab = 'open'
-      if (match.status === 'closed') {
-        targetTab = 'closed'
-      } else if (match.assigneeUserId === currentUserId) {
-        targetTab = 'assigned'
-      } else if (!match.assigneeUserId) {
-        targetTab = 'unassigned'
-      }
-
-      console.log('🎯 Switching to tab:', targetTab)
-      setActiveTab(targetTab)
-
-      // Use setTimeout to ensure tab switch completes before selecting ticket
-      setTimeout(() => {
-        console.log('📍 Now selecting ticket after tab switch:', match.id)
-        setSelectedTicket(match)
-        setSelectedTicketIds(new Set([match.id]))
-        console.log('✅ Deep-link selection complete!')
-        initialSelectHandledRef.current = true
-      }, 150)
-    } else {
-      console.error('❌ TICKET NOT FOUND with ID:', initialTicketId)
-      console.log('Available ticket IDs:', tickets.map(t => t.id))
-    }
-  }, [tickets, initialTicketId, currentUserId, ticketNavKey])
+    // Small delay to let the tab switch render before selecting the ticket
+    setTimeout(() => {
+      setSelectedTicket(match)
+      setSelectedTicketIds(new Set([match.id]))
+    }, 150)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTicketId, currentUserId, ticketNavKey]) // NO tickets here — use ticketsRef instead
 
   // Close quick replies sidebar and refetch when user changes or logs out
   useEffect(() => {
@@ -1607,6 +1630,15 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         async (payload) => {
           const ticketId = (payload.new as any)?.ticket_id as string | undefined
           if (!ticketId) return
+
+          // If we are within the post-Send suppression window, skip the fetchTickets.
+          // The assignment PATCH may not have completed yet on the server, so fetching
+          // now would return stale data and flip the UI back to the wrong tab.
+          if (Date.now() < suppressRealtimeFetchUntil.current) {
+            console.log('[Realtime] Suppressing fetchTickets during post-send window for ticket:', ticketId)
+            return
+          }
+
           await fetchTickets({ silent: true })
 
           if (selectedTicket?.id === ticketId) {
@@ -2823,6 +2855,57 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
     }
 
+    // OPTIMISTIC NAVIGATION FOR PLAIN "SEND" (not close)
+    // Exact mirror of the Send & Close block above — same structure, same ghost
+    // suppression, same next-ticket logic. Only differences: status stays 'pending'
+    // (ticket isn't closed) and we switch to the 'assigned' tab instead of 'closed'.
+    if (!opts?.closeTicket) {
+      // 1. Determine next ticket (same logic as Send & Close)
+      const currentIndex = filteredTickets.findIndex(t => t.id === targetTicketId)
+      let nextTicket = filteredTickets[currentIndex + 1] || filteredTickets[0]
+      if (nextTicket && nextTicket.id === targetTicketId) {
+        nextTicket = null as any
+      }
+
+      // 2. Optimistically update current ticket: assign + mark pending
+      const pendingTicketState = {
+        ...selectedTicket,
+        status: 'pending' as const,
+        assigneeUserId: currentUserId || selectedTicket.assigneeUserId
+      }
+      setTickets(prev => prev.map(t => t.id === targetTicketId ? pendingTicketState : t))
+
+      // SUPPRESS GHOST REAPPEARANCE (same as Send & Close)
+      setTemporarilyHiddenIds(prev => {
+        const next = new Set(prev)
+        next.add(targetTicketId)
+        return next
+      })
+      setTimeout(() => {
+        setTemporarilyHiddenIds(prev => {
+          const next = new Set(prev)
+          next.delete(targetTicketId)
+          return next
+        })
+      }, 10000)
+
+      // 3. Navigate immediately
+      if (nextTicket) {
+        setSelectedTicket(nextTicket)
+      } else {
+        setSelectedTicket(null)
+      }
+
+      // NOTE: No setActiveTab here — same as Send & Close.
+      // The ticket disappears from the current tab naturally when its
+      // status/assignee changes. Stay on whatever tab the user was on.
+
+      // Suppress the realtime INSERT handler's fetchTickets for 6 seconds.
+      // This prevents early server fetches (before assignment PATCH completes)
+      // from resetting the optimistic state and causing tab flickering.
+      suppressRealtimeFetchUntil.current = Date.now() + 6000
+    }
+
     // Perform the actual work (Background if closed, Foreground if just send)
     const performSend = async () => {
       try {
@@ -2848,16 +2931,13 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         const data = await response.json().catch(() => ({}))
         const activeTicketId = data?.ticketId || targetTicketId
 
-        // Refresh stuff in background (non-blocking) for both send and send-close
-        // If closing, DO NOT fetch thread for the OLD ticket to avoid stale data race
+        // Refresh thread in background so the sent message is reflected
         if (!opts?.closeTicket) {
           fetchThread({ silent: true, ticketId: activeTicketId }).catch(err => console.warn('Background thread refresh failed:', err))
-        }
-
-        // Only fetch tickets here if NOT closing (for standard reply)
-        // If closing, we want to fetch AFTER the close operation completes
-        if (!opts?.closeTicket) {
-          fetchTickets({ silent: true }).catch(err => console.warn('Background tickets refresh failed:', err))
+          // Do NOT fetchTickets here — it fires before the assignment PATCH completes
+          // (server still shows ticket as unassigned) causing the tab to flicker back.
+          // The optimistic update before performSend already handled the UI instantly.
+          // The normal polling interval will catch up within 5-30s.
         }
 
         // Handle Assignment & Closing (Server-side)
@@ -2892,24 +2972,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
             console.log('✅ Background Send & Close completed for:', activeTicketId);
           }
-          // If NOT closing, but unassigned, auto-assign (existing logic)
+          // If NOT closing: run the assignment in the background.
+          // All optimistic UI updates (tab switch, next ticket, state) were already
+          // applied before performSend() was called, so nothing to do here for the UI.
           else if (!opts?.closeTicket) {
-            // Check if ticket is unassigned
-            const ticketCheckResponse = await fetch(`/api/tickets/${activeTicketId}`)
-            if (ticketCheckResponse.ok) {
-              const ticketData = await ticketCheckResponse.json()
-              const ticket = ticketData.ticket
-
-              if (ticket && !ticket.assigneeUserId) {
-                await fetch(`/api/tickets/${activeTicketId}/assign`, {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ assigneeUserId: currentUserId }),
-                })
-                window.dispatchEvent(new CustomEvent('ticketUpdated', {
-                  detail: { ticketId: activeTicketId, assigneeUserId: currentUserId, status: 'pending', switchToTab: 'assigned' }
-                }))
-              }
+            if (!selectedTicket.assigneeUserId && currentUserId) {
+              fetch(`/api/tickets/${activeTicketId}/assign`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assigneeUserId: currentUserId }),
+              }).catch(err => console.warn('[SendReply] Background assign failed:', err))
             }
           }
         }
@@ -3141,6 +3213,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
   // Show creating indicator if tickets are being created but we have some tickets already
   const showCreatingIndicator = isCreatingTickets && tickets.length > 0
+
+  // Keep ticketsRef always current so the deep-link effect can read
+  // the latest ticket list without needing `tickets` as a dependency
+  // (assigning in render body is safe and idiomatic: always up to date)
+  ticketsRef.current = tickets
 
   return (
     <div className="h-full w-full bg-background overflow-hidden" ref={panelGroupRef} style={{ contain: 'layout size' }}>
@@ -4786,19 +4863,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               defaultSize={effectivePanelSizes[2]}
               minSize={15}
               maxSize={35}
+              order={3}
+              id="quick-replies-panel"
               className="flex flex-col bg-background overflow-hidden"
               style={{ minWidth: 0, contain: 'layout size' }}
-              onResize={(size) => {
-                // When resizing sidebar, we need to update the FULL panelSizes array.
-                // panelSizes = [list, detail, rightSidebar]
-                // We only get 'size' of THIS panel.
-                // We need to assume the others scale proportionally?
-                // Or we can just read the current layout?
-                // ResizablePanelGroup doesn't easily give us the "other" sizes in this callback callback.
-                // Simplification: Don't track exact sidebar resize for "mainSplit" persistence.
-                // Just let it be. If user drastically resizes sidebar, it might reset next reload.
-                // That is acceptable for sidebars usually.
-              }}
             >
               <QuickRepliesSidebar
                 onSelectReply={handleSelectQuickReply}
@@ -4821,6 +4889,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               defaultSize={showQuickRepliesSidebar ? effectivePanelSizes[3] : effectivePanelSizes[2]}
               minSize={20}
               maxSize={40}
+              order={showQuickRepliesSidebar ? 4 : 3}
+              id="shopify-panel"
               className="flex flex-col bg-background overflow-hidden"
               style={{ minWidth: 0, contain: 'layout size' }}
             >
