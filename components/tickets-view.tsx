@@ -132,9 +132,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const ticketCache = useRef<{ active: Ticket[], closed: Ticket[] }>({ active: [], closed: [] })
 
   const [tickets, setTickets] = useState<Ticket[]>([])
-  // Mirror tickets into a ref immediately after state change so effects that
-  // read tickets without subscribing to changes can always get the latest.
-  // (This is assigned in the render body, not inside useEffect, so it's always current.)
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -170,6 +167,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // background assignment PATCH completes (which would return stale "unassigned"
   // data and flip the tab back).
   const suppressRealtimeFetchUntil = useRef<number>(0)
+  // Tracks the ticket ID of the most-recently-sent reply.
+  // Prevents the ticket_updates realtime INSERT from navigating the user back
+  // to a ticket they already moved away from after pressing Send.
+  const lastSentTicketIdRef = useRef<string | null>(null)
+  // Always reflects the currently-selected ticket ID synchronously.
+  // Used as the guard inside fetchThread instead of the closed-over `selectedTicket`
+  // state value, which is stale inside async functions defined earlier in the render.
+  const selectedTicketIdRef = useRef<string | null>(null)
+  // Keep in sync on every render — written in the render body (not useEffect) so
+  // it updates synchronously before any async work that reads it runs.
+  selectedTicketIdRef.current = selectedTicket?.id ?? null
 
   // Ghost Ticket Suppression
   // Stores IDs of tickets we've just closed, to FORCE hide them from "Open" lists
@@ -357,6 +365,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   }, [selectedTicket?.id])
   const [sendingReply, setSendingReply] = useState(false)
   const [sendingAction, setSendingAction] = useState<'send' | 'send-close' | null>(null)
+  // Synchronous guard for double-send prevention.
+  // React state (sendingReply) is async — its value doesn't update until the
+  // next render, so a rapid double-click both see sendingReply===false and both
+  // proceed, producing a duplicate optimistic message with the same
+  // `sent-${Date.now()}` key.  A ref toggles synchronously within the same tick.
+  const isSendingReplyRef = useRef(false)
   const [newNote, setNewNote] = useState("")
   const [selectedMentions, setSelectedMentions] = useState<string[]>([])
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
@@ -1293,28 +1307,50 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         },
         (payload) => {
           console.log('[Realtime] Ticket updated:', payload.new)
-          const updatedTicket = payload.new as any
+          const raw = payload.new as any
 
-          // Check if department_id was updated (classification happened)
-          const oldTicket = tickets.find(t => t.id === updatedTicket.id)
-          const deptChanged = oldTicket && oldTicket.departmentId !== updatedTicket.department_id
+          // If we are still within the post-Send suppression window, ignore this
+          // UPDATE entirely — the assignment PATCH may not have completed yet and
+          // merging stale DB data here would flip the ticket back to "unassigned".
+          if (Date.now() < suppressRealtimeFetchUntil.current) {
+            console.log('[Realtime] Suppressing tickets UPDATE during post-send window:', raw.id)
+            return
+          }
+
+          // Map DB snake_case columns → camelCase ticket fields.
+          // Spreading the raw payload directly onto the camelCase ticket object
+          // leaves camelCase fields (e.g. assigneeUserId) stale while adding
+          // duplicate snake_case keys — causing isTicketVisibleInTab to mis-classify
+          // the ticket (e.g. treating it as "unassigned" after an assignment).
+          const mapped: Partial<Ticket> = {
+            status: raw.status,
+            priority: raw.priority ?? undefined,
+            assigneeUserId: raw.assignee_user_id ?? null,
+            departmentId: raw.department_id ?? null,
+            subject: raw.subject,
+            tags: raw.tags,
+            lastCustomerReplyAt: raw.last_customer_reply_at ?? null,
+            lastAgentReplyAt: raw.last_agent_reply_at ?? null,
+            updatedAt: raw.updated_at,
+          }
+          // Strip undefined keys so we don't accidentally overwrite good data
+          const patch = Object.fromEntries(
+            Object.entries(mapped).filter(([, v]) => v !== undefined)
+          ) as Partial<Ticket>
+
+          // Check if department changed (need a full refetch for JOINed name)
+          const oldTicket = tickets.find(t => t.id === raw.id)
+          const deptChanged = oldTicket && oldTicket.departmentId !== (raw.department_id ?? null)
 
           if (deptChanged) {
-            // Department was updated - refetch to get JOINed departmentName
-            console.log('[Realtime] Department changed for ticket', updatedTicket.id, '- refetching ticket...')
-            fetchSingleTicket(updatedTicket.id)
+            console.log('[Realtime] Department changed for ticket', raw.id, '- refetching ticket...')
+            fetchSingleTicket(raw.id)
           } else {
-            // Other field updated - just merge the changes
             setTickets(prev => prev.map(t =>
-              t.id === updatedTicket.id
-                ? { ...t, ...updatedTicket }
-                : t
+              t.id === raw.id ? { ...t, ...patch } : t
             ))
-            // Also update selected ticket if it's the one being updated
             setSelectedTicket(prev =>
-              prev?.id === updatedTicket.id
-                ? { ...prev, ...updatedTicket }
-                : prev
+              prev?.id === raw.id ? { ...prev, ...patch } : prev
             )
           }
         }
@@ -1345,6 +1381,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         clearTimeout(refreshTimeoutId)
       }
       refreshTimeoutId = setTimeout(() => {
+        // Respect the post-action suppression window (set when a Send/Close fires).
+        // Without this check the 2-second debounced fetch that fires after every
+        // ticketUpdated / ticketsForceRefresh event would fetch stale server data
+        // before the assignment/close PATCH commits, causing the ticket to ghost-
+        // reappear in the active tab and/or show in both tabs simultaneously.
+        if (Date.now() < suppressRealtimeFetchUntil.current) {
+          console.log('[Debounce] Skipping fetch — within post-action suppression window')
+          refreshTimeoutId = null
+          return
+        }
         console.log('🔄 Debounced fetch executing...')
         // Refresh ALL loaded pages to preserve scroll position/data
         const currentLimit = page * 200
@@ -1473,8 +1519,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   useEffect(() => {
     // Function to sync emails and fetch tickets
     const doSyncAndFetch = async () => {
-      // Don't log on every poll to keep console clean, unless important
-      // console.log('[Tickets] Auto-poll executing...') 
+      // If we are within the post-action suppression window (e.g. right after a
+      // close or send), skip this poll cycle entirely.  The optimistic state is
+      // already correct; firing a fetch here before the server PATCH commits
+      // would return stale data and overwrite the optimistic close/pending state.
+      if (Date.now() < suppressRealtimeFetchUntil.current) {
+        console.log('[Poll] Skipping poll cycle — within post-action suppression window')
+        return
+      }
 
       try {
         await fetch('/api/emails?type=inbox&maxResults=5', {
@@ -1641,7 +1693,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
           await fetchTickets({ silent: true })
 
-          if (selectedTicket?.id === ticketId) {
+          // Only refresh/navigate if the user is still looking at this ticket
+          // AND it is NOT the ticket they just sent a reply to (guard against
+          // the narrow React-flush race where the old subscription fires before
+          // the new one is set up, snapping the user back to the sent ticket).
+          if (selectedTicket?.id === ticketId && ticketId !== lastSentTicketIdRef.current) {
             try {
               const res = await fetch(`/api/tickets/${ticketId}`)
               if (res.ok) {
@@ -1897,11 +1953,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (!silent) setLoadingThread(true)
       const response = await fetch(`/api/tickets/${targetTicketId}/thread`)
 
-      // GUARD: If we moved to another ticket while fetching, ABORT
-      if (selectedTicket?.id !== targetTicketId) {
+      // GUARD: If we moved to another ticket while fetching, ABORT.
+      // Use selectedTicketIdRef (updated synchronously on every render) rather
+      // than the closed-over `selectedTicket` state value.  The state value is
+      // stale inside this async function if setSelectedTicket() was called before
+      // the fetch completed — both sides of the comparison would be the OLD id
+      // so the guard would pass and the old ticket’s thread would overwrite the
+      // new ticket’s thread in state.
+      if (selectedTicketIdRef.current !== targetTicketId) {
         console.log('🛑 Aborting thread update: user switched tickets', {
           wanted: targetTicketId,
-          current: selectedTicket?.id
+          current: selectedTicketIdRef.current
         })
         return
       }
@@ -1933,11 +1995,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
     } catch (err) {
       console.error("Error fetching thread:", err)
-      if (selectedTicket?.id === targetTicketId) {
+      if (selectedTicketIdRef.current === targetTicketId) {
         setThreadMessages([])
       }
     } finally {
-      if (selectedTicket?.id === targetTicketId) {
+      if (selectedTicketIdRef.current === targetTicketId) {
         if (!silent) setLoadingThread(false)
       }
     }
@@ -2156,21 +2218,30 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     // OPTIMISTIC NAVIGATION: If closing, move to next ticket IMMEDIATELY
     if (status === "closed" && selectedTicket?.id === targetTicketId) {
       console.log('🚀 Optimistically closing and navigating...')
-      // Find next ticket from current filtered list
-      const currentIndex = filteredTickets.findIndex(t => t.id === targetTicketId)
-      // Improve next ticket logic: try next, then try previous (if we closed the last one)
-      let nextTicket = filteredTickets[currentIndex + 1]
-      if (!nextTicket) {
-        nextTicket = filteredTickets[currentIndex - 1]
-      }
 
-      // Ensure we don't select the same ticket (unlikely given filters but safe to check)
-      if (nextTicket && nextTicket.id !== targetTicketId) {
+      // Suppress the poller and realtime INSERT channel from fetching while
+      // the PATCH is in-flight.  Without this, a poll cycle that happens to
+      // fire in the ~500 ms before the server commits the close can return
+      // the ticket as 'open', overwrite optimistic state, and cause it to
+      // ghost-reappear in the active tab once temporarilyHiddenIds clears.
+      suppressRealtimeFetchUntil.current = Date.now() + 8000
+      lastSentTicketIdRef.current = targetTicketId
+      setTimeout(() => {
+        if (lastSentTicketIdRef.current === targetTicketId) lastSentTicketIdRef.current = null
+      }, 15000)
+
+      // Restrict to tickets visible in the current tab to avoid jumping to a
+      // ticket from a different sub-tab (e.g. unassigned while on assigned).
+      const tabVisibleTickets = filteredTickets.filter(t => isTicketVisibleInTab(t, activeTab, currentUserId))
+      const currentIndex = tabVisibleTickets.findIndex(t => t.id === targetTicketId)
+      let nextTicket = tabVisibleTickets[currentIndex + 1] || tabVisibleTickets[currentIndex - 1] || null
+      if (nextTicket && nextTicket.id === targetTicketId) nextTicket = null
+
+      if (nextTicket) {
         console.log('➡️ Optimistically navigating to:', nextTicket.id)
         setSelectedTicket(nextTicket)
         markTicketViewed(nextTicket)
       } else {
-        // No more tickets, clear selection
         setSelectedTicket(null)
       }
     }
@@ -2225,7 +2296,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         const closedTicketState = { ...selectedTicket, status: 'closed' as const }
         setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
 
-        // SUPPRESS GHOST REAPPEARANCE
+        // SUPPRESS GHOST REAPPEARANCE from realtime/polling before server confirms close.
+        // This ref is checked by BOTH the ticket_updates realtime INSERT handler AND the
+        // 5-second poller, so neither can fire fetchTickets before the PATCH completes
+        // and overwrite the optimistic closed state with stale 'open/pending' data.
+        suppressRealtimeFetchUntil.current = Date.now() + 8000
+        lastSentTicketIdRef.current = targetTicketId
+        setTimeout(() => {
+          if (lastSentTicketIdRef.current === targetTicketId) lastSentTicketIdRef.current = null
+        }, 15000)
+
         setTemporarilyHiddenIds(prev => {
           const next = new Set(prev)
           next.add(targetTicketId)
@@ -2239,25 +2319,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           })
         }, 10000)
 
-
-        setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
-
-        // 1b. Counts update automatically via useMemo on tickets change? NO, we removed that.
-        // We must manually update ticketCounts for instant feedback
-        setTicketCounts(prev => {
-          const t = selectedTicket
-          if (!t) return prev
-          const wasAssigned = !!t.assigneeUserId;
-          return {
-            ...prev,
-            [wasAssigned ? 'assigned' : 'unassigned']: Math.max(0, prev[wasAssigned ? 'assigned' : 'unassigned'] - 1),
-            closed: prev.closed + 1,
-            open: Math.max(0, prev.open - 1)
-          }
-        })
-        // wait, I need access to the ticket object (itemToUpdate) before this block.
-        // I can use 'selectedTicket' since this block is for selectedTicket.
-
+        // Update badge counts immediately (single call, no duplicate)
         setTicketCounts(prev => {
           const t = selectedTicket
           if (!t) return prev
@@ -2266,19 +2328,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             ...prev,
             [isAssigned ? 'assigned' : 'unassigned']: Math.max(0, prev[isAssigned ? 'assigned' : 'unassigned'] - 1),
             closed: prev.closed + 1,
-            // Also decrement 'open' total if that's what we track? 
-            // The API usually returns { open: X, assigned: Y, unassigned: Z, closed: W } where open = assigned + unassigned? 
-            // Or open = "status=open"? 
-            // Let's assume the API returns disjoint sets or specific status counts.
-            // Usually 'open' matches status='open'. 
-            // If the ticket status was 'open', we decrement open.
             open: t.status === 'open' ? Math.max(0, prev.open - 1) : prev.open
           }
         })
 
-        // 2. Determine next ticket & Navigate
-        const currentIndex = filteredTickets.findIndex(t => t.id === targetTicketId)
-        let nextTicket = filteredTickets[currentIndex + 1] || filteredTickets[0]
+        // 2. Determine next ticket & Navigate — restrict to current tab
+        const tabVisibleTickets = filteredTickets.filter(t => isTicketVisibleInTab(t, activeTab, currentUserId))
+        const currentIndex = tabVisibleTickets.findIndex(t => t.id === targetTicketId)
+        let nextTicket = tabVisibleTickets[currentIndex + 1] || tabVisibleTickets[0]
         if (nextTicket && nextTicket.id === targetTicketId) nextTicket = null as any // No others
 
         if (nextTicket) {
@@ -2745,6 +2802,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
   const handleSendReply = async (opts?: { closeTicket?: boolean }) => {
     if (!selectedTicket || !replyHtml.trim() || !threadMessages.length) return
+    // Synchronous double-send guard (state-based check is async and insufficient).
+    if (isSendingReplyRef.current) return
+    isSendingReplyRef.current = true
     const targetTicketId = selectedTicket.id
 
     // Capture state before any navigation/clearing
@@ -2764,6 +2824,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     setSendingReply(true)
     setSendingAction(opts?.closeTicket ? 'send-close' : 'send')
+
+    // Suppress the 5-second poller AND realtime handlers immediately.
+    // This must be the very first thing we do — before any setTickets/setSelectedTicket
+    // calls — so that a poll cycle already in-flight (or one that fires in the
+    // next few ms) cannot fetch stale server data and overwrite the optimistic state.
+    suppressRealtimeFetchUntil.current = Date.now() + 10000
+    lastSentTicketIdRef.current = targetTicketId
+    // Auto-clear after 20 s so future actions on this ticket still work
+    setTimeout(() => {
+      if (lastSentTicketIdRef.current === targetTicketId) lastSentTicketIdRef.current = null
+    }, 20000)
 
     // OPTIMISTIC UI UPDATE FOR BOTH "SEND" AND "SEND & CLOSE"
     // We do this BEFORE the slow email send to make it feel instant
@@ -2806,15 +2877,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     if (opts?.closeTicket) {
       console.log('🚀 Optimistic "Send & Close" started for:', targetTicketId)
 
-      // 1. Determine next ticket
-      const currentIndex = filteredTickets.findIndex(t => t.id === targetTicketId)
-      // If we are about to close this ticket, we should look for the immediate next valid one
-      // We start searching from currentIndex + 1
-      let nextTicket = filteredTickets[currentIndex + 1] || filteredTickets[0]
+      // 1. Determine next ticket – restrict to tickets visible in the CURRENT tab
+      // so we never jump the user to a ticket from the wrong tab (e.g. unassigned
+      // while they were on the assigned tab).
+      const tabVisibleTickets = filteredTickets.filter(t => isTicketVisibleInTab(t, activeTab, currentUserId))
+      const currentIndex = tabVisibleTickets.findIndex(t => t.id === targetTicketId)
+      // Look for the ticket immediately after the current one; wrap to the first if at the end
+      let nextTicket = tabVisibleTickets[currentIndex + 1] || tabVisibleTickets[0]
 
-      // If the found 'next' is the same as current (list of 1), or undefined
+      // If the found 'next' is the same as current (only one ticket in the tab), clear it
       if (nextTicket && nextTicket.id === targetTicketId) {
-        nextTicket = null as any; // No other tickets
+        nextTicket = null as any; // No other tickets in this tab
       }
 
       // 2. Optimistically mark current as closed in the list
@@ -2826,6 +2899,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
 
       setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
+
+      // Update badge counts instantly for Send & Close
+      setTicketCounts(prev => {
+        const isAssigned = !!selectedTicket.assigneeUserId
+        return {
+          ...prev,
+          [isAssigned ? 'assigned' : 'unassigned']: Math.max(0, prev[isAssigned ? 'assigned' : 'unassigned'] - 1),
+          closed: prev.closed + 1,
+          open: selectedTicket.status === 'open' ? Math.max(0, prev.open - 1) : prev.open,
+        }
+      })
 
       // SUPPRESS GHOST REAPPEARANCE
       setTemporarilyHiddenIds(prev => {
@@ -2842,7 +2926,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         })
       }, 10000)
 
-      // 3b. Counts update automatically via useMemo on tickets change
+      // (suppression refs already set at the top of handleSendReply)
 
       // 3. Navigate immediately
       if (nextTicket) {
@@ -2853,21 +2937,26 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         console.log('🏁 No next ticket, clearing selection')
         setSelectedTicket(null)
       }
+
+      // (suppression refs already set at the top of handleSendReply)
     }
 
     // OPTIMISTIC NAVIGATION FOR PLAIN "SEND" (not close)
-    // Exact mirror of the Send & Close block above — same structure, same ghost
-    // suppression, same next-ticket logic. Only differences: status stays 'pending'
-    // (ticket isn't closed) and we switch to the 'assigned' tab instead of 'closed'.
     if (!opts?.closeTicket) {
-      // 1. Determine next ticket (same logic as Send & Close)
-      const currentIndex = filteredTickets.findIndex(t => t.id === targetTicketId)
-      let nextTicket = filteredTickets[currentIndex + 1] || filteredTickets[0]
-      if (nextTicket && nextTicket.id === targetTicketId) {
-        nextTicket = null as any
-      }
+      // 1. Determine next ticket – restrict to the CURRENT tab so the user
+      //    stays within the same view they were browsing.
+      //    For plain Send (not close), do NOT wrap around to [0] — if the
+      //    replied-to ticket is the last one in this tab, land on nothing
+      //    rather than cycling back to the top (which can cause the same or
+      //    an already-visited ticket to be re-selected).
+      const tabVisibleTickets = filteredTickets.filter(t => isTicketVisibleInTab(t, activeTab, currentUserId))
+      const currentIndex = tabVisibleTickets.findIndex(t => t.id === targetTicketId)
+      const nextTicket = tabVisibleTickets[currentIndex + 1] ?? null
 
-      // 2. Optimistically update current ticket: assign + mark pending
+      // 2. Optimistically update current ticket: assign to self + mark pending
+      //    This moves the ticket naturally from 'unassigned' → 'assigned' tab
+      //    via isTicketVisibleInTab without needing to hide it entirely.
+      const wasUnassigned = !selectedTicket.assigneeUserId
       const pendingTicketState = {
         ...selectedTicket,
         status: 'pending' as const,
@@ -2875,35 +2964,30 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
       setTickets(prev => prev.map(t => t.id === targetTicketId ? pendingTicketState : t))
 
-      // SUPPRESS GHOST REAPPEARANCE (same as Send & Close)
-      setTemporarilyHiddenIds(prev => {
-        const next = new Set(prev)
-        next.add(targetTicketId)
-        return next
-      })
-      setTimeout(() => {
-        setTemporarilyHiddenIds(prev => {
-          const next = new Set(prev)
-          next.delete(targetTicketId)
-          return next
-        })
-      }, 10000)
+      // Update badge counts instantly — don't wait for the next fetchTicketCounts()
+      // call (which only happens on the 5-second poll) since that's what causes the
+      // 5-second delay before the tab numbers update after clicking Send.
+      if (wasUnassigned && currentUserId) {
+        setTicketCounts(prev => ({
+          ...prev,
+          unassigned: Math.max(0, prev.unassigned - 1),
+          assigned: prev.assigned + 1,
+        }))
+      }
 
-      // 3. Navigate immediately
+      // NOTE: We intentionally do NOT add to temporarilyHiddenIds here.
+      // The optimistic status/assignee update above is enough to move the ticket
+      // to the correct tab instantly.  Hiding it completely (as we did before)
+      // made the ticket look "closed" for ~10 s even though it was only sent.
+
+      // 3. Navigate to the next ticket in the same tab
       if (nextTicket) {
         setSelectedTicket(nextTicket)
       } else {
         setSelectedTicket(null)
       }
 
-      // NOTE: No setActiveTab here — same as Send & Close.
-      // The ticket disappears from the current tab naturally when its
-      // status/assignee changes. Stay on whatever tab the user was on.
-
-      // Suppress the realtime INSERT handler's fetchTickets for 6 seconds.
-      // This prevents early server fetches (before assignment PATCH completes)
-      // from resetting the optimistic state and causing tab flickering.
-      suppressRealtimeFetchUntil.current = Date.now() + 6000
+      // (suppression refs already set at the top of handleSendReply)
     }
 
     // Perform the actual work (Background if closed, Foreground if just send)
@@ -2931,14 +3015,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         const data = await response.json().catch(() => ({}))
         const activeTicketId = data?.ticketId || targetTicketId
 
-        // Refresh thread in background so the sent message is reflected
-        if (!opts?.closeTicket) {
-          fetchThread({ silent: true, ticketId: activeTicketId }).catch(err => console.warn('Background thread refresh failed:', err))
-          // Do NOT fetchTickets here — it fires before the assignment PATCH completes
-          // (server still shows ticket as unassigned) causing the tab to flicker back.
-          // The optimistic update before performSend already handled the UI instantly.
-          // The normal polling interval will catch up within 5-30s.
-        }
+        // Do NOT call fetchThread for the old ticket here.
+        // setSelectedTicket(nextTicket) was already called above, so
+        // selectedTicketIdRef.current is now the NEXT ticket’s ID. Any
+        // fetchThread call with the old ticket’s ID would pass the stale-closure
+        // guard and overwrite the next ticket’s conversation with the old thread.
+        // The useEffect on selectedTicket.id already handles fetching the new thread.
+        // Do NOT fetchTickets here — it fires before the assignment PATCH completes
+        // (server still shows ticket as unassigned) causing the tab to flicker back.
 
         // Handle Assignment & Closing (Server-side)
         if (activeTicketId && currentUserId) {
@@ -2961,14 +3045,26 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               body: JSON.stringify({ status: 'closed' }),
             });
 
-            // NOW fetch tickets to get the updated "closed" status
-            fetchTickets({ silent: true }).catch(err => console.warn('Background tickets refresh failed:', err))
+            // Extend the suppression window now that all PATCHes have committed,
+            // so the next poller / debounced-fetch cycle (which fires immediately
+            // after the ticketUpdated broadcast below) cannot overwrite our state
+            // with stale data.
+            suppressRealtimeFetchUntil.current = Date.now() + 8000
 
-            // Broadcast to ensure other tabs/components know
+            // Update only this single ticket in state with confirmed server data.
+            // DO NOT call fetchTickets() here — that replaces the whole tickets
+            // array using the active-tab filter (status=open,pending,on_hold) which
+            // excludes the now-closed ticket and wipes it from state completely.
+            // If there is any DB propagation lag (even 1 ms) fetchTickets would
+            // also re-add the ticket as 'open', then temporarilyHiddenIds would
+            // let it ghost-reappear when it clears at T=10 s.
+            fetchSingleTicket(activeTicketId).catch(err => console.warn('Background ticket refresh failed:', err))
+
+            // Broadcast so other components (inbox-view etc.) stay in sync.
+            // No switchToTab — we intentionally keep the user on the tab they were on.
             window.dispatchEvent(new CustomEvent('ticketUpdated', {
               detail: { ticketId: activeTicketId, status: 'closed', assigneeUserId: currentUserId }
             }))
-
 
             console.log('✅ Background Send & Close completed for:', activeTicketId);
           }
@@ -3012,6 +3108,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       } finally {
         setSendingReply(false)
         setSendingAction(null)
+        isSendingReplyRef.current = false
       }
     }
 
