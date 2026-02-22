@@ -262,12 +262,50 @@ function PageContent() {
     }
   }, [currentUser, isConnected])
 
+  // Redirect to /welcome when auth checks have settled and user is not connected.
+  // Using useEffect avoids calling window.location.href as a render side-effect,
+  // which could fire on transient false states mid-auth-check.
+  useEffect(() => {
+    if (!checkingAuth && !checkingUser && !isConnected) {
+      if (typeof window !== 'undefined') {
+        window.location.href = '/welcome'
+      }
+    }
+  }, [checkingAuth, checkingUser, isConnected])
+
   // Re-check admin status when currentUser changes
   useEffect(() => {
     if (currentUser && isConnected) {
       checkAdminExists()
     }
   }, [currentUser, isConnected])
+
+  // Proactively refresh Gmail OAuth tokens every 45 minutes so they never expire
+  // while the user is actively using the app. Access tokens last 60 minutes;
+  // refreshing at 45-min intervals keeps them well within validity.
+  useEffect(() => {
+    if (!isConnected) return
+
+    const doRefresh = () => {
+      fetch('/api/auth/refresh-tokens', { method: 'POST', credentials: 'include' })
+        .then(res => res.json())
+        .then(data => {
+          if (data.refreshed > 0) {
+            console.log(`[TokenRefresh] Proactively refreshed ${data.refreshed} Gmail token(s)`)
+          }
+        })
+        .catch(err => console.warn('[TokenRefresh] Background refresh failed:', err))
+    }
+
+    // Run once shortly after the user is confirmed connected, then every 45 minutes
+    const initialTimer = setTimeout(doRefresh, 10_000) // 10 s after connection confirmed
+    const interval = setInterval(doRefresh, 45 * 60 * 1000) // Every 45 minutes
+
+    return () => {
+      clearTimeout(initialTimer)
+      clearInterval(interval)
+    }
+  }, [isConnected])
 
   const checkAdminExists = async () => {
     try {
@@ -546,6 +584,13 @@ function PageContent() {
       }
 
       if (!response.ok) {
+        // 401: session expired — send user back to login instead of showing a toast error
+        if (response.status === 401) {
+          if (typeof window !== 'undefined') {
+            window.location.href = '/auth/landing?view=login'
+          }
+          return
+        }
         const message = data?.error || "Failed to start sync"
         if (!silent) {
           setSyncInProgress(false)
@@ -681,7 +726,10 @@ function PageContent() {
           setCheckingAuth(false)
           return
         } else {
-          setIsConnected(false)
+          // Gmail tokens expired/invalid - clean up flag but DO NOT set isConnected=false
+          // yet, because we still need to check if a valid business session exists below.
+          // Setting false here would race against checkUserSelection and trigger a
+          // premature redirect to /welcome before the business-session check completes.
           try {
             window.localStorage.removeItem(LOCAL_STORAGE_KEY)
           } catch { }
@@ -1094,18 +1142,10 @@ function PageContent() {
               </div>
             ) : !isConnected ? (
               <div className="flex items-center justify-center h-full p-4">
-                {(() => {
-                  // Redirect to welcome page
-                  if (typeof window !== 'undefined') {
-                    window.location.href = '/welcome'
-                  }
-                  return (
-                    <div className="text-center">
-                      <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-                      <p className="mt-4 text-muted-foreground">Redirecting...</p>
-                    </div>
-                  )
-                })()}
+                <div className="text-center">
+                  <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+                  <p className="mt-4 text-muted-foreground">Redirecting...</p>
+                </div>
               </div>
             ) : (
               <UserSelector

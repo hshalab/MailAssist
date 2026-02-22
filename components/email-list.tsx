@@ -185,9 +185,11 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
           return
         }
 
-        // Generic 401 error
+        // Generic 401 error — session expired, redirect to login
         if (response.status === 401) {
-          setError('Not authenticated - please log in again')
+          if (typeof window !== 'undefined') {
+            window.location.href = '/auth/landing?view=login'
+          }
           return
         }
 
