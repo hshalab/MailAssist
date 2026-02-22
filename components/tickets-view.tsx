@@ -406,6 +406,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([])
   const [showQuickRepliesSidebar, setShowQuickRepliesSidebar] = useState(false)
   const initialSelectHandledRef = useRef(false)
+  // Tracks internal auto-navigation (e.g. next-ticket after close) so the
+  // deep-link effect doesn't switch tabs when the URL updates internally.
+  const internalNavigationRef = useRef(false)
 
   // Reset deep-link selection guard when ticketNavKey changes (on each navigation)
   useEffect(() => {
@@ -1452,6 +1455,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
               if (nextTicket) {
                 console.log('➡️ Auto-selecting next ticket:', nextTicket.id, nextTicket.subject)
+                // Mark as internal navigation so the deep-link effect won't
+                // switch tabs when the URL updates to the new ticket's id.
+                internalNavigationRef.current = true
                 // Use setTimeout to ensure state updates don't conflict
                 setTimeout(() => setSelectedTicket(nextTicket), 0)
               } else {
@@ -1591,6 +1597,15 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     // Check if we already handled this navigation (guard set synchronously)
     if (initialSelectHandledRef.current) return
+
+    // If this URL change was caused by an internal auto-selection (e.g. next
+    // ticket after close), skip the tab switch so the user stays on their
+    // current tab.
+    if (internalNavigationRef.current) {
+      internalNavigationRef.current = false
+      initialSelectHandledRef.current = true
+      return
+    }
 
     const currentTickets = ticketsRef.current
     if (!currentTickets.length) {
@@ -2239,6 +2254,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       if (nextTicket) {
         console.log('➡️ Optimistically navigating to:', nextTicket.id)
+        internalNavigationRef.current = true
         setSelectedTicket(nextTicket)
         markTicketViewed(nextTicket)
       } else {
@@ -2340,6 +2356,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
         if (nextTicket) {
           console.log('➡️ Optimistically navigating to next ticket:', nextTicket.id)
+          internalNavigationRef.current = true
           setSelectedTicket(nextTicket)
         } else {
           console.log('🏁 No next ticket, clearing selection')
@@ -3938,6 +3955,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                               toggleTicketSelection(ticket.id)
                             } else {
                               markTicketViewed(ticket)
+                              internalNavigationRef.current = true
                               setSelectedTicket(ticket)
                             }
                           }}
@@ -4365,6 +4383,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
                       const selectAndScrollToTicket = (ticket: Ticket) => {
                         // Set the ticket
+                        internalNavigationRef.current = true
                         setSelectedTicket(ticket)
 
                         // Scroll the content area to top
