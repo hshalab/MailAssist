@@ -360,7 +360,8 @@ export async function classifyTicketToDepartmentAsync(
 export async function ensureTicketForEmail(
   email: TicketEmailLike,
   isFromAgent: boolean,
-  emailBody?: string // Optional: email body for AI classification
+  emailBody?: string, // Optional: email body for AI classification
+  isSpam?: boolean    // Optional: mark ticket as spam (adds 'spam' tag)
 ): Promise<Ticket | null> {
   if (!supabase) return null;
 
@@ -399,11 +400,14 @@ export async function ensureTicketForEmail(
       customerName: null,
       initialStatus: isFromAgent ? 'pending' : 'open',
       priority: undefined, // Don't set priority for unassigned tickets
-      tags: [],
+      tags: isSpam ? ['spam'] : [],
       lastCustomerReplyAt: isFromAgent ? undefined : dateIso,
       lastAgentReplyAt: isFromAgent ? dateIso : undefined,
       ownerEmail: resolvedUserEmail || undefined, // Pass owner email from source
     }, emailBody); // Pass email body for classification
+    if (ticket && isSpam) {
+      console.log(`[Ticket] Created spam-tagged ticket ${ticket.id} for email ${email.id}`);
+    }
     if (ticket) {
       console.log(`[Ticket] Created ticket ${ticket.id} for email ${email.id}`, {
         threadId,
@@ -560,6 +564,7 @@ export async function getTickets(
     tags?: string[];
     departmentId?: string | null; // "unclassified" or specific UUID
     isEmptied?: boolean;
+    excludeSpam?: boolean; // When true, hide spam-tagged tickets (default in normal view)
   }
 ): Promise<Ticket[]> {
   if (!supabase) return [];
@@ -642,6 +647,10 @@ export async function getTickets(
       // .contains('tags', ['tag1']) -> AND logic (must have all)
       // .overlaps('tags', ['tag1', 'tag2']) -> OR logic (must have at least one)
       query = query.overlaps('tags', filters.tags);
+    } else if (filters.excludeSpam) {
+      // Exclude spam-tagged tickets from the normal view
+      // Only applies when NOT filtering for a specific tag (e.g., 'spam')
+      query = (query as any).not('tags', 'cs', '{spam}');
     }
   }
 
@@ -859,7 +868,9 @@ export async function getTicketCounts(
       null,
       'desc',
       undefined,
-      undefined
+      undefined,
+      undefined,
+      { excludeSpam: true } // Never count spam tickets in normal tab badges
     );
 
     let assigned = 0;

@@ -92,9 +92,9 @@ export async function POST(request: NextRequest) {
         };
 
         // Get new messages since last sync
-        const { messageIds, latestHistoryId } = await getNewMessagesFromHistory(tokens, lastHistoryId);
+        const { messageIds, spamMessageIds, latestHistoryId } = await getNewMessagesFromHistory(tokens, lastHistoryId);
 
-        console.log(`[Gmail Webhook] ${messageIds.length} new messages for ${notification.emailAddress}`);
+        console.log(`[Gmail Webhook] ${messageIds.length} new inbox message(s), ${spamMessageIds.length} new spam message(s) for ${notification.emailAddress}`);
 
         if (messageIds.length > 0) {
             // Fetch message details
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
                 agentEmails.push(notification.emailAddress.toLowerCase());
             }
 
-            // Process new emails
+            // Process new inbox emails
             let ticketsCreated = 0;
             for (const email of newEmails) {
                 try {
@@ -137,10 +137,11 @@ export async function POST(request: NextRequest) {
                             from: email.from,
                             to: email.to,
                             date: email.date,
-                            ownerEmail: notification.emailAddress, // Pass owner email for correct scoping
+                            ownerEmail: notification.emailAddress,
                         },
                         isFromAgent,
-                        email.body // Pass email body for AI classification
+                        email.body,
+                        false // not spam
                     );
                     ticketsCreated++;
                 } catch (emailError) {
@@ -148,7 +149,7 @@ export async function POST(request: NextRequest) {
                 }
             }
 
-            console.log(`[Gmail Webhook] Created ${ticketsCreated} tickets`);
+            console.log(`[Gmail Webhook] Created ${ticketsCreated} inbox tickets`);
 
             // Auto-classify new tickets
             if (ticketsCreated > 0) {
@@ -163,6 +164,40 @@ export async function POST(request: NextRequest) {
                 } catch (classifyError) {
                     console.warn('[Gmail Webhook] Classification error:', classifyError);
                 }
+            }
+        }
+
+        // --- Process spam messages ---
+        if (spamMessageIds.length > 0) {
+            try {
+                const spamEmails = await getMessagesByIds(tokens, spamMessageIds);
+                let spamTicketsCreated = 0;
+
+                for (const email of spamEmails) {
+                    try {
+                        await ensureTicketForEmail(
+                            {
+                                id: email.id,
+                                threadId: email.threadId,
+                                subject: email.subject,
+                                from: email.from,
+                                to: email.to,
+                                date: email.date,
+                                ownerEmail: notification.emailAddress,
+                            },
+                            false, // customer email (spam is always inbound)
+                            email.body,
+                            true  // isSpam — tags ticket with 'spam'
+                        );
+                        spamTicketsCreated++;
+                    } catch (spamEmailError) {
+                        console.warn(`[Gmail Webhook] Error processing spam email ${email.id}:`, spamEmailError);
+                    }
+                }
+
+                console.log(`[Gmail Webhook] Created ${spamTicketsCreated} spam ticket(s)`);
+            } catch (spamError) {
+                console.warn('[Gmail Webhook] Spam processing error (non-fatal):', spamError);
             }
         }
 

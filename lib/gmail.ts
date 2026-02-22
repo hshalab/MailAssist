@@ -429,7 +429,7 @@ export async function getNewMessagesFromHistory(
   tokens: { access_token?: string | null; refresh_token?: string | null },
   startHistoryId: string | null,
   maxPages: number = 5 // Limit history pages to prevent timeouts
-): Promise<{ messageIds: string[]; latestHistoryId: string | null }> {
+): Promise<{ messageIds: string[]; spamMessageIds: string[]; latestHistoryId: string | null }> {
   const gmail = getGmailClient(tokens);
 
   // If no startHistoryId, we need to do initial sync - get current historyId
@@ -437,17 +437,19 @@ export async function getNewMessagesFromHistory(
     const profile = await gmail.users.getProfile({ userId: 'me' });
     return {
       messageIds: [], // No incremental sync possible without starting point
+      spamMessageIds: [],
       latestHistoryId: profile.data.historyId || null,
     };
   }
 
   try {
     const messageIds = new Set<string>();
+    const spamMessageIds = new Set<string>();
     let pageToken: string | undefined;
     let latestHistoryId = startHistoryId;
     let pagesFetched = 0;
 
-    // Paginate through history to get all new messages
+    // --- Pass 1: INBOX messages ---
     do {
       // Safety break
       if (pagesFetched >= maxPages) {
@@ -459,7 +461,7 @@ export async function getNewMessagesFromHistory(
         userId: 'me',
         startHistoryId,
         historyTypes: ['messageAdded'],
-        labelId: 'INBOX', // Only care about inbox messages
+        labelId: 'INBOX', // Only inbox messages in this pass
         maxResults: 100,
         pageToken,
       });
@@ -470,7 +472,7 @@ export async function getNewMessagesFromHistory(
         if (record.messagesAdded) {
           for (const added of record.messagesAdded) {
             if (added.message?.id) {
-              // Skip if message is in SPAM or TRASH
+              // Skip if message is in SPAM or TRASH (belt-and-suspenders)
               const labels = added.message.labelIds || [];
               if (!labels.includes('SPAM') && !labels.includes('TRASH')) {
                 messageIds.add(added.message.id);
@@ -489,8 +491,36 @@ export async function getNewMessagesFromHistory(
       pagesFetched++;
     } while (pageToken);
 
+    // --- Pass 2: SPAM messages (single page, spam volume is usually low) ---
+    try {
+      const spamResponse = await gmail.users.history.list({
+        userId: 'me',
+        startHistoryId,
+        historyTypes: ['messageAdded'],
+        labelId: 'SPAM',
+        maxResults: 50,
+      });
+
+      const spamHistory = spamResponse.data.history || [];
+      for (const record of spamHistory) {
+        if (record.messagesAdded) {
+          for (const added of record.messagesAdded) {
+            if (added.message?.id && !messageIds.has(added.message.id)) {
+              spamMessageIds.add(added.message.id);
+            }
+          }
+        }
+      }
+
+      console.log(`[Gmail] Spam history pass: found ${spamMessageIds.size} spam message(s)`);
+    } catch (spamError) {
+      // Non-fatal: if spam pass fails, just log and continue
+      console.warn('[Gmail] Spam history pass failed (non-fatal):', spamError);
+    }
+
     return {
       messageIds: Array.from(messageIds),
+      spamMessageIds: Array.from(spamMessageIds),
       latestHistoryId,
     };
   } catch (error: any) {
@@ -501,6 +531,7 @@ export async function getNewMessagesFromHistory(
       const profile = await gmail.users.getProfile({ userId: 'me' });
       return {
         messageIds: [], // Can't do incremental, but don't fail
+        spamMessageIds: [],
         latestHistoryId: profile.data.historyId || null,
       };
     }

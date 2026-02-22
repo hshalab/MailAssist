@@ -263,6 +263,12 @@ export async function GET(request: NextRequest) {
             // If not, it might be missing OR just unclassified.
             // ensureTicketForEmail is safe to call (idempotent-ish) - it checks existence first.
             if (!email.departmentName) {
+              // Skip spam emails in the smart sync path — the Gmail webhook handles
+              // spam ticket creation in real-time going forward. We never backfill
+              // old spam here so agents don't get flooded with historical junk.
+              const emailLabels: string[] = email.labels || [];
+              if (emailLabels.includes('SPAM')) return;
+
               // Extract bare email address from "Name <email@domain.com>" format before comparing.
               // Raw .includes() on the full FROM string is unreliable and can throw on null.
               const extractBareEmail = (s: string) => {
@@ -282,7 +288,7 @@ export async function GET(request: NextRequest) {
                 to: email.to,
                 date: email.date,
                 ownerEmail: email.ownerEmail
-              }, !!isFromAgent, email.body); // Pass body for AI classification
+              }, !!isFromAgent, email.body);
             }
           }));
         }

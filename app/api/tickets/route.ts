@@ -116,6 +116,10 @@ export async function GET(request: NextRequest) {
     const tagsFilter = tagsParam ? tagsParam.split(',') : undefined;
     const departmentParam = request.nextUrl.searchParams.get('department'); // "unclassified" or UUID
 
+    // Exclude spam-tagged tickets by default UNLESS the user is explicitly filtering for spam
+    const showingSpam = tagsFilter?.includes('spam') ?? false;
+    const excludeSpam = !showingSpam;
+
     // Get tickets with role-based filtering and optional account scope
     let tickets = await getTickets(
       userId,
@@ -131,7 +135,8 @@ export async function GET(request: NextRequest) {
         assigneeUserId: assigneeParam || undefined,
         priority: priorityFilter,
         tags: tagsFilter,
-        departmentId: departmentParam || undefined
+        departmentId: departmentParam || undefined,
+        excludeSpam,
       }
     );
 

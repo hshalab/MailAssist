@@ -3460,6 +3460,38 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                 </TabsList>
               </Tabs>
 
+              {/* Spam quick-filter — shown whenever spam tickets exist or filter is active */}
+              {(tagsFilter === "spam" || tickets.some(t => t.tags.includes('spam'))) && (
+                <div className="flex items-center gap-1.5 px-0.5 pb-1">
+                  <button
+                    onClick={() => setTagsFilter(tagsFilter === "spam" ? "all" : "spam")}
+                    className={`flex items-center gap-1 h-6 px-2 rounded-md text-xs border transition-colors ${
+                      tagsFilter === "spam"
+                        ? "bg-yellow-100 border-yellow-400 text-yellow-800 dark:bg-yellow-900/40 dark:border-yellow-600 dark:text-yellow-300"
+                        : "border-dashed border-muted-foreground/40 text-muted-foreground hover:border-yellow-400 hover:text-yellow-700"
+                    }`}
+                  >
+                    <span>⚠</span>
+                    <span>Spam</span>
+                    {tagsFilter !== "spam" && (
+                      <Badge variant="secondary" className="h-4 px-1 text-[9px] ml-0.5">
+                        {tickets.filter(t => t.tags.includes('spam')).length}
+                      </Badge>
+                    )}
+                  </button>
+                  {tagsFilter === "spam" && (
+                    <span className="text-[10px] text-muted-foreground">Showing spam tickets only —{" "}
+                      <button
+                        className="underline hover:text-foreground"
+                        onClick={() => setTagsFilter("all")}
+                      >
+                        clear
+                      </button>
+                    </span>
+                  )}
+                </div>
+              )}
+
               {/* Collapsible Filters */}
               <Accordion type="single" collapsible value={filtersExpanded ? "filters" : undefined}>
                 <AccordionItem value="filters" className="border-none">
