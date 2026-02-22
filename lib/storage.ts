@@ -871,22 +871,18 @@ export async function saveTokens(tokens: StoredTokens, businessId?: string | nul
   // try to preserve the existing refresh token from the database to prevent data loss.
   if (!tokens.refresh_token) {
     try {
-      let query = supabase
+      // Find ANY existing refresh token for this Google account, regardless of business_id.
+      // A refresh token is tied to the Google account and OAuth client, not our internal business_id.
+      const { data: existingTokens } = await supabase
         .from('tokens')
         .select('refresh_token')
-        .eq('user_email', finalUserEmail);
+        .eq('user_email', finalUserEmail)
+        .not('refresh_token', 'is', null)
+        .limit(1);
 
-      if (businessId) {
-        query = query.eq('business_id', businessId);
-      } else {
-        query = query.is('business_id', null);
-      }
-
-      const { data: existingToken } = await query.maybeSingle();
-
-      if (existingToken?.refresh_token) {
+      if (existingTokens && existingTokens.length > 0 && existingTokens[0].refresh_token) {
         console.log('[saveTokens] Preserving existing refresh token for', finalUserEmail);
-        tokens.refresh_token = existingToken.refresh_token;
+        tokens.refresh_token = existingTokens[0].refresh_token;
       }
     } catch (fetchError) {
       console.warn('Error fetching existing refresh token:', fetchError);

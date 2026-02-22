@@ -64,7 +64,7 @@ export function getCookieOptions(options?: {
 
 
   // Secure flag: true in production (HTTPS), false in dev (HTTP)
-  const secure: boolean = isProduction;
+  const secure: boolean = isProduction ?? false;
 
   // SameSite: MUST be 'none' for OAuth redirects from Google
   // OAuth redirects from accounts.google.com to your domain are cross-site requests
@@ -93,6 +93,10 @@ export function getCookieOptions(options?: {
 
   if (options?.maxAge !== undefined) {
     cookieOptions.maxAge = options.maxAge;
+    // CRITICAL: Always set expires if maxAge is set, to ensure browser persists it reliably
+    if (options?.expires === undefined) {
+      cookieOptions.expires = new Date(Date.now() + options.maxAge * 1000);
+    }
   }
 
   if (options?.expires !== undefined) {

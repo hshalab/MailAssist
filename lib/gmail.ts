@@ -38,15 +38,17 @@ export function getAuthUrl(state?: string, forceConsent: boolean = false): strin
     'https://www.googleapis.com/auth/userinfo.profile', // Added for name
   ];
 
-  return oauth2Client.generateAuthUrl({
+  const authOptions: any = {
     access_type: 'offline',
     scope: scopes,
-    // CRITICAL FIX: Always force consent to ensure we get a refresh token
-    // This prevents tokens from expiring permanently after 1 hour
-    prompt: 'consent',
+    // Use select_account by default so users can easily switch accounts
+    // Only force consent when explicitly requested, to prevent hitting the 50 refresh token limit per user
+    prompt: forceConsent ? 'consent' : 'select_account',
     state: state,
     include_granted_scopes: true // Merge with existing scopes
-  });
+  };
+
+  return oauth2Client.generateAuthUrl(authOptions);
 }
 
 /**

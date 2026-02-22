@@ -253,9 +253,11 @@ export async function POST(req: NextRequest) {
     const { getCookieOptions, getClientCookieOptions } = await import('@/lib/cookie-config')
 
     // If rememberMe is true, use 90 days; otherwise use 7 days for cookie expiry
-    const cookieOptions = rememberMe
-      ? { maxAge: 90 * 24 * 60 * 60 } // 90 days
-      : { maxAge: 7 * 24 * 60 * 60 } // 7 days
+    const maxAgeSeconds = rememberMe ? 90 * 24 * 60 * 60 : 7 * 24 * 60 * 60;
+    const cookieOptions = {
+      maxAge: maxAgeSeconds,
+      expires: new Date(Date.now() + maxAgeSeconds * 1000)
+    };
 
     // Set session token
     cookieStore.set('session_token', sessionToken, getCookieOptions({
