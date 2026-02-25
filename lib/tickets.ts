@@ -81,25 +81,55 @@ export async function getTicketByThreadId(
 ): Promise<Ticket | null> {
   if (!supabase) return null;
 
+  // CRITICAL FIX: Do NOT use .maybeSingle() here.
+  // If duplicates already exist in the DB, maybeSingle() returns an error
+  // (PGRST116: "more than one row"), causing this function to return null,
+  // which then triggers the creation of YET ANOTHER duplicate — exponential growth.
+  // Instead, use a normal array query with .limit(1) and pick the first result.
+
   let query = supabase
     .from('tickets')
     .select('*')
     .eq('thread_id', threadId)
 
   if (userEmail) {
+    // First try exact match on user_email (most common case)
     query = query.eq('user_email', userEmail)
   }
 
-  const { data, error } = await query.limit(1).maybeSingle()
+  // Order by created_at ascending to always return the OLDEST (canonical) ticket
+  const { data, error } = await query.order('created_at', { ascending: true }).limit(1)
 
   if (error) {
     console.error('Error fetching ticket by thread_id:', error);
     return null;
   }
 
-  if (!data) return null;
+  if (data && data.length > 0) return mapRowToTicket(data[0]);
 
-  return mapRowToTicket(data);
+  // FALLBACK: If no exact match found and we have a userEmail,
+  // also check for zombie tickets (user_email IS NULL) for this thread
+  if (userEmail) {
+    const { data: zombieData, error: zombieError } = await supabase
+      .from('tickets')
+      .select('*')
+      .eq('thread_id', threadId)
+      .is('user_email', null)
+      .order('created_at', { ascending: true })
+      .limit(1)
+
+    if (!zombieError && zombieData && zombieData.length > 0) {
+      console.log(`[Ticket] Found zombie ticket ${zombieData[0].id} for thread ${threadId}, will adopt it`);
+      // Update the zombie ticket with the correct user_email so it won't be orphaned
+      await supabase
+        .from('tickets')
+        .update({ user_email: userEmail, updated_at: new Date().toISOString() })
+        .eq('id', zombieData[0].id);
+      return mapRowToTicket({ ...zombieData[0], user_email: userEmail });
+    }
+  }
+
+  return null;
 }
 
 export async function getOrCreateTicketForThread(
@@ -112,7 +142,7 @@ export async function getOrCreateTicketForThread(
   const userEmail = await getCurrentUserEmail();
   const validUserEmail = seed.ownerEmail || userEmail;
 
-  // 1) Check if ticket already exists
+  // 1) Check if ticket already exists for this thread + user scope
   const existing = await getTicketByThreadId(threadId, validUserEmail);
   if (existing) {
     return existing;
@@ -137,8 +167,10 @@ export async function getOrCreateTicketForThread(
     owner_email: seed.ownerEmail || userEmail, // Use specific owner email if available, else default to user
   };
 
-  if (userEmail) {
-    payload.user_email = userEmail;
+  // CRITICAL: Always set user_email using the resolved valid email (ownerEmail fallback)
+  // to prevent creating zombie tickets with null user_email
+  if (validUserEmail) {
+    payload.user_email = validUserEmail;
   }
 
   const { data, error } = await supabase
@@ -148,6 +180,12 @@ export async function getOrCreateTicketForThread(
     .maybeSingle();
 
   if (error) {
+    // RACE CONDITION GUARD: If a unique constraint violation occurs (23505),
+    // another concurrent request already created this ticket. Just fetch it.
+    if (error.code === '23505') {
+      console.log(`[Ticket] Unique constraint hit for thread ${threadId}, fetching existing ticket`);
+      return getTicketByThreadId(threadId, validUserEmail);
+    }
     console.error('Error creating ticket:', error);
     console.error('Ticket payload:', payload);
     return null;

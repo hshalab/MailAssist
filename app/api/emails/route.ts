@@ -255,10 +255,22 @@ export async function GET(request: NextRequest) {
         if (recentEmails.length === 0) {
           console.log('[EMAILS] Smart Sync: no emails newer than 7 days in top 10, skipping ticket creation');
         } else {
-          console.log(`[EMAILS] Smart Sync: processing ${recentEmails.length} emails newer than ${SMART_SYNC_MAX_AGE_DAYS} days`);
+          // CRITICAL FIX: Deduplicate by threadId BEFORE running in parallel.
+          // Without this, two emails from the same thread would both pass the existence
+          // check simultaneously and BOTH create a ticket (race condition).
+          const latestByThread = new Map<string, any>();
+          recentEmails.forEach((email: any) => {
+            const threadId = email.threadId || email.id;
+            const existing = latestByThread.get(threadId);
+            if (!existing || new Date(email.date) > new Date(existing.date)) {
+              latestByThread.set(threadId, email);
+            }
+          });
+          const uniqueRecentEmails = Array.from(latestByThread.values());
+          console.log(`[EMAILS] Smart Sync: processing ${uniqueRecentEmails.length} unique threads (from ${recentEmails.length} emails) newer than ${SMART_SYNC_MAX_AGE_DAYS} days`);
 
           // Process in parallel for speed
-          await Promise.all(recentEmails.map(async (email: any) => {
+          await Promise.all(uniqueRecentEmails.map(async (email: any) => {
             // If we already found a department name, the ticket definitely exists and is classified
             // If not, it might be missing OR just unclassified.
             // ensureTicketForEmail is safe to call (idempotent-ish) - it checks existence first.

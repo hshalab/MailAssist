@@ -763,13 +763,19 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         const data = await response.json()
         if (data.ticket) {
           setTickets(prev => {
-            const exists = prev.find(t => t.id === ticketId)
-            if (exists) {
+            const existsById = prev.find(t => t.id === ticketId)
+            if (existsById) {
               return prev.map(t => t.id === ticketId ? data.ticket : t)
-            } else {
-              // Prepend new ticket
-              return [data.ticket, ...prev]
             }
+            // DEDUP GUARD: Also check if we already have a ticket for this thread
+            // This prevents duplicates when multiple accounts sync the same thread
+            const existsByThread = prev.find(t => t.threadId === data.ticket.threadId)
+            if (existsByThread) {
+              console.log(`[fetchSingleTicket] Thread ${data.ticket.threadId} already in state as ${existsByThread.id}, skipping add of ${ticketId}`)
+              return prev
+            }
+            // Prepend new ticket
+            return [data.ticket, ...prev]
           })
           // Also update selected if needed
           setSelectedTicket(prev => prev?.id === ticketId ? data.ticket : prev)
@@ -989,7 +995,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           }
         }
       } else {
-        setTickets(prev => [...prev, ...list])
+        setTickets(prev => {
+          // Robust deduplication: prevent React state from containing duplicate keys
+          const existingIds = new Set(prev.map(t => t.id));
+          const newItems = list.filter((item: Ticket) => !existingIds.has(item.id));
+          return [...prev, ...newItems];
+        })
         // We generally don't cache pagination results deeply to avoid memory bloat
         // unless we want to support "Show More" persistence across tabs?
         // for now, just caching page 1 is enough for "instant switch" feel
@@ -1296,9 +1307,22 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           table: 'tickets',
         },
         (payload) => {
-          console.log('[Realtime] New ticket created:', payload.new)
+          const newRow = payload.new as any
+          console.log('[Realtime] New ticket created:', newRow.id)
+
+          // DEDUP GUARD: If we already have a ticket for this thread_id, skip it.
+          // This prevents the UI from showing duplicates when multiple INSERT events
+          // fire for the same thread (e.g., race conditions between sync and webhook).
+          const existsInState = ticketsRef.current.some(
+            t => t.id === newRow.id || t.threadId === newRow.thread_id
+          )
+          if (existsInState) {
+            console.log('[Realtime] Skipping INSERT — ticket or thread already in state:', newRow.id)
+            return
+          }
+
           // Refresh tickets to get the new one with all joined data
-          fetchSingleTicket(payload.new.id)
+          fetchSingleTicket(newRow.id)
         }
       )
       .on(
@@ -3482,11 +3506,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                 <div className="flex items-center gap-1.5 px-0.5 pb-1">
                   <button
                     onClick={() => setTagsFilter(tagsFilter === "spam" ? "all" : "spam")}
-                    className={`flex items-center gap-1 h-6 px-2 rounded-md text-xs border transition-colors ${
-                      tagsFilter === "spam"
-                        ? "bg-yellow-100 border-yellow-400 text-yellow-800 dark:bg-yellow-900/40 dark:border-yellow-600 dark:text-yellow-300"
-                        : "border-dashed border-muted-foreground/40 text-muted-foreground hover:border-yellow-400 hover:text-yellow-700"
-                    }`}
+                    className={`flex items-center gap-1 h-6 px-2 rounded-md text-xs border transition-colors ${tagsFilter === "spam"
+                      ? "bg-yellow-100 border-yellow-400 text-yellow-800 dark:bg-yellow-900/40 dark:border-yellow-600 dark:text-yellow-300"
+                      : "border-dashed border-muted-foreground/40 text-muted-foreground hover:border-yellow-400 hover:text-yellow-700"
+                      }`}
                   >
                     <span>⚠</span>
                     <span>Spam</span>

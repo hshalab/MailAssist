@@ -414,7 +414,7 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
               from: email.from,
               to: email.to,
               date: email.date,
-              ownerEmail: emailForAutoClassify || userEmail || undefined, // CRITICAL FIX: Pass owner email for correct scoping (email.ownerEmail is undefined)
+              ownerEmail: email.ownerEmail || emailForAutoClassify || undefined, // CRITICAL FIX: Use the specific account that fetched this email
             },
             isFromAgent,
             email.body // Pass email body for AI classification
