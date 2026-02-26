@@ -1018,31 +1018,31 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
                 <SelectTrigger className="bg-slate-800/50 border-slate-700 focus:border-primary text-white h-11 rounded-xl transition-all">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-slate-900 border-slate-800 rounded-xl">
-                  <SelectItem value="admin">
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-purple-400" />
-                      <div>
-                        <div className="font-semibold">Admin</div>
-                        <div className="text-xs text-slate-400">Full system access</div>
+                <SelectContent className="bg-slate-900 border-slate-800 rounded-xl text-slate-100">
+                  <SelectItem value="admin" className="group rounded-lg py-2 data-[highlighted]:bg-primary data-[highlighted]:text-white">
+                    <div className="flex items-center gap-2.5">
+                      <Shield className="h-4 w-4 text-purple-400 group-data-[highlighted]:text-white" />
+                      <div className="leading-tight">
+                        <div className="font-semibold text-slate-100 group-data-[highlighted]:text-white">Admin</div>
+                        <div className="text-xs text-slate-300 group-data-[highlighted]:text-white/90">Full system access</div>
                       </div>
                     </div>
                   </SelectItem>
-                  <SelectItem value="manager">
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-blue-400" />
-                      <div>
-                        <div className="font-semibold">Manager</div>
-                        <div className="text-xs text-slate-400">Can invite and manage team</div>
+                  <SelectItem value="manager" className="group rounded-lg py-2 data-[highlighted]:bg-primary data-[highlighted]:text-white">
+                    <div className="flex items-center gap-2.5">
+                      <Shield className="h-4 w-4 text-blue-400 group-data-[highlighted]:text-white" />
+                      <div className="leading-tight">
+                        <div className="font-semibold text-slate-100 group-data-[highlighted]:text-white">Manager</div>
+                        <div className="text-xs text-slate-300 group-data-[highlighted]:text-white/90">Can invite and manage team</div>
                       </div>
                     </div>
                   </SelectItem>
-                  <SelectItem value="agent">
-                    <div className="flex items-center gap-2">
-                      <User className="h-4 w-4 text-green-400" />
-                      <div>
-                        <div className="font-semibold">Agent</div>
-                        <div className="text-xs text-slate-400">Standard access</div>
+                  <SelectItem value="agent" className="group rounded-lg py-2 data-[highlighted]:bg-primary data-[highlighted]:text-white">
+                    <div className="flex items-center gap-2.5">
+                      <User className="h-4 w-4 text-green-400 group-data-[highlighted]:text-white" />
+                      <div className="leading-tight">
+                        <div className="font-semibold text-slate-100 group-data-[highlighted]:text-white">Agent</div>
+                        <div className="text-xs text-slate-300 group-data-[highlighted]:text-white/90">Standard access</div>
                       </div>
                     </div>
                   </SelectItem>
