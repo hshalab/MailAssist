@@ -93,6 +93,12 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
   const [memberToDelete, setMemberToDelete] = useState<TeamMember | null>(null)
   const [deletingMember, setDeletingMember] = useState(false)
 
+  // Edit role dialog
+  const [editRoleDialogOpen, setEditRoleDialogOpen] = useState(false)
+  const [memberToEditRole, setMemberToEditRole] = useState<TeamMember | null>(null)
+  const [newRole, setNewRole] = useState<"admin" | "manager" | "agent">("agent")
+  const [updatingRole, setUpdatingRole] = useState(false)
+
   // State to hold fresh user data from API
   const [freshUserData, setFreshUserData] = useState<{ businessId?: string | null; role?: string } | null>(null)
 
@@ -411,6 +417,45 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
     }
   }
 
+  const handleEditRole = async (member: TeamMember) => {
+    setMemberToEditRole(member)
+    setNewRole(member.role)
+    setEditRoleDialogOpen(true)
+  }
+
+  const confirmRoleChange = async () => {
+    if (!memberToEditRole) return
+
+    setUpdatingRole(true)
+    setError(null)
+
+    try {
+      const response = await fetch(`/api/users/${memberToEditRole.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: newRole }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        setError(data.error || "Failed to update user role")
+        return
+      }
+
+      setSuccess(`Successfully updated ${memberToEditRole.name}'s role to ${newRole}`)
+      setEditRoleDialogOpen(false)
+      setMemberToEditRole(null)
+
+      // Reload team data to reflect the changes
+      await loadTeamData()
+    } catch (err) {
+      setError("An unexpected error occurred")
+      console.error("Error updating user role:", err)
+    } finally {
+      setUpdatingRole(false)
+    }
+  }
+
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case "admin":
@@ -682,10 +727,10 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl flex items-center justify-center border border-slate-700/50 relative overflow-hidden flex-shrink-0">
-                          <User className="h-5 w-5 text-slate-400 group-hover:text-primary transition-colors" />
+                          <User className="h-5 w-5 text-slate-400 group-hover:text-slate-100 transition-colors" />
                         </div>
                         <div className="min-w-0">
-                          <h4 className="text-sm font-bold text-white group-hover:text-primary transition-colors truncate pr-2">{member.name}</h4>
+                          <h4 className="text-sm font-bold text-white group-hover:text-slate-100 transition-colors truncate pr-2">{member.name}</h4>
                           <p className="text-slate-400 text-xs font-medium truncate">{member.email}</p>
                         </div>
                       </div>
@@ -708,6 +753,15 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
                             onClick={() => handleEditDepartments(member)}
                           >
                             Edit Access
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs rounded-lg text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                            onClick={() => handleEditRole(member)}
+                          >
+                            <Shield className="w-3 h-3 mr-1" />
+                            Role
                           </Button>
                           <Button
                             variant="ghost"
@@ -788,7 +842,7 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
               <span className="text-xs font-bold uppercase tracking-widest">Access Control</span>
             </div>
             <p className="text-slate-400 text-xs leading-relaxed">
-              Role permissions are scoped to specific modules. Only Managers and Admins can invite net members.
+              Role permissions are scoped to specific modules. Only Managers and Admins can invite new members.
             </p>
           </div>
         </div>
@@ -934,6 +988,114 @@ export default function TeamManagementView({ currentUser }: TeamManagementViewPr
                 <>
                   <Trash2 className="mr-2 h-4 w-4" />
                   Remove Member
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Role Dialog */}
+      <Dialog open={editRoleDialogOpen} onOpenChange={setEditRoleDialogOpen}>
+        <DialogContent className="bg-slate-950 border-slate-800 rounded-2xl max-w-md">
+          <DialogHeader className="space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="h-12 w-12 rounded-full bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                <Shield className="h-6 w-6 text-blue-400" />
+              </div>
+              <div className="flex-1 pt-1">
+                <DialogTitle className="text-xl font-semibold text-white mb-2">Change User Role</DialogTitle>
+                <DialogDescription className="text-sm text-slate-400">
+                  Update the role for <span className="font-semibold text-white">{memberToEditRole?.name}</span>
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-3">
+              <Label htmlFor="role-select" className="text-slate-300 ml-1">Select New Role</Label>
+              <Select value={newRole} onValueChange={(value: any) => setNewRole(value)}>
+                <SelectTrigger className="bg-slate-800/50 border-slate-700 focus:border-primary text-white h-11 rounded-xl transition-all">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-slate-900 border-slate-800 rounded-xl">
+                  <SelectItem value="admin">
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-4 w-4 text-purple-400" />
+                      <div>
+                        <div className="font-semibold">Admin</div>
+                        <div className="text-xs text-slate-400">Full system access</div>
+                      </div>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="manager">
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-4 w-4 text-blue-400" />
+                      <div>
+                        <div className="font-semibold">Manager</div>
+                        <div className="text-xs text-slate-400">Can invite and manage team</div>
+                      </div>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="agent">
+                    <div className="flex items-center gap-2">
+                      <User className="h-4 w-4 text-green-400" />
+                      <div>
+                        <div className="font-semibold">Agent</div>
+                        <div className="text-xs text-slate-400">Standard access</div>
+                      </div>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Role descriptions */}
+            <Alert className="bg-blue-500/5 border-blue-500/10">
+              <Shield className="h-4 w-4 text-blue-400" />
+              <AlertDescription className="text-sm text-slate-300 ml-2">
+                {effectiveRole === 'manager' && (
+                  <span className="text-amber-400 font-medium">Note: As a manager, you cannot promote users to admin role.</span>
+                )}
+                {effectiveRole === 'admin' && (
+                  <span>Admins have full control. Managers can invite members and manage tickets. Agents have standard access.</span>
+                )}
+              </AlertDescription>
+            </Alert>
+
+            {error && (
+              <Alert className="bg-red-500/10 border-red-500/20">
+                <XCircle className="h-4 w-4 text-red-400" />
+                <AlertDescription className="text-sm text-red-300 ml-2">{error}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+          <DialogFooter className="flex flex-col gap-3 sm:flex-row sm:justify-end sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEditRoleDialogOpen(false)
+                setError(null)
+              }}
+              disabled={updatingRole}
+              className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 border-slate-700 text-white rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmRoleChange}
+              disabled={updatingRole || newRole === memberToEditRole?.role}
+              className="w-full sm:w-auto bg-primary hover:bg-primary/90 rounded-xl"
+            >
+              {updatingRole ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                <>
+                  <Shield className="mr-2 h-4 w-4" />
+                  Update Role
                 </>
               )}
             </Button>

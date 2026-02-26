@@ -37,6 +37,11 @@ export interface UpdateUserInput {
   isActive?: boolean;
 }
 
+export interface UpdateUserContext {
+  businessId?: string | null;
+  userEmail?: string | null;
+}
+
 /**
  * Get current user from session
  */
@@ -161,14 +166,10 @@ export async function createUser(input: CreateUserInput): Promise<User | null> {
  */
 export async function updateUser(
   userId: string,
-  input: UpdateUserInput
+  input: UpdateUserInput,
+  context?: UpdateUserContext
 ): Promise<User | null> {
   if (!supabase) return null;
-
-  const sharedGmailEmail = await getSessionUserEmail();
-  if (!sharedGmailEmail) {
-    throw new Error('No shared Gmail account found');
-  }
 
   const updates: any = {};
   if (input.name !== undefined) updates.name = input.name;
@@ -176,11 +177,24 @@ export async function updateUser(
   if (input.role !== undefined) updates.role = input.role;
   if (input.isActive !== undefined) updates.is_active = input.isActive;
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('users')
     .update(updates)
-    .eq('id', userId)
-    .eq('user_email', sharedGmailEmail) // Ensure user belongs to this account
+    .eq('id', userId);
+
+  if (context?.businessId) {
+    query = query.eq('business_id', context.businessId);
+  } else if (context?.userEmail) {
+    query = query.eq('user_email', context.userEmail);
+  } else {
+    const sharedGmailEmail = await getSessionUserEmail();
+    if (!sharedGmailEmail) {
+      throw new Error('No account scope found for user update');
+    }
+    query = query.eq('user_email', sharedGmailEmail);
+  }
+
+  const { data, error } = await query
     .select('*')
     .maybeSingle();
 

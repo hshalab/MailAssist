@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserById, updateUser, deleteUser, UserRole } from '@/lib/users';
+import { getUserById, updateUser, deleteUser, getAllUsers } from '@/lib/users';
 import { requirePermission, getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { getCurrentUserIdFromRequest as getUserId } from '@/lib/session';
 
@@ -96,14 +96,50 @@ export async function PATCH(
     const isSelf = userId === currentUserId;
     const isUpdatingRoleOrActive = role !== undefined || isActive !== undefined;
 
+    // Get current user's details to check their role
+    const currentUser = await getUserById(currentUserId);
+    if (!currentUser) {
+      return NextResponse.json(
+        { error: 'Current user not found' },
+        { status: 404 }
+      );
+    }
+
+    // Get target user's current role
+    const targetUser = await getUserById(userId);
+    if (!targetUser) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      );
+    }
+
     if (isUpdatingRoleOrActive || (!isSelf && name === undefined && email === undefined)) {
-      // Changing role or active status requires admin
-      const { allowed } = await requirePermission(request, 'admin');
+      // Role/status changes require admin OR manager (with restrictions)
+      const { allowed } = await requirePermission(request, ['admin', 'manager']);
       if (!allowed) {
         return NextResponse.json(
-          { error: 'Admin access required to update role or status' },
+          { error: 'Admin or Manager access required to update role or status' },
           { status: 403 }
         );
+      }
+
+      // Managers can only change roles between agent and manager (not admin)
+      if (currentUser.role === 'manager' && role !== undefined) {
+        // Manager cannot promote anyone to admin
+        if (role === 'admin') {
+          return NextResponse.json(
+            { error: 'Only admins can promote users to admin role' },
+            { status: 403 }
+          );
+        }
+        // Manager cannot demote existing admins
+        if (targetUser.role === 'admin') {
+          return NextResponse.json(
+            { error: 'Only admins can change admin roles' },
+            { status: 403 }
+          );
+        }
       }
     }
 
@@ -115,13 +151,29 @@ export async function PATCH(
       );
     }
 
+    // If trying to change role FROM admin, ensure at least one other active admin exists
+    if (targetUser.role === 'admin' && role && role !== 'admin') {
+      const allUsers = await getAllUsers(currentUser.businessId ?? null, currentUser.userEmail ?? null);
+      const activeAdmins = allUsers.filter(u => u.isActive && u.role === 'admin' && u.id !== userId);
+      
+      if (activeAdmins.length === 0) {
+        return NextResponse.json(
+          { error: 'Cannot change role: At least one admin must remain in the organization' },
+          { status: 400 }
+        );
+      }
+    }
+
     const updateData: any = {};
     if (name !== undefined) updateData.name = name;
     if (email !== undefined) updateData.email = email;
     if (role !== undefined) updateData.role = role;
     if (isActive !== undefined) updateData.isActive = isActive;
 
-    const user = await updateUser(userId, updateData);
+    const user = await updateUser(userId, updateData, {
+      businessId: currentUser.businessId ?? null,
+      userEmail: currentUser.userEmail ?? null,
+    });
     if (!user) {
       return NextResponse.json(
         { error: 'Failed to update user' },
