@@ -134,8 +134,8 @@ const sortTicketsByOrder = (tickets: Ticket[], order: 'asc' | 'desc'): Ticket[] 
 }
 
 export default function TicketsView({ currentUserId, currentUserRole, globalSearchTerm, onClearGlobalSearch, refreshKey, initialTicketId, ticketNavKey }: TicketsViewProps) {
-  // Cache for instant switching between Active/Closed
-  const ticketCache = useRef<{ active: Ticket[], closed: Ticket[] }>({ active: [], closed: [] })
+  // Cache for instant switching between tabs
+  const ticketCache = useRef<{ open: Ticket[], assigned: Ticket[], unassigned: Ticket[], closed: Ticket[] }>({ open: [], assigned: [], unassigned: [], closed: [] })
 
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [users, setUsers] = useState<User[]>([])
@@ -184,6 +184,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // Keep in sync on every render — written in the render body (not useEffect) so
   // it updates synchronously before any async work that reads it runs.
   selectedTicketIdRef.current = selectedTicket?.id ?? null
+
+  // Robust Optimistic State Overlay: ensures fetchTickets doesn't overwrite
+  // optimistic UI states with stale DB data before webhooks process updates
+  const optimisticTicketsRef = useRef<Record<string, { data: Partial<Ticket>, expiresAt: number }>>({})
 
   // Ghost Ticket Suppression
   // Stores IDs of tickets we've just closed, to FORCE hide them from "Open" lists
@@ -242,15 +246,28 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [sortOrder, currentUserId])
 
-  // Clear global search when changing tabs manually (but NOT when auto-switching due to search)
+  // Clear global search when changing tabs manually
   const handleTabChange = (value: string) => {
+    const prevTab = activeTab
     const nextTab = value as typeof activeTab
     setActiveTab(nextTab)
 
-    // When switching between Active <-> Closed, try to show cached tickets instantly
-    // so the user doesn't see a "blank" state while the network request runs.
-    const cacheKey = nextTab === "closed" ? "closed" : "active"
+    const isPrevActive = prevTab !== 'closed'
+    const isNextActive = nextTab !== 'closed'
+
+    // When switching between Active tabs (open/assigned/unassigned), do NOT overwrite
+    // the tickets array with the cache. The React tickets array already contains all
+    // active tickets AND any fresh optimistic updates that aren't in the cache yet.
+    if (isPrevActive && isNextActive) {
+      return
+    }
+
+    const cacheKey = nextTab as keyof typeof ticketCache.current
     const cached = ticketCache.current[cacheKey]
+
+    // If we are switching TO the Closed tab (or FROM it), ONLY wipe the tickets
+    // array and show the full-screen spinner if we literally have NO cached data for it.
+    // Otherwise, let fetchTickets handle replacing the list silently.
     if (
       cached &&
       cached.length > 0 &&
@@ -260,11 +277,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       departmentFilter === "all" &&
       tagsFilter === "all"
     ) {
+      // We have cache! We can instantly show it.
       setTickets(cached)
+      setLoading(false)
+    } else {
+      // No cache available. We must establish a loading state.
+      // If we are moving between active tabs, we actually don't want to clear the screen!
+      // But we already early-returned above for active->active.
+      // So this is Active->Closed or Closed->Active with NO cache.
+      setLoading(true)
     }
-
-    // Only clear if we are NOT currently searching (or if we want to clear search on tab switch)
-    // User requested: keep global search when changing tabs, so we intentionally do nothing here.
   }
 
   // Filters
@@ -641,6 +663,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     const finalDeptId = targetDepartmentId === "unclassified" || !targetDepartmentId ? null : targetDepartmentId
     console.log(`[DepartmentUpdate] Updating ticket ${selectedTicket.id} to department:`, finalDeptId)
 
+    // Suppress polling and realtime updates while the DB commits to prevent stale data flashing
+    suppressRealtimeFetchUntil.current = Date.now() + 15000
+
     setUpdatingDepartment(true)
     try {
       const response = await fetch(`/api/tickets/${selectedTicket.id}/department`, {
@@ -832,12 +857,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       // Use forceTab if provided (for prefetching), otherwise use activeTab
       const effectiveTab = forceTab || activeTab
       let initialCachedData: Ticket[] | null = null
-      const targetMode = effectiveTab === 'closed' ? 'closed' : 'active'
 
-      // OPTIMIZATION: Always check cache first for instant feedback, especially for 'closed' tab
+      // Ensure targetMode is one of the strictly typed keys
+      let targetMode: keyof typeof ticketCache.current = 'open';
+      if (effectiveTab === 'assigned') targetMode = 'assigned';
+      if (effectiveTab === 'unassigned') targetMode = 'unassigned';
+      if (effectiveTab === 'closed') targetMode = 'closed';
+
+      // OPTIMIZATION: Always check cache first for instant feedback
       if (pageNum === 1 && !activeSearchQuery && statusFilter === 'all' && assigneeFilter === 'all' && departmentFilter === 'all' && tagsFilter === 'all') {
-        // If we have ANY cached data for the target mode, use it immediately
-        if (ticketCache.current[targetMode].length > 0) {
+        // If we have ANY cached data for the specific target mode, use it immediately
+        if (ticketCache.current[targetMode] && ticketCache.current[targetMode].length > 0) {
           console.log(`[Tickets] Instant load from cache for ${targetMode}`)
           initialCachedData = ticketCache.current[targetMode]
         }
@@ -848,13 +878,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       if (shouldUseCache) {
         setTickets(sortTicketsByOrder(initialCachedData!, effectiveSort))
-        // If we used cache, we treat this fetch as silent from UI perspective
-        // But we don't overwrite the 'silent' param because we want to know if it was *intended* to be silent?
-        // Actually, we should just not set loading(true).
+        // If we used cache, we treat this fetch as semi-silent: we don't show the big spinner
+        setLoading(false)
       }
 
+      // Only show the big blocking spinner if we are NOT using cache and we don't currently have any tickets
+      // This prevents the screen from clearing when switching tabs where tickets exist but aren't strictly cached
       if (!silent && !isLoadMore && !shouldUseCache && !activeSearchQuery) {
-        setLoading(true)
+        setLoading(tickets.length === 0)
         setLoadingMore(false) // Fix race condition: ensure load-more state is cleared on full refresh
       }
       if (isLoadMore) setLoadingMore(true)
@@ -977,21 +1008,39 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         })
       }
 
-      const list = data.tickets || []
+      const now = Date.now()
+      const list = (data.tickets || []).map((t: Ticket) => {
+        const opt = optimisticTicketsRef.current[t.id]
+        if (opt && now < opt.expiresAt) {
+          return { ...t, ...opt.data }
+        }
+        return t
+      })
 
       if (pageNum === 1) {
         // Only update displayed tickets if this is NOT a prefetch (forceTab)
         // Prefetches should only update the cache, not the displayed tickets
         if (!forceTab) {
+          // Note: when fetching active tabs, the server returns open, pending, on_hold.
+          // The component's client-side filter (filteredTickets) uses isTicketVisibleInTab
+          // to hide the ones that don't belong in the current sub-tab.
+          // By giving the raw list to setTickets, we are filling React state
+          // but the UI will filter correctly.
           setTickets(sortTicketsByOrder(list, effectiveSort))
         }
-        // Update cache
-        const cacheKey = effectiveTab === 'closed' ? 'closed' : 'active'
+        // Update cache: save the filtered output so tab switching doesn't flash the wrong tickets
+        let cacheKey: keyof typeof ticketCache.current = 'open';
+        if (effectiveTab === 'assigned') cacheKey = 'assigned';
+        if (effectiveTab === 'unassigned') cacheKey = 'unassigned';
+        if (effectiveTab === 'closed') cacheKey = 'closed';
+
         // Only update cache if we are not searching/filtering
         if (!activeSearchQuery && statusFilter === 'all' && assigneeFilter === 'all') {
-          ticketCache.current[cacheKey] = list
+          // For active tabs, only cache the subset of tickets that actually belong in this tab
+          const cacheList = list.filter((t: Ticket) => isTicketVisibleInTab(t, effectiveTab, currentUserId))
+          ticketCache.current[cacheKey] = cacheList
           if (forceTab) {
-            console.log(`[Tickets] Prefetched and cached ${list.length} ${cacheKey} tickets`)
+            console.log(`[Tickets] Prefetched and cached ${cacheList.length} ${cacheKey} tickets`)
           }
         }
       } else {
@@ -1855,6 +1904,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       // Clear previous state immediately to avoid stale data
       setThreadMessages([])
       setNotes([])
+      setSendingReply(false)
+      setSendingAction(null)
+      isSendingReplyRef.current = false
 
       fetchThread()
       fetchNotes()
@@ -1871,6 +1923,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       setTypingUsers([]) // Clear when no ticket selected
       setConversationSummary("")
       setSummaryExpanded(false)
+      setSendingReply(false)
+      setSendingAction(null)
+      isSendingReplyRef.current = false
     }
   }, [selectedTicket?.id]) // Only re-fetch when the actual ticket changes, not when its status updates
 
@@ -2061,6 +2116,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
     }
 
+    // Suppress polling and realtime updates while the DB commits to prevent stale data flashing
+    suppressRealtimeFetchUntil.current = Date.now() + 15000
+
     // Optimistic update
     const targetTicket = tickets.find(t => t.id === ticketId)
     if (!targetTicket) return
@@ -2185,6 +2243,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     const targetTicketId = ticketId || selectedTicket?.id
     if (!targetTicketId) return
 
+    // Suppress polling and realtime updates while the DB commits to prevent stale data flashing
+    suppressRealtimeFetchUntil.current = Date.now() + 15000
+
     // Optimistic update
     const targetTicket = tickets.find(t => t.id === targetTicketId)
     if (!targetTicket) return
@@ -2303,6 +2364,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     if (previousStatus === status) return
 
+    // Suppress polling and realtime updates while the DB commits to prevent stale data flashing
+    suppressRealtimeFetchUntil.current = Date.now() + 15000
+
     // OPTIMISTIC UPDATE FOR CLOSE (Parity with Send & Close)
     if (status === 'closed') {
       try {
@@ -2313,6 +2377,20 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         // 1. Update state immediately (Close it in the list)
         const closedTicketState = { ...selectedTicket, status: 'closed' as const }
         setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
+
+        // Update optimistic overlay mapping for any incoming server fetches
+        optimisticTicketsRef.current[targetTicketId] = {
+          data: { status: 'closed' },
+          expiresAt: Date.now() + 20000
+        }
+
+        // Update caches to make tab-switching purely optimistic
+        const targetModes = ['open', 'assigned', 'unassigned', 'closed'] as const
+        targetModes.forEach(mode => {
+          ticketCache.current[mode] = ticketCache.current[mode].map(t =>
+            t.id === targetTicketId ? closedTicketState : t
+          )
+        })
 
         // SUPPRESS GHOST REAPPEARANCE from realtime/polling before server confirms close.
         // This ref is checked by BOTH the ticket_updates realtime INSERT handler AND the
@@ -2459,6 +2537,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         return
       }
     }
+
+    // Suppress polling and realtime updates while the DB commits to prevent stale data flashing
+    suppressRealtimeFetchUntil.current = Date.now() + 15000
 
     try {
       setBulkUpdating(true)
@@ -2919,6 +3000,20 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       setTickets(prev => prev.map(t => t.id === targetTicketId ? closedTicketState : t))
 
+      // Update optimistic overlay mapping
+      optimisticTicketsRef.current[targetTicketId] = {
+        data: { status: 'closed', assigneeUserId: currentUserId || selectedTicket.assigneeUserId },
+        expiresAt: Date.now() + 20000
+      }
+
+      // Update caches to prevent stale flashes on tab switch
+      const targetModes = ['open', 'assigned', 'unassigned', 'closed'] as const
+      targetModes.forEach(mode => {
+        ticketCache.current[mode] = ticketCache.current[mode].map(t =>
+          t.id === targetTicketId ? closedTicketState : t
+        )
+      })
+
       // Update badge counts instantly for Send & Close
       setTicketCounts(prev => {
         const isAssigned = !!selectedTicket.assigneeUserId
@@ -2984,6 +3079,20 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
       setTickets(prev => prev.map(t => t.id === targetTicketId ? pendingTicketState : t))
 
+      // Update optimistic overlay mapping
+      optimisticTicketsRef.current[targetTicketId] = {
+        data: { status: 'pending', assigneeUserId: currentUserId || selectedTicket.assigneeUserId },
+        expiresAt: Date.now() + 20000
+      }
+
+      // Update caches to prevent stale flashes on tab switch
+      const targetModes = ['open', 'assigned', 'unassigned', 'closed'] as const
+      targetModes.forEach(mode => {
+        ticketCache.current[mode] = ticketCache.current[mode].map(t =>
+          t.id === targetTicketId ? pendingTicketState : t
+        )
+      })
+
       // Update badge counts instantly — don't wait for the next fetchTicketCounts()
       // call (which only happens on the 5-second poll) since that's what causes the
       // 5-second delay before the tab numbers update after clicking Send.
@@ -2994,6 +3103,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           assigned: prev.assigned + 1,
         }))
       }
+
+      // SUPPRESS REALTIME FETCH FOR PLAIN SEND
+      // We set status to 'pending' above. The real-time listener will fire shortly
+      // because the thread replied-to timestamp updates. This prevents it from
+      // wiping our optimistic 'pending'/'assigned' states before the server finishes.
+      suppressRealtimeFetchUntil.current = Date.now() + 15000
 
       // NOTE: We intentionally do NOT add to temporarilyHiddenIds here.
       // The optimistic status/assignee update above is enough to move the ticket
@@ -3127,9 +3242,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           setTickets(prev => prev.map(t => t.id === targetTicketId ? { ...t, status: 'open' } : t))
         }
       } finally {
-        setSendingReply(false)
-        setSendingAction(null)
-        isSendingReplyRef.current = false
+        if (selectedTicketIdRef.current === targetTicketId) {
+          setSendingReply(false)
+          setSendingAction(null)
+          isSendingReplyRef.current = false
+        }
       }
     }
 
@@ -3558,8 +3675,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                   <button
                     onClick={() => setTagsFilter(tagsFilter === "spam" ? "all" : "spam")}
                     className={`flex items-center gap-1 h-6 px-2 rounded-md text-xs border transition-colors ${tagsFilter === "spam"
-                        ? "bg-yellow-100 border-yellow-400 text-yellow-800 dark:bg-yellow-900/40 dark:border-yellow-600 dark:text-yellow-300"
-                        : "border-dashed border-muted-foreground/40 text-muted-foreground hover:border-yellow-400 hover:text-yellow-700"
+                      ? "bg-yellow-100 border-yellow-400 text-yellow-800 dark:bg-yellow-900/40 dark:border-yellow-600 dark:text-yellow-300"
+                      : "border-dashed border-muted-foreground/40 text-muted-foreground hover:border-yellow-400 hover:text-yellow-700"
                       }`}
                   >
                     <span>⚠</span>
@@ -3907,8 +4024,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             )}
 
             <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 w-full">
-              {/* Show skeleton only when loading AND we have no tickets to display (initial load) */}
-              {(loading && tickets.length === 0) ? (
+              {/* Show skeleton when loading OR when we're searching subsequent pages for tickets that match the current tab/filters */}
+              {(loading && tickets.length === 0) || (hasMore && !filteredTickets.some(t => isTicketVisibleInTab(t, activeTab, currentUserId, assigneeFilter))) ? (
                 <div className="p-2 space-y-2">
                   {/* Skeleton loading cards to show tickets are loading */}
                   {[1, 2, 3, 4, 5].map((i) => (

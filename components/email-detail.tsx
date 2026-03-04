@@ -286,6 +286,9 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           setDraftId(null)
           setCopied(false)
           setGenerating(false)
+          setSending(false)
+          setSendingAction(null)
+          setSendSuccess(false)
           setError(null)
           setConversationSummary("")
           setSummaryExpanded(false)
@@ -772,15 +775,15 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         const message = err instanceof Error ? err.message : "Failed to send reply"
         setError(message)
         setSendSuccess(false)
-        
+
         // Remove optimistic message on error
         setThreadMessages(prev => prev.filter(msg => msg.id !== newMessage.id))
-        
+
         // Restore draft on error
         setDraftText(textValue)
         setDraftHtml(htmlValue)
         setShowDraft(true)
-        
+
         toast({
           title: "Couldn't send reply",
           description: message,

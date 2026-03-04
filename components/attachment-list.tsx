@@ -119,12 +119,14 @@ export function AttachmentList({
                     }
                 }
 
-                // Create blob and download
-                const blob = new Blob(chunks, { type: att.mimeType })
+                // Create blob and download - use application/octet-stream as fallback if mimeType is undefined
+                const validMimeType = att.mimeType || 'application/octet-stream'
+                // Ensure chunks are treated as BlobPart[] to prevent TypeScript / runtime constructor issues
+                const blob = new Blob(chunks as BlobPart[], { type: validMimeType })
                 const url = URL.createObjectURL(blob)
                 const link = document.createElement('a')
                 link.href = url
-                link.download = att.filename
+                link.download = att.filename || 'download'
                 document.body.appendChild(link)
                 link.click()
                 document.body.removeChild(link)

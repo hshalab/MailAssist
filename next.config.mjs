@@ -12,6 +12,7 @@ const nextConfig = {
   turbopack: {
     resolveAlias: {},
   },
+  output: "standalone",
 }
 
 export default nextConfig
