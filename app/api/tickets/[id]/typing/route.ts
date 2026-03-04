@@ -11,20 +11,8 @@ import { validateBusinessSession } from '@/lib/session';
 // In-memory store for typing indicators (in production, use Redis or database)
 const typingStatus = new Map<string, Map<string, number>>(); // ticketId -> userId -> timestamp
 
-// Clean up old typing indicators (older than 5 seconds)
-setInterval(() => {
-  const now = Date.now()
-  typingStatus.forEach((users, ticketId) => {
-    users.forEach((timestamp, userId) => {
-      if (now - timestamp > 5000) {
-        users.delete(userId)
-      }
-    })
-    if (users.size === 0) {
-      typingStatus.delete(ticketId)
-    }
-  })
-}, 2000)
+// NOTE: In production serverless environments, setInterval at the top level is unreliable.
+// Typing indicators are now primarily handled via Supabase Broadcast.
 
 type RouteContext =
   | { params: { id: string } }

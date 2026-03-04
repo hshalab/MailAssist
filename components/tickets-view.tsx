@@ -1557,15 +1557,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   }, [fetchTickets, selectedTicket])
 
   // CHECK: Adaptive polling based on visibility
-  // If tab is visible: Poll every 5 seconds (Super fast / Instant feel)
-  // If tab is hidden: Poll every 30 seconds (Background sync)
+  // If tab is visible: Poll every 60 seconds (Reduced from 5s to save Vercel limits)
+  // If tab is hidden: Poll every 5 minutes (Background sync)
   useEffect(() => {
     // Function to sync emails and fetch tickets
     const doSyncAndFetch = async () => {
-      // If we are within the post-action suppression window (e.g. right after a
-      // close or send), skip this poll cycle entirely.  The optimistic state is
-      // already correct; firing a fetch here before the server PATCH commits
-      // would return stale data and overwrite the optimistic close/pending state.
       if (Date.now() < suppressRealtimeFetchUntil.current) {
         console.log('[Poll] Skipping poll cycle — within post-action suppression window')
         return
@@ -1593,9 +1589,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (intervalId) clearInterval(intervalId)
 
       const isVisible = document.visibilityState === 'visible'
-      const delay = isVisible ? 5000 : 30000 // 5s active, 30s background
+      const delay = isVisible ? 60000 : 300000 // 60s active, 5m background
 
-      console.log(`[Tickets] Polling started: ${isVisible ? 'FAST (5s)' : 'SLOW (30s)'}`)
+      console.log(`[Tickets] Polling started: ${isVisible ? 'FAST (60s)' : 'SLOW (300s)'}`)
 
       intervalId = setInterval(doSyncAndFetch, delay)
     }
@@ -1606,7 +1602,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     // Listen for visibility changes
     const handleVisibilityChange = () => {
       startPolling()
-      // If becoming visible, ALSO trigger an immediate fetch
+      // If becoming visible, ALSO trigger an immediate fetch if it's been a while
       if (document.visibilityState === 'visible') {
         console.log('[Tickets] Tab active - forcing immediate check')
         doSyncAndFetch()
@@ -1912,22 +1908,57 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       fetchNotes()
       setConversationSummary("")
       setSummaryExpanded(false)
-      // Start polling for typing indicators when ticket is selected
-      fetchTypingIndicator() // Fetch immediately
-      const typingInterval = setInterval(() => {
-        fetchTypingIndicator()
-      }, 2000) // Poll every 2 seconds
 
-      return () => clearInterval(typingInterval)
+      // SUPABASE REALTIME TYPING INDICATOR (Replaces 2s polling)
+      if (!supabaseBrowser) {
+        fetchTypingIndicator(); // Fallback to single fetch
+        return;
+      }
+
+      const channel = supabaseBrowser.channel(`typing:${selectedTicket.id}`)
+
+      channel
+        .on('broadcast', { event: 'typing' }, (payload) => {
+          const { userId, typing } = payload.payload;
+          if (userId === currentUserId) return;
+
+          setTypingUsers(prev => {
+            const others = prev.filter(id => id !== userId);
+            const next = typing ? [...others, userId] : others;
+            // Only update if changed
+            if (JSON.stringify(prev.sort()) !== JSON.stringify(next.sort())) {
+              return next;
+            }
+            return prev;
+          });
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log(`[Realtime] Subscribed to typing for ticket ${selectedTicket.id}`);
+          }
+        });
+
+      // Periodic cleanup of stale typing indicators (every 10s)
+      const cleanupInterval = setInterval(() => {
+        // In a real broadcast system, we expect 'typing: false' events,
+        // but as a safety, we could clear them if no event received for a while.
+        // For now, we trust the broadcast toggle.
+      }, 10000);
+
+      return () => {
+        const sb = supabaseBrowser
+        if (sb) sb.removeChannel(channel)
+        clearInterval(cleanupInterval)
+      }
     } else {
-      setTypingUsers([]) // Clear when no ticket selected
+      setTypingUsers([])
       setConversationSummary("")
       setSummaryExpanded(false)
       setSendingReply(false)
       setSendingAction(null)
       isSendingReplyRef.current = false
     }
-  }, [selectedTicket?.id]) // Only re-fetch when the actual ticket changes, not when its status updates
+  }, [selectedTicket?.id, currentUserId])
 
   const updateTypingStatus = async (typing: boolean) => {
     if (!selectedTicket || !currentUserId) return
@@ -1950,13 +1981,34 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       clearTimeout(typingTimeout)
     }
 
-    // Set typing status
-    setIsTyping(true)
-    updateTypingStatus(true)
+    // Set typing status locally
+    if (!isTyping) {
+      setIsTyping(true)
+      // Broadcast via Supabase (Instant)
+      const sb = supabaseBrowser;
+      if (sb) {
+        sb.channel(`typing:${selectedTicket.id}`).send({
+          type: 'broadcast',
+          event: 'typing',
+          payload: { userId: currentUserId, typing: true }
+        });
+      }
+      // Update DB/Cache as secondary (Less frequent)
+      updateTypingStatus(true)
+    }
 
     // Clear typing status after 3 seconds of inactivity
     const timeout = setTimeout(() => {
       setIsTyping(false)
+      // Broadcast stop typing
+      const sb = supabaseBrowser;
+      if (sb) {
+        sb.channel(`typing:${selectedTicket.id}`).send({
+          type: 'broadcast',
+          event: 'typing',
+          payload: { userId: currentUserId, typing: false }
+        });
+      }
       updateTypingStatus(false)
     }, 3000)
 

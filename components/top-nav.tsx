@@ -12,6 +12,7 @@ import { useEffect, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useToast } from "@/components/ui/use-toast"
+import { supabaseBrowser } from "@/lib/supabase-client"
 
 interface UserProfile {
   name?: string
@@ -116,9 +117,39 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
 
   useEffect(() => {
     fetchNotifications()
-    const interval = setInterval(() => fetchNotifications({ showToast: true }), 10000)
-    return () => clearInterval(interval)
-  }, [])
+
+    if (!currentUser?.id || !supabaseBrowser) {
+      // Fallback: poll every 2 minutes if realtime is unavailable
+      const interval = setInterval(() => fetchNotifications({ showToast: true }), 120000)
+      return () => clearInterval(interval)
+    }
+
+    // SUPABASE REALTIME NOTIFICATIONS (Replaces 10s polling)
+    console.log('[Notifications] Setting up realtime subscription for user:', currentUser.id)
+    const channel = supabaseBrowser
+      .channel(`notifications:${currentUser.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${currentUser.id}`
+        },
+        (payload) => {
+          console.log('[Notifications] New notification received via Realtime:', payload.new)
+          // Refetch to get formatted notification with all fields
+          fetchNotifications({ showToast: true })
+        }
+      )
+      .subscribe()
+
+    return () => {
+      console.log('[Notifications] Cleaning up realtime subscription')
+      const sb = supabaseBrowser
+      if (sb) sb.removeChannel(channel)
+    }
+  }, [currentUser?.id])
 
   const markRead = async (id: string) => {
     try {
