@@ -242,7 +242,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
         emailListRefresh()
         setLastRefreshTime(Date.now())
       }
-    }, 5000) // 5 seconds
+    }, 60000) // 1 minute (Reduced from 5s to minimize Vercel load)
 
     return () => clearInterval(interval)
   }, [emailListRefresh, listLoading, selectedEmail])

@@ -44,10 +44,19 @@ const isTicketVisibleInTab = (
   currentUserId: string | undefined | null,
   assigneeFilter: string = "all"
 ) => {
-  if (assigneeFilter !== "all" && tab !== 'closed') return ticket.status !== 'closed'
+  const isClosed = ticket.status === 'closed'
+  if (tab === 'closed') return isClosed
+  if (isClosed) return false
+
+  // For active tabs (Open, Assigned, Unassigned)
   if (tab === 'assigned') return ticket.assigneeUserId === currentUserId
   if (tab === 'unassigned') return !ticket.assigneeUserId
-  return true // 'open' shows all, 'closed' is handled by filteredTickets logic
+
+  // In 'open' tab, if a specific assignee filter is set, honor it
+  if (assigneeFilter === 'me') return ticket.assigneeUserId === currentUserId
+  if (assigneeFilter === 'unassigned') return !ticket.assigneeUserId
+
+  return true
 }
 
 interface Ticket {
@@ -126,10 +135,11 @@ const sortTicketsByOrder = (tickets: Ticket[], order: 'asc' | 'desc'): Ticket[] 
   return [...tickets].sort((a, b) => {
     const aDate = a.lastCustomerReplyAt || a.updatedAt || a.createdAt
     const bDate = b.lastCustomerReplyAt || b.updatedAt || b.createdAt
-    const aTime = aDate ? new Date(aDate).getTime() : 0
-    const bTime = bDate ? new Date(bDate).getTime() : 0
-    if (aTime === bTime) return 0
-    return aTime > bTime ? factor * 1 : factor * -1
+    if (!aDate && !bDate) return 0
+    if (!aDate) return -1 * factor
+    if (!bDate) return 1 * factor
+    if (aDate === bDate) return 0
+    return aDate > bDate ? factor : -factor
   })
 }
 
@@ -181,9 +191,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // Used as the guard inside fetchThread instead of the closed-over `selectedTicket`
   // state value, which is stale inside async functions defined earlier in the render.
   const selectedTicketIdRef = useRef<string | null>(null)
-  // Keep in sync on every render — written in the render body (not useEffect) so
-  // it updates synchronously before any async work that reads it runs.
   selectedTicketIdRef.current = selectedTicket?.id ?? null
+  ticketsRef.current = tickets
 
   // Robust Optimistic State Overlay: ensures fetchTickets doesn't overwrite
   // optimistic UI states with stale DB data before webhooks process updates
@@ -265,26 +274,31 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     const cacheKey = nextTab as keyof typeof ticketCache.current
     const cached = ticketCache.current[cacheKey]
 
+    // Determine if we already have visible tickets for this tab in the current state
+    const hasVisibleInState = tickets.some(t => isTicketVisibleInTab(t, nextTab, currentUserId, assigneeFilter))
+
     // If we are switching TO the Closed tab (or FROM it), ONLY wipe the tickets
-    // array and show the full-screen spinner if we literally have NO cached data for it.
-    // Otherwise, let fetchTickets handle replacing the list silently.
+    // array and show the full-screen spinner if we literally have NO cached data for it
+    // AND we don't already have relevant tickets in the current state.
     if (
-      cached &&
-      cached.length > 0 &&
-      !activeSearchQuery &&
-      statusFilter === "all" &&
-      assigneeFilter === "all" &&
-      departmentFilter === "all" &&
-      tagsFilter === "all"
+      (cached && cached.length > 0) || hasVisibleInState
     ) {
-      // We have cache! We can instantly show it.
-      setTickets(cached)
+      if (
+        !activeSearchQuery
+      ) {
+        if (cached && cached.length > 0) {
+          // Merge cache into tickets to ensure we have the latest cached set plus any optimistic updates
+          // Optimized merge: O(N) using Set instead of O(N*M)
+          setTickets(prev => {
+            const cachedIds = new Set(cached.map(t => t.id))
+            const combined = [...cached, ...prev.filter(t => !cachedIds.has(t.id))]
+            return sortTicketsByOrder(combined, sortOrder)
+          })
+        }
+      }
       setLoading(false)
     } else {
-      // No cache available. We must establish a loading state.
-      // If we are moving between active tabs, we actually don't want to clear the screen!
-      // But we already early-returned above for active->active.
-      // So this is Active->Closed or Closed->Active with NO cache.
+      // No cache or state available. We must establish a loading state.
       setLoading(true)
     }
   }
@@ -865,7 +879,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (effectiveTab === 'closed') targetMode = 'closed';
 
       // OPTIMIZATION: Always check cache first for instant feedback
-      if (pageNum === 1 && !activeSearchQuery && statusFilter === 'all' && assigneeFilter === 'all' && departmentFilter === 'all' && tagsFilter === 'all') {
+      if (pageNum === 1 && !activeSearchQuery) {
         // If we have ANY cached data for the specific target mode, use it immediately
         if (ticketCache.current[targetMode] && ticketCache.current[targetMode].length > 0) {
           console.log(`[Tickets] Instant load from cache for ${targetMode}`)
@@ -882,10 +896,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         setLoading(false)
       }
 
-      // Only show the big blocking spinner if we are NOT using cache and we don't currently have any tickets
+      // Only show the big blocking spinner if we are NOT using cache and we don't currently have any visible tickets for this tab
       // This prevents the screen from clearing when switching tabs where tickets exist but aren't strictly cached
       if (!silent && !isLoadMore && !shouldUseCache && !activeSearchQuery) {
-        setLoading(tickets.length === 0)
+        const hasVisible = tickets.some(t => isTicketVisibleInTab(t, effectiveTab, currentUserId, assigneeFilter))
+        setLoading(!hasVisible)
         setLoadingMore(false) // Fix race condition: ensure load-more state is cleared on full refresh
       }
       if (isLoadMore) setLoadingMore(true)
@@ -1018,16 +1033,30 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       })
 
       if (pageNum === 1) {
-        // Only update displayed tickets if this is NOT a prefetch (forceTab)
-        // Prefetches should only update the cache, not the displayed tickets
-        if (!forceTab) {
-          // Note: when fetching active tabs, the server returns open, pending, on_hold.
-          // The component's client-side filter (filteredTickets) uses isTicketVisibleInTab
-          // to hide the ones that don't belong in the current sub-tab.
-          // By giving the raw list to setTickets, we are filling React state
-          // but the UI will filter correctly.
-          setTickets(sortTicketsByOrder(list, effectiveSort))
-        }
+        // Handle data update for page 1
+        // We now MERGE and DEDUPLICATE instead of replacing, ensuring that prefetched
+        // tabs (like "closed") populate the state in the background without clearing
+        // the current view.
+        setTickets(prev => {
+          // 1. Filter out old versions of the tickets we just fetched
+          const incomingIds = new Set(list.map((t: Ticket) => t.id))
+          const existingFiltered = prev.filter(t => !incomingIds.has(t.id))
+
+          // 2. Combine and sort
+          // If this is a specific tab fetch (forceTab or activeTab), we prioritize incoming.
+          // If the user already has 1000 tickets loaded and we just fetched page 1 (200),
+          // we should keep the ones beyond 200 too?
+          // Actually, for page 1 we usually want to "freshen" the top, but for instant
+          // switch we need to keep the other tabs' data.
+          let combined = [...list, ...existingFiltered]
+
+          // 3. Limit total size to prevent memory leaks, but keep it generous
+          if (combined.length > 1000) {
+            combined = combined.slice(0, 1000)
+          }
+
+          return sortTicketsByOrder(combined, effectiveSort)
+        })
         // Update cache: save the filtered output so tab switching doesn't flash the wrong tickets
         let cacheKey: keyof typeof ticketCache.current = 'open';
         if (effectiveTab === 'assigned') cacheKey = 'assigned';
@@ -1085,7 +1114,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (!silent) setLoading(false)
       setLoadingMore(false)
     }
-  }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery, activeTab === 'closed' ? 'closed' : 'active', statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, fetchTicketCounts, sortOrder])
+  }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery, activeTab, statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, fetchTicketCounts, sortOrder])
 
   // IntersectionObserver for infinite scroll (load more on scroll)
   useEffect(() => {
@@ -1190,19 +1219,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       return
     }
 
-    const prefetchTimer = setTimeout(() => {
-      console.log("[Tickets] Prefetching closed tickets for fast Closed tab")
-      fetchTickets({
-        silent: true,
-        pageNum: 1,
-        limit: 200,
-        forceTab: "closed",
-      }).catch(() => {
-        // Ignore errors in prefetch - it's just a background optimization
-      })
-    }, 200)
+    fetchTickets({
+      silent: true,
+      pageNum: 1,
+      limit: 200,
+      forceTab: "closed",
+    }).catch(() => {
+      // Ignore errors in prefetch - it's just a background optimization
+    })
 
-    return () => clearTimeout(prefetchTimer)
+
   }, [activeSearchQuery, statusFilter, assigneeFilter, departmentFilter, tagsFilter, fetchTickets])
 
   useEffect(() => {
@@ -1288,30 +1314,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
 
-  // Prefetch closed tickets for instant switching
-  useEffect(() => {
-    // Wait for initial load
-    if (loading) return
-
-    // Check if we already have closed tickets
-    if (ticketCache.current.closed.length > 0) return
-
-    // Prefetch closed tickets (Page 1)
-    console.log('[Tickets] Prefetching closed tickets for instant switch...')
-    const timestamp = Date.now()
-    const limit = 200
-    const url = `/api/tickets?_=${timestamp}&status=closed&page=1&limit=${limit}`
-
-    fetch(url, { priority: 'low' } as any)
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data && data.tickets) {
-          console.log(`[Tickets] Prefetched ${data.tickets.length} closed tickets`)
-          ticketCache.current.closed = data.tickets
-        }
-      })
-      .catch(err => console.error('Failed to prefetch closed tickets', err))
-  }, [loading]) // Run once after initial loading finishes
 
   // Supabase Realtime subscription for instant ticket updates
   // This enables new tickets to appear automatically when emails arrive
@@ -3387,25 +3389,50 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     // For standard tabs, apply lightweight client-side filtering so UI filters
     // always feel responsive even before server responses settle.
+    const now = new Date()
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const weekAgo = new Date(now)
+    weekAgo.setDate(now.getDate() - 7)
+    const monthAgo = new Date(now)
+    monthAgo.setMonth(now.getMonth() - 1)
+
+    // Resolve custom dates once
+    const customStart = customDateStart ? new Date(customDateStart) : null
+    if (customStart) customStart.setHours(0, 0, 0, 0)
+    const customEnd = customDateEnd ? new Date(customDateEnd) : null
+    if (customEnd) customEnd.setHours(23, 59, 59, 999)
+
     return tickets.filter(t => {
+      // 1. Tab Filtering (Critical for correctness)
       if (activeTab === 'closed') {
         if (t.status !== 'closed') return false
       } else {
         if (temporarilyHiddenIds.has(t.id)) return false
         if (t.status === 'closed') return false
+
+        // Sub-tab logic for Active
+        if (activeTab === 'assigned' && t.assigneeUserId !== currentUserId) return false
+        if (activeTab === 'unassigned' && t.assigneeUserId) return false
       }
 
+      // 2. Dropdown Status Filter (Overrides Tab)
       if (statusFilter !== 'all' && t.status !== statusFilter) return false
+
+      // 3. Priority
       if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false
 
+      // 4. Assignee
       if (assigneeFilter !== 'all') {
         if (assigneeFilter === 'unassigned') {
           if (t.assigneeUserId) return false
+        } else if (assigneeFilter === 'me') {
+          if (t.assigneeUserId !== currentUserId) return false
         } else if (t.assigneeUserId !== assigneeFilter) {
           return false
         }
       }
 
+      // 5. Department
       if (departmentFilter !== 'all') {
         if (departmentFilter === 'unclassified') {
           if (t.departmentId) return false
@@ -3414,6 +3441,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         }
       }
 
+      // 6. Tags
       if (tagsFilter !== 'all') {
         const requestedTags = tagsFilter.split(',').map(tag => tag.trim()).filter(Boolean)
         if (requestedTags.length > 0 && !requestedTags.some(tag => t.tags.includes(tag))) {
@@ -3421,40 +3449,32 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         }
       }
 
+      // 7. Unread
       if (showUnreadOnly) {
         if (!t.lastCustomerReplyAt) return false
         const lastSeen = lastViewedMap[t.id]
-        if (lastSeen && !(new Date(t.lastCustomerReplyAt) > new Date(lastSeen))) return false
+        if (lastSeen) {
+          const replyTime = new Date(t.lastCustomerReplyAt).getTime()
+          const seenTime = new Date(lastSeen).getTime()
+          if (replyTime <= seenTime) return false
+        }
       }
 
+      // 8. Date
       if (dateFilter !== 'all') {
         const dateValue = t.lastCustomerReplyAt || t.updatedAt || t.createdAt
         if (!dateValue) return false
-        const ticketDate = new Date(dateValue)
-        const now = new Date()
+        const ticketTime = new Date(dateValue).getTime()
 
         if (dateFilter === 'today') {
-          const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-          if (ticketDate < startOfDay) return false
+          if (ticketTime < startOfDay.getTime()) return false
         } else if (dateFilter === 'week') {
-          const weekAgo = new Date(now)
-          weekAgo.setDate(now.getDate() - 7)
-          if (ticketDate < weekAgo) return false
+          if (ticketTime < weekAgo.getTime()) return false
         } else if (dateFilter === 'month') {
-          const monthAgo = new Date(now)
-          monthAgo.setMonth(now.getMonth() - 1)
-          if (ticketDate < monthAgo) return false
+          if (ticketTime < monthAgo.getTime()) return false
         } else if (dateFilter === 'custom') {
-          if (customDateStart) {
-            const start = new Date(customDateStart)
-            start.setHours(0, 0, 0, 0)
-            if (ticketDate < start) return false
-          }
-          if (customDateEnd) {
-            const end = new Date(customDateEnd)
-            end.setHours(23, 59, 59, 999)
-            if (ticketDate > end) return false
-          }
+          if (customStart && ticketTime < customStart.getTime()) return false
+          if (customEnd && ticketTime > customEnd.getTime()) return false
         }
       }
 
@@ -3477,14 +3497,15 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     customDateEnd,
   ])
 
-  // Trigger fetch when filters change (fetchTickets dependency changes)
   useEffect(() => {
-    // Prevent double-fetch on mount/initial render by checking mount ref?
-    // Actually, we want to fetch on mount.
-    // But we want to know WHICH dependency changed.
-    console.log('[Tickets] Filter/Dependency change detected, triggering fetch. ActiveTab:', activeTab)
-    fetchTickets({ pageNum: 1 })
-  }, [fetchTickets])
+    // Determine if we already have visible tickets for this view in the current state
+    // If we do, we can fetch silently in the background to avoid flickering or spinners.
+    // Use ticketsRef instead of tickets state to avoid dependency loop
+    const hasVisible = ticketsRef.current.some(t => isTicketVisibleInTab(t, activeTab, currentUserId, assigneeFilter))
+
+    console.log(`[Tickets] Filter/Dependency change detected (Tab: ${activeTab}, HasVisible: ${hasVisible}), triggering fetch`)
+    fetchTickets({ pageNum: 1, silent: hasVisible })
+  }, [fetchTickets, activeTab, currentUserId, assigneeFilter])
 
 
 
@@ -4185,13 +4206,12 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                       <div key={ticket.id} style={{ display: isVisible ? 'block' : 'none' }}>
                         <Card
                           data-ticket-id={ticket.id}
-                          className={`m-2 cursor-pointer relative transition-all duration-300 ease-out animate-in fade-in slide-in-from-left-4 ${isSelected
+                          className={`m-2 cursor-pointer relative transition-all duration-300 ease-out ${isSelected
                             ? "border-primary border-2 bg-muted/30 shadow-lg ring-2 ring-primary/20"
                             : isUnread
                               ? "border-primary/60 bg-primary/5 hover:bg-primary/10 hover:shadow-md hover:border-primary/80"
                               : "border-border/50 hover:bg-muted/50 hover:shadow-md hover:border-border"
                             }`}
-                          style={{ animationDelay: `${index * 30}ms` }}
                           onClick={(e) => {
                             if (isSelectMode) {
                               e.stopPropagation()

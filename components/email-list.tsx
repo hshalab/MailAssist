@@ -311,7 +311,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     const pollInterval = setInterval(() => {
       console.log('Auto-polling for new emails...')
       fetchEmails(limit, false, true)
-    }, 30000) // 30 seconds
+    }, 60000) // 1 minute (Reduced from 30s to minimize Vercel load)
 
     return () => clearInterval(pollInterval)
   }, [limit, selectedEmail])
