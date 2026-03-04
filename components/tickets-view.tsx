@@ -2948,6 +2948,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       // (suppression refs already set at the top of handleSendReply)
 
       // 3. Navigate immediately
+      internalNavigationRef.current = true
       if (nextTicket) {
         console.log('➡️ Optimistically navigating to next ticket:', nextTicket.id)
         setSelectedTicket(nextTicket)
@@ -3000,6 +3001,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       // made the ticket look "closed" for ~10 s even though it was only sent.
 
       // 3. Navigate to the next ticket in the same tab
+      internalNavigationRef.current = true
       if (nextTicket) {
         setSelectedTicket(nextTicket)
       } else {
@@ -3555,11 +3557,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                 <div className="flex items-center gap-1.5 px-0.5 pb-1">
                   <button
                     onClick={() => setTagsFilter(tagsFilter === "spam" ? "all" : "spam")}
-                    className={`flex items-center gap-1 h-6 px-2 rounded-md text-xs border transition-colors ${
-                      tagsFilter === "spam"
+                    className={`flex items-center gap-1 h-6 px-2 rounded-md text-xs border transition-colors ${tagsFilter === "spam"
                         ? "bg-yellow-100 border-yellow-400 text-yellow-800 dark:bg-yellow-900/40 dark:border-yellow-600 dark:text-yellow-300"
                         : "border-dashed border-muted-foreground/40 text-muted-foreground hover:border-yellow-400 hover:text-yellow-700"
-                    }`}
+                      }`}
                   >
                     <span>⚠</span>
                     <span>Spam</span>

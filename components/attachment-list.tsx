@@ -75,7 +75,7 @@ export function AttachmentList({
             onDownload(att)
             return
         }
-        
+
         if (att.downloadUrl) {
             // For data URLs or simple downloads, just trigger immediately
             if (att.downloadUrl.startsWith('data:')) {
@@ -150,7 +150,7 @@ export function AttachmentList({
                     const Icon = getFileIcon(att.mimeType)
                     const isDownloading = downloading[att.id]
                     const progress = downloadProgress[att.id] || 0
-                    
+
                     return (
                         <button
                             key={att.id}
@@ -245,7 +245,7 @@ export function AttachmentList({
                                     )}
                                 </Button>
                             </div>
-                            
+
                             {/* Progress bar */}
                             {isDownloading && (
                                 <Progress value={progress} className="h-1" />
