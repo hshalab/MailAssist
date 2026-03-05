@@ -13,25 +13,26 @@ function stripHtml(html: string): string {
   if (!html) return ''
   // Remove script and style tags completely
   let cleaned = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-                    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
   // Convert common HTML entities to plain text
-  cleaned = cleaned.replace(/&nbsp;/gi, ' ')
-                   .replace(/&amp;/gi, '&')
-                   .replace(/&lt;/gi, '<')
-                   .replace(/&gt;/gi, '>')
-                   .replace(/&quot;/gi, '"')
-                   .replace(/&#39;/gi, "'")
+  cleaned = cleaned.replace(/&nbsp;?/gi, ' ')
+    .replace(/\u00A0/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
   // Convert line breaks to newlines before removing tags
   cleaned = cleaned.replace(/<br\s*\/?>/gi, '\n')
-                   .replace(/<\/p>/gi, '\n\n')
-                   .replace(/<\/div>/gi, '\n')
-                   .replace(/<\/li>/gi, '\n')
-                   .replace(/<li[^>]*>/gi, '• ')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
   // Remove all remaining HTML tags
   cleaned = cleaned.replace(/<[^>]+>/g, '')
   // Normalize whitespace but preserve line breaks
   cleaned = cleaned.replace(/[ \t]+/g, ' ') // Multiple spaces to single
-                   .replace(/\n{3,}/g, '\n\n') // Max 2 consecutive newlines
+    .replace(/\n{3,}/g, '\n\n') // Max 2 consecutive newlines
   return cleaned.trim()
 }
 
@@ -85,7 +86,7 @@ export async function POST(
     // CRITICAL: Always strip HTML tags from plain text body to prevent HTML from leaking through
     // If draftText is provided, clean it (might contain HTML). If only HTML provided, convert it.
     let plainTextBody = draftText ? stripHtml(draftText) : stripHtml(draftHtml || '');
-    
+
     // Ensure plain text body has no HTML tags remaining
     if (plainTextBody && /<[^>]+>/.test(plainTextBody)) {
       plainTextBody = stripHtml(plainTextBody); // Double-check and clean again
@@ -348,7 +349,7 @@ export async function POST(
           let ticket = await ensureTicketForEmail(ticketEmailLike, true); // true = isFromAgent
           if (ticket) {
             ticketId = ticket.id;
-            
+
             // CRITICAL: If ticket is closed, reopen it when agent sends a reply
             // This allows agents to continue conversations on closed tickets
             if (ticket.status === 'closed') {
