@@ -1558,63 +1558,48 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [fetchTickets, selectedTicket])
 
-  // CHECK: Adaptive polling based on visibility
-  // If tab is visible: Poll every 60 seconds (Reduced from 5s to save Vercel limits)
-  // If tab is hidden: Poll every 5 minutes (Background sync)
+  // PUSH-BASED ARCHITECTURE: Supabase Realtime (lines ~1328-1420) handles instant ticket
+  // updates the moment the Gmail webhook fires. This fallback interval is ONLY a safety
+  // net for when the WebSocket connection drops — it no longer hits /api/emails at all.
+  // Active: 2 minutes | Background: 10 minutes
   useEffect(() => {
-    // Function to sync emails and fetch tickets
-    const doSyncAndFetch = async () => {
+    // Lightweight silent re-fetch of ticket list (Supabase only, no Gmail API hit)
+    const doRefreshTickets = async () => {
       if (Date.now() < suppressRealtimeFetchUntil.current) {
-        console.log('[Poll] Skipping poll cycle — within post-action suppression window')
+        console.log('[Poll] Skipping fallback poll — within post-action suppression window')
         return
       }
-
-      try {
-        await fetch('/api/emails?type=inbox&maxResults=5', {
-          cache: 'no-store',
-          headers: { 'Cache-Control': 'no-cache, no-store' }
-        })
-      } catch (err) {
-        // Ignore errors
-      }
-
       await fetchTickets({ silent: true })
     }
 
-    // Run immediately on mount
-    doSyncAndFetch()
+    // Run once on mount to warm the cache
+    doRefreshTickets()
 
     let intervalId: NodeJS.Timeout
 
     const startPolling = () => {
-      // Clear existing interval if any
       if (intervalId) clearInterval(intervalId)
-
       const isVisible = document.visibilityState === 'visible'
-      const delay = isVisible ? 60000 : 300000 // 60s active, 5m background
-
-      console.log(`[Tickets] Polling started: ${isVisible ? 'FAST (60s)' : 'SLOW (300s)'}`)
-
-      intervalId = setInterval(doSyncAndFetch, delay)
+      const delay = isVisible ? 120000 : 600000 // 2m active, 10m background
+      console.log(`[Tickets] Fallback poll started: ${isVisible ? '2m (active)' : '10m (background)'}`)
+      intervalId = setInterval(doRefreshTickets, delay)
     }
 
-    // Start initial polling
     startPolling()
 
-    // Listen for visibility changes
+    // Restart with correct interval when tab visibility changes
     const handleVisibilityChange = () => {
       startPolling()
-      // If becoming visible, ALSO trigger an immediate fetch if it's been a while
       if (document.visibilityState === 'visible') {
-        console.log('[Tickets] Tab active - forcing immediate check')
-        doSyncAndFetch()
+        console.log('[Tickets] Tab became active — running immediate silent refresh')
+        doRefreshTickets()
       }
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
-      console.log('[Tickets] Stopping auto-poll')
+      console.log('[Tickets] Stopping fallback poll')
       clearInterval(intervalId)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }

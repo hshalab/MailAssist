@@ -119,8 +119,8 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
     fetchNotifications()
 
     if (!currentUser?.id || !supabaseBrowser) {
-      // Fallback: poll every 2 minutes if realtime is unavailable
-      const interval = setInterval(() => fetchNotifications({ showToast: true }), 120000)
+      // Fallback: poll every 5 minutes if realtime is unavailable (Realtime handles the real-time case)
+      const interval = setInterval(() => fetchNotifications({ showToast: true }), 300000)
       return () => clearInterval(interval)
     }
 
