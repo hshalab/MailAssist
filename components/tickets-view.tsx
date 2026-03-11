@@ -954,8 +954,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
       // START FETCH
       const ticketsPromise = fetch(url, { cache: "no-store", headers })
-      // Only check sync if page 1
-      const syncCheckPromise = pageNum === 1 ? checkSyncStatus() : Promise.resolve(false)
+      // Only check sync status on an interactive (non-silent) first-page fetch.
+      // Silent polling should not hammer /api/emails/sync.
+      const syncCheckPromise = (!effectiveSilent && pageNum === 1)
+        ? checkSyncStatus()
+        : Promise.resolve(false)
 
       // Also fetch counts if page 1 (refresh counts on navigation/filter change)
       if (pageNum === 1) fetchTicketCounts()
@@ -1012,7 +1015,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         setPage(pageNum)
       }
 
-      if (!silent && !isLoadMore) setLoading(false)
+      // Clear loading on interactive fetches, and also clear it if it was set earlier
+      // but we ended up doing a silent refresh (e.g., initial mount polling).
+      if ((!silent && !isLoadMore) || (pageNum === 1 && loading)) setLoading(false)
       if (isLoadMore) setLoadingMore(false)
 
       const syncRunning = await syncCheckPromise
@@ -1036,7 +1041,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (!silent) setLoading(false)
       setLoadingMore(false)
     }
-  }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery, activeTab === 'closed' ? 'closed' : 'active', statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, fetchTicketCounts, sortOrder])
+  }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery, activeTab === 'closed' ? 'closed' : 'active', statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, fetchTicketCounts, sortOrder, loading])
 
   // IntersectionObserver for infinite scroll (load more on scroll)
   useEffect(() => {
@@ -1170,7 +1175,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
     }
 
-    // Ensure loading state is set before fetch
+    // Ensure we do an initial non-silent fetch so the page can exit the loading state.
     setLoading(true)
 
     // Set navigation timestamp to force fresh data on this page visit
@@ -1183,7 +1188,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     (async () => {
       try {
         // STEP 1: FETCH TICKETS FIRST (Instant UI)
-        // Handled by the filter change effect now
+        await fetchTicketsRef.current?.({ silent: false, pageNum: 1 })
 
         // STEP 2: Load secondary data in parallel (non-blocking)
         // This runs after tickets are visible, so user sees list immediately
@@ -1221,6 +1226,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         }
       } catch (err) {
         console.error('[Tickets] Error loading data:', err)
+        // Ensure we never get stuck in loading state if initialization fails.
+        setLoading(false)
       }
     })()
 
