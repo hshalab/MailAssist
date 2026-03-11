@@ -300,48 +300,21 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     }
   }, [onRefreshReady, handleRefresh])
 
-  // Push-based refresh: listen for new ticket inserts (driven by Gmail webhook)
-  // instead of polling /api/emails on a timer. When the Gmail Pub/Sub webhook fires,
-  // it immediately creates a ticket in Supabase, which triggers this listener and
-  // runs a silent email refresh — giving sub-second inbox updates at zero idle cost.
+  // Auto-poll for new emails every 30 seconds (silent refresh)
+  // PERFORMANCE: Skip polling if user has an email selected (reduces load)
   useEffect(() => {
-    // Only subscribe for inbox views — sent/spam/trash don't need push updates
-    if (viewType !== 'inbox') return
-
-    let channel: any = null
-
-    const setupRealtime = async () => {
-      try {
-        // Dynamic import so we don't break SSR
-        const { supabaseBrowser } = await import('@/lib/supabase-client')
-        if (!supabaseBrowser) return
-
-        channel = supabaseBrowser
-          .channel('email-list-ticket-inserts')
-          .on(
-            'postgres_changes',
-            { event: 'INSERT', schema: 'public', table: 'tickets' },
-            () => {
-              console.log('[EmailList] New ticket detected via Realtime — refreshing inbox silently')
-              fetchEmails(limit, false, true)
-            }
-          )
-          .subscribe()
-      } catch (err) {
-        console.warn('[EmailList] Could not set up Realtime subscription:', err)
-      }
+    // Don't poll if user is viewing an email (reduces unnecessary requests)
+    if (selectedEmail) {
+      return () => { } // Return empty cleanup function to keep dependency array consistent
     }
 
-    setupRealtime()
+    const pollInterval = setInterval(() => {
+      console.log('Auto-polling for new emails...')
+      fetchEmails(limit, false, true)
+    }, 30000) // 30 seconds
 
-    return () => {
-      if (channel) {
-        import('@/lib/supabase-client').then(({ supabaseBrowser }) => {
-          supabaseBrowser?.removeChannel(channel)
-        }).catch(() => { })
-      }
-    }
-  }, [viewType, limit])
+    return () => clearInterval(pollInterval)
+  }, [limit, selectedEmail])
 
   // Initial fetch on mount and when viewType or selectedAccount changes
   useEffect(() => {

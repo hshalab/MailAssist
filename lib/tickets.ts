@@ -808,133 +808,68 @@ export async function getTicketCounts(
   if (!supabase) return { open: 0, assigned: 0, unassigned: 0, closed: 0 };
 
   try {
-    // OPTIMIZED: Use count() queries instead of fetching all rows
-    // This is much faster for large datasets
+    // Use fast DB count queries (no row fetch) to keep the tickets page responsive
+    // even when the dataset grows large.
 
-    const getCount = async (status: string | null, assigneeId: string | 'null' | null) => {
-      let query = supabase!
+    const base = () => {
+      let q = supabase!
         .from('tickets')
-        .select('*', { count: 'exact', head: true }); // head: true means do not return data, only count
+        .select('id', { count: 'exact', head: true });
 
-      // Apply common filters (account, userEmail)
-      if (userEmail) query = query.eq('user_email', userEmail);
-      if (accountFilter) query = query.eq('owner_email', accountFilter);
+      if (userEmail) q = q.eq('user_email', userEmail);
+      if (accountFilter) q = q.eq('owner_email', accountFilter);
 
-      // Apply status
-      if (status) query = query.eq('status', status);
-      else query = query.neq('status', 'closed'); // Default for open/assigned/unassigned
+      // Never count spam in the normal badges (matches list behavior)
+      q = (q as any).not('tags', 'cs', '{spam}');
 
-      // Apply assignee
-      if (assigneeId === 'null') query = query.is('assignee_user_id', null);
-      else if (assigneeId) query = query.eq('assignee_user_id', assigneeId);
+      return q;
+    };
 
-      // Apply role-based visibility if needed (Agents)
-      if (!canViewAll && currentUserId) {
-        // This is complex for count queries with OR conditions in Supabase
-        // Simplified approach: Agents see accurate counts for 'Assigned to Me' and 'Unassigned'
-        // But 'Open' count might be tricky without full query.
-        // For accurate counts, we might need to replicate the complex OR logic
-        // query = query.or(...)
+    // Role-based visibility (mirror `getTickets`):
+    // - Admin/Manager: everything (already handled by base())
+    // - Agent: assigned to them OR unassigned tickets in their departments (or all unassigned if no depts)
+    const applyAgentVisibility = async (q: any) => {
+      if (canViewAll || !currentUserId) return q;
+
+      const { data: userDepts } = await supabase
+        .from('user_departments')
+        .select('department_id')
+        .eq('user_id', currentUserId);
+
+      const deptIds = userDepts?.map((ud: any) => ud.department_id) || [];
+      if (deptIds.length > 0) {
+        return q.or(
+          `assignee_user_id.eq.${currentUserId},and(assignee_user_id.is.null,department_id.in.(${deptIds.join(',')}))`
+        );
       }
 
-      const { count, error } = await query;
+      return q.or(`assignee_user_id.eq.${currentUserId},assignee_user_id.is.null`);
+    };
+
+    const count = async (builder: (q: any) => any) => {
+      let q = base();
+      q = builder(q);
+      q = await applyAgentVisibility(q);
+      const { count, error } = await q;
       if (error) throw error;
       return count || 0;
     };
 
-    // If admin, we can run optimized separate queries
-    // If agent, simpler to run one aggregated query or the complex OR query
-    // For now, let's keep the exact logic for Agents to ensure consistency by running the full query for them
-    // but optimizing for Admins.
+    const [closed, assigned, unassigned, open] = await Promise.all([
+      // Closed tickets
+      count((q) => q.eq('status', 'closed')),
 
-    // Actually, to ensure PERFECT consistency between list and counts, and since we already have 
-    // a highly optimized `getTickets` query logic, let's use `getTickets` but with a flag or minimal select?
-    // Supabase JS doesn't easily support "get count for this complex query" without selecting data.
+      // Assigned-to-me (non-closed)
+      count((q) => q.neq('status', 'closed').eq('assignee_user_id', currentUserId)),
 
-    // FALLBACK for now: Use `getTickets` but select minimal fields?
-    // Or just run getTickets().length as before?
-    // The previous implementation ran `getTickets` without limit.
-    // Since we removed the limit, this fetches ALL tickets. That's slow.
+      // Unassigned (non-closed)
+      count((q) => q.neq('status', 'closed').is('assignee_user_id', null)),
 
-    // IMPLEMENTATION:
-    // We will run 4 specific count queries for the 4 badges.
+      // Open-ish total (non-closed)
+      count((q) => q.neq('status', 'closed')),
+    ]);
 
-    // 1. Closed
-    let closedQuery = supabase
-      .from('tickets')
-      .select('*', { count: 'exact', head: true })
-      .eq('status', 'closed');
-    if (userEmail) closedQuery = closedQuery.eq('user_email', userEmail);
-    if (accountFilter) closedQuery = closedQuery.eq('owner_email', accountFilter);
-    // Role filter (Agents can usually see closed tickets? If not, apply filter)
-    // Assuming agents can see their own closed tickets + unassigned closed tickets?
-    // If permission logic is complex, sticking to getTickets might be safer for correctness 
-    // BUT we must optimize it.
-
-    // Let's stick to the previous implementation for SAFETY/CORRECTNESS first, 
-    // but perform the count on the database if possible.
-    // Since we can't easily replicate the complex OR logic of agent permissions in simple count queries,
-    // and we don't want to maintain duplicate logic...
-
-    // REVERTED CHOICE: Fetching all tickets (even with minimal fields) is essentially what we did.
-    // If we want pagination, we can't fetch all tickets for the list.
-    // But for counts, we DO need the totals.
-    // Let's fetch ONLY `id`, `status`, `assignee_user_id` to minimize data transfer.
-
-    const allTicketsMin = await supabase
-      .from('tickets')
-      .select('status, assignee_user_id, department_id') // Small payload
-      .match(userEmail ? { user_email: userEmail } : {})
-      .match(accountFilter ? { owner_email: accountFilter } : {})
-    // We still need to apply role limits!
-
-    // Apply role-based filtering manually or via query?
-    // Let's use `getTickets` but modify it to select minimal fields? 
-    // `getTickets` hardcodes `select('*')`.
-
-    // FINAL DECISION: Use `getTickets` as before (it's robust), but we accept the cost for COUNTS only.
-    // The `tickets/counts` endpoint is called separately.
-    // We can optimize `getTickets` to accept a "countOnly" implementation later.
-    // For now, just using it as is guarantees correctness.
-
-    // Wait, we need to return the object.
-    const tickets = await getTickets(
-      currentUserId,
-      canViewAll,
-      userEmail,
-      accountFilter,
-      null,
-      'desc',
-      undefined,
-      undefined,
-      undefined,
-      { excludeSpam: true } // Never count spam tickets in normal tab badges
-    );
-
-    let assigned = 0;
-    let unassigned = 0;
-    let open = 0;
-    let closed = 0;
-
-    for (const ticket of tickets) {
-      const isClosed = ticket.status === 'closed';
-      const isUnassigned = ticket.assigneeUserId === null;
-      const isAssignedToMe = ticket.assigneeUserId === currentUserId;
-
-      if (isClosed) {
-        closed++;
-      } else {
-        open++;
-        if (isAssignedToMe) {
-          assigned++;
-        } else if (isUnassigned) {
-          unassigned++;
-        }
-      }
-    }
-
-    return { assigned, unassigned, open, closed };
-    return { assigned, unassigned, open, closed };
+    return { open, assigned, unassigned, closed };
   } catch (err) {
     console.error('Error fetching ticket counts:', err);
     return { open: 0, assigned: 0, unassigned: 0, closed: 0 };

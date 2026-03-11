@@ -99,19 +99,6 @@ export async function GET(request: NextRequest) {
         });
         console.log(`[API] After account filter: ${emails.length} emails`);
       }
-
-      // CRITICAL: Check if we got 0 emails despite having connected accounts
-      // This likely means all tokens are invalid/revoked
-      if (emails.length === 0 && connectedAccounts.length > 0) {
-        console.log('[API] WARNING: 0 emails fetched despite having connected accounts - tokens may be invalid');
-        return NextResponse.json(
-          {
-            error: 'Gmail connection expired. Please reconnect your Gmail account in Settings.',
-            code: 'TOKEN_EXPIRED'
-          },
-          { status: 400 }
-        );
-      }
     } else {
       // No business session - check if user is authenticated at all
       const isAuth = await isAuthenticated();
