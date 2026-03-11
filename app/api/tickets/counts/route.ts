@@ -57,7 +57,8 @@ export async function GET(request: NextRequest) {
             userId,
             canViewAll,
             userEmail,
-            accountFilter
+            accountFilter,
+            businessId
         );
 
         return NextResponse.json({ counts }, {

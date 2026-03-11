@@ -617,8 +617,27 @@ export async function getTickets(
       department:departments(id, name)
     `);
 
-  // Filter by Gmail account (the primary account scoping)
-  if (userEmail) {
+  // Filter by ticket scope:
+  // - Business: tickets may belong to ANY connected mailbox under that business.
+  //   Scoping by a single "current" email is brittle and can return 0 tickets if the
+  //   "current" email changes (e.g., token updated for a different connected account).
+  // - Personal: scope by userEmail as before.
+  if (businessId) {
+    try {
+      const { loadBusinessTokens } = await import('./storage');
+      const connected = await loadBusinessTokens(businessId);
+      const connectedEmails = connected.map(a => a.email).filter(Boolean);
+      if (connectedEmails.length > 0) {
+        query = query.in('user_email', connectedEmails);
+      } else if (userEmail) {
+        // Fallback (should be rare): preserve old behavior if we can't resolve connected accounts.
+        query = query.eq('user_email', userEmail);
+      }
+    } catch (e) {
+      // Safety fallback
+      if (userEmail) query = query.eq('user_email', userEmail);
+    }
+  } else if (userEmail) {
     query = query.eq('user_email', userEmail);
   }
 
@@ -803,7 +822,8 @@ export async function getTicketCounts(
   currentUserId: string | null,
   canViewAll: boolean,
   userEmail: string | null,
-  accountFilter?: string
+  accountFilter?: string,
+  businessId?: string | null
 ): Promise<{ open: number; assigned: number; unassigned: number; closed: number }> {
   if (!supabase) return { open: 0, assigned: 0, unassigned: 0, closed: 0 };
 
@@ -811,12 +831,29 @@ export async function getTicketCounts(
     // Use fast DB count queries (no row fetch) to keep the tickets page responsive
     // even when the dataset grows large.
 
+    // Determine ticket scope for counts (same logic as getTickets)
+    let scopedUserEmails: string[] | null = null;
+    if (businessId) {
+      try {
+        const { loadBusinessTokens } = await import('./storage');
+        const connected = await loadBusinessTokens(businessId);
+        const connectedEmails = connected.map(a => a.email).filter(Boolean);
+        scopedUserEmails = connectedEmails.length > 0 ? connectedEmails : null;
+      } catch {
+        scopedUserEmails = null;
+      }
+    }
+
     const base = () => {
       let q = supabase!
         .from('tickets')
         .select('id', { count: 'exact', head: true });
 
-      if (userEmail) q = q.eq('user_email', userEmail);
+      if (scopedUserEmails && scopedUserEmails.length > 0) {
+        q = q.in('user_email', scopedUserEmails);
+      } else if (userEmail) {
+        q = q.eq('user_email', userEmail);
+      }
       if (accountFilter) q = q.eq('owner_email', accountFilter);
 
       // Never count spam in the normal badges (matches list behavior)
