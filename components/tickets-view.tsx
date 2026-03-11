@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, Search, ShoppingBag, Inbox, RefreshCw, Paperclip, Building2, FileText, Download } from "lucide-react"
+import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, Search, ShoppingBag, Inbox, RefreshCw, Paperclip, Building2, FileText, Download, Undo2 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -357,6 +357,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [notes, setNotes] = useState<TicketNote[]>([])
   const [replyText, setReplyText] = useState("")
   const [replyHtml, setReplyHtml] = useState("")
+  const [rewritingReply, setRewritingReply] = useState(false)
+  const lastReplyBeforeRewriteRef = useRef<{ html: string; text: string } | null>(null)
   const [replyAttachments, setReplyAttachments] = useState<{ id: string; name: string; type: string; size: number; data: string }[]>([])
   const [draftText, setDraftText] = useState("")
   const [draftId, setDraftId] = useState<string | null>(null)
@@ -1116,6 +1118,79 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     // Focus logic would be handled by the editor receiving props update
   }
+
+  // Rewrite-only AI helper for agent-written replies
+  const handleRewriteReply = useCallback(async () => {
+    if (!replyText.trim() || rewritingReply) return
+
+    try {
+      setRewritingReply(true)
+      lastReplyBeforeRewriteRef.current = { html: replyHtml, text: replyText }
+
+      const response = await fetch("/api/compose/rewrite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: replyText,
+          tone: "friendly",
+        }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        const message = data?.error || "Failed to rewrite reply"
+        toast({
+          title: "Rewrite failed",
+          description: message,
+          variant: "destructive",
+        })
+        return
+      }
+
+      const data = await response.json()
+      const rewritten: string = data.rewritten || ""
+      const safe = (rewritten || "").trim()
+      if (!safe) {
+        toast({
+          title: "Rewrite unavailable",
+          description: "The AI did not return any content. Please try again.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Convert plain text into simple paragraphs for the rich text editor
+      const paragraphs = safe.split(/\n{2,}|\r\n\r\n/).map(p => p.trim()).filter(Boolean)
+      const html =
+        paragraphs.length > 0
+          ? paragraphs.map(line => `<p>${line}</p>`).join("")
+          : `<p>${safe}</p>`
+
+      setReplyHtml(html)
+      setReplyText(safe)
+      toast({
+        title: "Reply polished",
+        description: "AI has rewritten your message to be more customer-friendly.",
+      })
+    } catch (err) {
+      console.error("[RewriteReply] Error:", err)
+      toast({
+        title: "Rewrite failed",
+        description: err instanceof Error ? err.message : "Something went wrong while rewriting your reply.",
+        variant: "destructive",
+      })
+    } finally {
+      setRewritingReply(false)
+    }
+  }, [replyText, replyHtml, rewritingReply, toast])
+
+  const handleUndoRewrite = useCallback(() => {
+    const previous = lastReplyBeforeRewriteRef.current
+    if (!previous) return
+    setReplyHtml(previous.html)
+    setReplyText(previous.text)
+    lastReplyBeforeRewriteRef.current = null
+  }, [])
 
   // Listen for account changes to refresh tickets and email list
   // This ensures ALL users (agents, managers, admins) see the changes
@@ -4974,6 +5049,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                             onClick={handleGenerateDraft}
                             disabled={generatingDraft || !threadMessages.length}
                             className="h-7 text-xs"
+                            title="Generate a full suggested reply from the conversation"
                           >
                             {generatingDraft ? (
                               <>
@@ -5039,17 +5115,56 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                           </span>
                         </div>
                       )}
-                      <RichTextEditor
-                        value={replyHtml}
-                        onChange={(html, text) => {
-                          setReplyHtml(html)
-                          setReplyText(text)
-                          handleTyping()
-                        }}
-                        placeholder="Type your reply..."
-                        minHeight="150px"
-                        onAttachments={(files) => setReplyAttachments(files)}
-                      />
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>Reply</span>
+                            {rewritingReply && (
+                              <span className="inline-flex items-center gap-1 text-primary">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                Polishing with AI...
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {lastReplyBeforeRewriteRef.current && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-[11px]"
+                                onClick={handleUndoRewrite}
+                              >
+                                <Undo2 className="w-3 h-3 mr-1" />
+                                Undo AI
+                              </Button>
+                            )}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-[11px] inline-flex items-center gap-1"
+                              onClick={handleRewriteReply}
+                              disabled={!replyText.trim() || rewritingReply || sendingReply || updatingStatus}
+                              title="Polish the text you've typed without adding new information"
+                            >
+                              <Sparkles className="w-3 h-3" />
+                              Polish with AI
+                            </Button>
+                          </div>
+                        </div>
+                        <RichTextEditor
+                          value={replyHtml}
+                          onChange={(html, text) => {
+                            setReplyHtml(html)
+                            setReplyText(text)
+                            handleTyping()
+                          }}
+                          placeholder="Type your reply..."
+                          minHeight="150px"
+                          onAttachments={(files) => setReplyAttachments(files)}
+                        />
+                      </div>
                       {replyAttachments.length > 0 && (
                         <div className="flex flex-wrap gap-2 pt-2">
                           {replyAttachments.map(att => (

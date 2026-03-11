@@ -1133,6 +1133,65 @@ export function getOpenAIApiKey(): string | null {
 }
 
 /**
+ * Lightweight helper: rewrite an agent-provided snippet to be clearer/more customer-friendly
+ * without inventing new facts. This is used for "polish only" flows in the UI.
+ */
+export async function rewriteAgentText(
+  text: string,
+  options?: { tone?: 'friendly' | 'formal' | 'neutral'; language?: string },
+  apiKeyOverride?: string | null
+): Promise<string> {
+  const apiKey = apiKeyOverride || getOpenAIApiKey();
+  if (!apiKey) {
+    throw new Error('OpenAI API key not configured');
+  }
+
+  const safeText = text?.trim();
+  if (!safeText) {
+    throw new Error('Text is required for rewrite');
+  }
+
+  const toneLabel = options?.tone === 'formal'
+    ? 'formal, professional'
+    : options?.tone === 'friendly'
+    ? 'warm, friendly, empathetic'
+    : 'clear, neutral, professional';
+
+  const languageHint = options?.language
+    ? `Write in ${options.language}.`
+    : 'Write in the same language as the original.';
+
+  const prompt = `You are a customer support writing assistant.
+
+Your job is to REWRITE the agent's draft message so it is clearer, more concise, and customer-friendly,
+while keeping ALL factual content and constraints EXACTLY the same.
+
+CRITICAL RULES:
+- Do NOT invent or assume any facts, numbers, dates, tracking details, product statuses, or promises.
+- If the original text says information is missing/unknown (for example: no tracking yet, item out of stock,
+  waiting for supplier, cannot guarantee a date), you MUST preserve that meaning.
+- You may change wording, order, and tone, but you may NOT change what is true.
+- You may soften phrasing and make it more empathetic, but you cannot promise outcomes the agent did not promise.
+- Do not add apologies or compensations that are not present in the original unless the tone clearly allows a simple apology.
+
+TONE:
+- Target tone: ${toneLabel}.
+- Keep the length similar or slightly shorter than the original.
+
+OUTPUT:
+- ${languageHint}
+- Output ONLY the rewritten message, no commentary, no quotes around it.
+
+ORIGINAL MESSAGE:
+"""${safeText}"""
+
+Rewritten message:`;
+
+  // Lower temperature for more predictable, fast rewrites
+  return await callGroqAPI(prompt, apiKey, 0.4);
+}
+
+/**
  * Call AI API (Groq or OpenAI) to generate draft
  */
 async function callGroqAPI(prompt: string, apiKey: string, temperature?: number): Promise<string> {

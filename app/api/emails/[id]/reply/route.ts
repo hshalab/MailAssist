@@ -75,7 +75,9 @@ export async function POST(
 
     const sentDraftText = body?.draftText ?? '';
     const draftText = sentDraftText.trim();
-    const draftHtml = (body?.draftHtml || '').trim();
+    // Normalize non-breaking spaces in HTML to regular spaces so they don't leak through
+    const rawDraftHtml = (body?.draftHtml || '').trim();
+    const draftHtml = rawDraftHtml.replace(/&nbsp;?/gi, ' ').replace(/\u00A0/g, ' ');
     if (!draftText && !draftHtml) {
       return NextResponse.json(
         { error: 'Draft text is required to send a reply' },

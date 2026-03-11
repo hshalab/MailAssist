@@ -55,6 +55,11 @@ export async function POST(request: NextRequest) {
       }
     }
     
+    // Normalize non-breaking spaces in outgoing HTML to regular spaces
+    if (htmlBody) {
+      htmlBody = htmlBody.replace(/&nbsp;?/gi, ' ').replace(/\u00A0/g, ' ');
+    }
+
     // If only HTML is provided, extract plain text
     if (htmlBody && (!plainTextBody || plainTextBody.trim() === '')) {
       plainTextBody = htmlToText(htmlBody);
