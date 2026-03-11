@@ -712,6 +712,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [hasMore, setHasMore] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [ticketCounts, setTicketCounts] = useState({ open: 0, assigned: 0, unassigned: 0, closed: 0 })
+  const autoSwitchedToClosedRef = useRef(false)
 
   // Check if sync is running (tickets being creating)
   const checkSyncStatus = useCallback(async (): Promise<boolean> => {
@@ -750,12 +751,41 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       const res = await fetch(url, { cache: 'no-store', headers })
       if (res.ok) {
         const data = await res.json()
-        setTicketCounts(data.counts || data)
+        const nextCounts = data.counts || data
+        setTicketCounts(nextCounts)
+
+        // UX guard: if there are 0 active tickets but there ARE closed tickets,
+        // auto-switch to Closed once so the page doesn't feel "broken".
+        const hasActive =
+          (nextCounts?.open || 0) > 0 ||
+          (nextCounts?.assigned || 0) > 0 ||
+          (nextCounts?.unassigned || 0) > 0
+        const hasClosed = (nextCounts?.closed || 0) > 0
+        const noFilters =
+          !activeSearchQuery &&
+          statusFilter === 'all' &&
+          assigneeFilter === 'all' &&
+          priorityFilter === 'all' &&
+          departmentFilter === 'all' &&
+          tagsFilter === 'all'
+
+        if (
+          noFilters &&
+          !autoSwitchedToClosedRef.current &&
+          hasClosed &&
+          !hasActive &&
+          ['open', 'assigned', 'unassigned'].includes(activeTab)
+        ) {
+          autoSwitchedToClosedRef.current = true
+          setActiveTab('closed')
+          // Kick an immediate interactive fetch for the Closed tab
+          fetchTicketsRef.current?.({ silent: false, pageNum: 1, forceTab: 'closed' })
+        }
       }
     } catch (e) {
       console.error("Failed to fetch ticket counts", e)
     }
-  }, [selectedAccount, currentUserId])
+  }, [selectedAccount, currentUserId, activeSearchQuery, statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, activeTab])
 
   const fetchSingleTicket = useCallback(async (ticketId: string) => {
     try {
@@ -1518,7 +1548,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // If tab is visible: Poll every 5 seconds (Super fast / Instant feel)
   // If tab is hidden: Poll every 30 seconds (Background sync)
   useEffect(() => {
-    // Function to sync emails and fetch tickets
+    // Function to (optionally) trigger lightweight email sync and fetch tickets.
+    // IMPORTANT: Do not hammer /api/emails every 5s — it can indirectly trigger /api/emails/sync
+    // and cause the page to look like it's "stuck loading".
     const doSyncAndFetch = async () => {
       // If we are within the post-action suppression window (e.g. right after a
       // close or send), skip this poll cycle entirely.  The optimistic state is
@@ -1529,13 +1561,22 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         return
       }
 
-      try {
-        await fetch('/api/emails?type=inbox&maxResults=5', {
-          cache: 'no-store',
-          headers: { 'Cache-Control': 'no-cache, no-store' }
-        })
-      } catch (err) {
-        // Ignore errors
+      // Throttle the lightweight inbox check to at most once per 2 minutes.
+      // The primary goal of this poll is to refresh tickets, not continuously sync Gmail.
+      const now = Date.now()
+      ;(doSyncAndFetch as any).__lastEmailCheckAt = (doSyncAndFetch as any).__lastEmailCheckAt || 0
+      const lastEmailCheckAt = (doSyncAndFetch as any).__lastEmailCheckAt as number
+      const EMAIL_CHECK_TTL = 120_000 // 2 minutes
+      if (now - lastEmailCheckAt > EMAIL_CHECK_TTL) {
+        ;(doSyncAndFetch as any).__lastEmailCheckAt = now
+        try {
+          await fetch('/api/emails?type=inbox&maxResults=5', {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache, no-store' }
+          })
+        } catch {
+          // Ignore errors (non-blocking)
+        }
       }
 
       await fetchTickets({ silent: true })
@@ -1551,9 +1592,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (intervalId) clearInterval(intervalId)
 
       const isVisible = document.visibilityState === 'visible'
-      const delay = isVisible ? 5000 : 30000 // 5s active, 30s background
+      // Poll tickets frequently, but keep it reasonable to avoid UI churn.
+      const delay = isVisible ? 15000 : 60000 // 15s active, 60s background
 
-      console.log(`[Tickets] Polling started: ${isVisible ? 'FAST (5s)' : 'SLOW (30s)'}`)
+      console.log(`[Tickets] Polling started: ${isVisible ? 'FAST (15s)' : 'SLOW (60s)'}`)
 
       intervalId = setInterval(doSyncAndFetch, delay)
     }
