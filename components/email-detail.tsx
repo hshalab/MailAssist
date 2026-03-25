@@ -19,7 +19,7 @@ const toPlainText = (html: string) => {
   tmp.innerHTML = html
   return tmp.textContent || tmp.innerText || ""
 }
-
+// Simple text to HTML converter that wraps paragraphs and converts line breaks
 const textToHtml = (text: string) => {
   if (!text) return ""
   return text
