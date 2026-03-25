@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, Search, ShoppingBag, Inbox, RefreshCw, Paperclip, Building2, FileText, Download, Undo2 } from "lucide-react"
+import { Loader2, User, Mail, Clock, Tag, MessageSquare, Sparkles, X, Plus, ChevronDown, ChevronUp, Edit2, Check, XCircle, MoreVertical, Filter, ChevronRight, ArrowRight, Search, ShoppingBag, Inbox, RefreshCw, Paperclip, Building2, FileText, Download, Undo2 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -364,12 +364,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   const [draftId, setDraftId] = useState<string | null>(null)
   const [showDraft, setShowDraft] = useState(false)
   const [generatingDraft, setGeneratingDraft] = useState(false)
+  const [isForwarding, setIsForwarding] = useState(false)
+  const [forwardTo, setForwardTo] = useState("")
 
   // Clear draft when switching tickets
   useEffect(() => {
     setShowDraft(false)
     setDraftText("")
     setDraftId(null)
+    setIsForwarding(false)
+    setForwardTo("")
   }, [selectedTicket?.id])
   const [sendingReply, setSendingReply] = useState(false)
   const [sendingAction, setSendingAction] = useState<'send' | 'send-close' | null>(null)
@@ -2943,6 +2947,51 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
 
+  const handleForward = () => {
+    if (!threadMessages.length) return
+    const latestMsg = threadMessages[threadMessages.length - 1]
+
+    // Create a "Forwarded message" header similar to Gmail
+    const dateStr = latestMsg.date ? new Date(latestMsg.date).toLocaleString([], {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }) : 'Unknown date'
+    
+    const forwardHeader = `
+<br>
+<br>
+---------- Forwarded message ---------<br>
+From: <b>${latestMsg.from.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</b><br>
+Date: ${dateStr}<br>
+Subject: ${latestMsg.subject}<br>
+To: ${latestMsg.to.replace(/</g, '&lt;').replace(/>/g, '&gt;')}<br>
+<br>
+${latestMsg.body || ""}
+`
+    const plainTextBody = latestMsg.body ? htmlToText(latestMsg.body) : ""
+    const forwardText = `\n\n---------- Forwarded message ---------\nFrom: ${latestMsg.from}\nDate: ${dateStr}\nSubject: ${latestMsg.subject}\nTo: ${latestMsg.to}\n\n${plainTextBody}`
+
+    setReplyHtml(forwardHeader)
+    setReplyText(forwardText)
+    setIsForwarding(true)
+    setShowDraft(false) // If AI draft was open, close it
+    setForwardTo("")
+    
+    // Smooth scroll to editor
+    const editor = document.querySelector('.rdw-editor-main')
+    editor?.scrollIntoView({ behavior: 'smooth' })
+    
+    // Focus after brief delay for rendering
+    setTimeout(() => {
+      const el = document.getElementById('forward-to-input-ticket')
+      el?.focus()
+    }, 100)
+  }
+
   const handleSendReply = async (opts?: { closeTicket?: boolean }) => {
     if (!selectedTicket || !replyHtml.trim() || !threadMessages.length) return
     // Synchronous double-send guard (state-based check is async and insufficient).
@@ -3139,6 +3188,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         // Step 1: Send Email (The slow part)
         // Use the first message ID from thread (the original email) to send reply
         const emailId = threadMessages[0].id
+        const forwardSubject = threadMessages[0]?.subject?.startsWith("Fwd:") ? threadMessages[0].subject : `Fwd: ${threadMessages[0]?.subject || ''}`;
+        
         const response = await fetch(`/api/emails/${emailId}/reply`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3146,7 +3197,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             draftText: contentToSend.text,
             draftHtml: contentToSend.html,
             draftId: contentToSend.draftId || null,
-            attachments: contentToSend.attachments
+            attachments: contentToSend.attachments,
+            to: isForwarding ? forwardTo : undefined,
+            subject: isForwarding ? forwardSubject : undefined,
+            forwardAttachments: isForwarding ? (threadMessages[threadMessages.length - 1]?.attachments?.map(a => ({ id: a.id, filename: a.filename, mimeType: a.mimeType })) || []) : []
           }),
         })
 
@@ -5063,6 +5117,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                               </>
                             )}
                           </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={handleForward}
+                            disabled={generatingDraft}
+                            className="h-7 text-xs"
+                          >
+                            <ArrowRight className="w-3 h-3 mr-1" />
+                            Forward
+                          </Button>
                         </div>
                       </div>
                       {showDraft && draftText && (
@@ -5153,6 +5217,53 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
                             </Button>
                           </div>
                         </div>
+                        {isForwarding && (
+                          <div className="space-y-1.5 px-1 pb-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                            <Label htmlFor="forward-to-input-ticket" className="text-xs font-semibold text-muted-foreground ml-1 uppercase tracking-wider">To</Label>
+                            <div className="relative group/input flex gap-2">
+                              <div className="relative flex-1">
+                                <Input
+                                  id="forward-to-input-ticket"
+                                  placeholder="recipient1@example.com, recipient2@example.com"
+                                  value={forwardTo}
+                                  onChange={(e) => setForwardTo(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && forwardTo.trim()) {
+                                      handleSendReply()
+                                    }
+                                  }}
+                                  className="h-9 text-sm pl-8 pr-10 border-muted focus-visible:ring-primary/20 hover:border-primary/30 transition-all rounded-lg w-full"
+                                />
+                                <Mail className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground group-focus-within/input:text-primary transition-colors" />
+                                {forwardTo && (
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 p-0 hover:bg-transparent"
+                                    onClick={() => setForwardTo("")}
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </Button>
+                                )}
+                              </div>
+                              <Button
+                                onClick={() => handleSendReply()}
+                                disabled={sendingReply || !forwardTo.trim()}
+                                size="sm"
+                                className="h-9 transition-all duration-200 hover:scale-105"
+                              >
+                                {sendingReply ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <>
+                                    <ArrowRight className="w-4 h-4 mr-1" />
+                                    Forward
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                         <RichTextEditor
                           value={replyHtml}
                           onChange={(html, text) => {

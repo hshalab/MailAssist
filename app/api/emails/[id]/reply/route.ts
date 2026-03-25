@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getValidTokens } from '@/lib/token-refresh';
-import { getEmailById, getUserProfile, sendReplyMessage } from '@/lib/gmail';
+import { getEmailById, getUserProfile, sendReplyMessage, getGmailClient } from '@/lib/gmail';
 import { storeSentEmail, loadDrafts, deleteDraft } from '@/lib/storage';
 import { logAIUsage } from '@/lib/analytics';
 import { getCurrentUserIdFromRequest, getSessionUserEmailFromRequest } from '@/lib/session';
@@ -66,6 +66,9 @@ export async function POST(
       attachments?: { filename?: string; mimeType?: string; name?: string; type?: string; data?: string; dataUrl?: string }[];
       closeTicket?: boolean;
       assignToUser?: boolean;
+      to?: string;
+      subject?: string;
+      forwardAttachments?: { id: string; filename: string; mimeType: string }[];
     } | null = null;
     try {
       body = await request.json();
@@ -94,39 +97,19 @@ export async function POST(
       plainTextBody = stripHtml(plainTextBody); // Double-check and clean again
     }
 
-    // Attachments validation (optional)
-    const maxAttachmentSizeBytes = 8 * 1024 * 1024; // 8 MB per file cap
-    const attachments = (body?.attachments || []).map((att) => {
-      // Support both field name formats:
-      // - Old format: { filename, mimeType, data }
-      // - RichTextEditor format: { id, name, type, size, data }
-      const filename = att?.filename || att?.name;
-      const mimeType = att?.mimeType || att?.type;
-
-      if (!filename || !mimeType) {
-        throw new Error('Invalid attachment metadata: filename and mimeType are required');
-      }
+    // Convert custom attachments to Gmail format (AttachmentPayload)
+    const attachments: { filename: string; mimeType: string; data: string }[] = (body?.attachments || []).map((att) => {
+      const filename = att.filename || att.name || 'attachment';
+      const mimeType = att.mimeType || att.type || 'application/octet-stream';
 
       let rawData = att.data || '';
       if (!rawData && att.dataUrl) {
-        // If dataUrl is provided (e.g. "data:image/png;base64,....."), strip the prefix
         const parts = att.dataUrl.split(',');
-        if (parts.length === 2) {
-          rawData = parts[1];
-        } else {
-          rawData = att.dataUrl; // Fallback or assume already base64
-        }
+        rawData = parts.length > 1 ? parts[1] : parts[0];
       }
 
       if (!rawData) {
-        throw new Error('Attachment data missing');
-      }
-
-      // Rough size check before decode
-      // Base64 size is ~1.33x original size. 
-      const estimatedBytes = Math.ceil((rawData.length * 3) / 4);
-      if (estimatedBytes > maxAttachmentSizeBytes) {
-        throw new Error(`Attachment ${filename} exceeds 8MB limit`);
+        throw new Error(`Attachment ${filename} is missing data`);
       }
 
       return {
@@ -135,6 +118,7 @@ export async function POST(
         data: rawData,
       };
     });
+
 
     // Get user info for logging
     let userEmail = getSessionUserEmailFromRequest(request as any);
@@ -240,7 +224,7 @@ export async function POST(
       console.warn('[Reply] Could not find ticket for logging:', ticketError);
     }
 
-    const replyRecipient = incomingEmail.from || incomingEmail.to;
+    const replyRecipient = body?.to || incomingEmail.from || incomingEmail.to;
     if (!replyRecipient) {
       return NextResponse.json(
         { error: 'Unable to determine reply recipient for this email' },
@@ -249,9 +233,12 @@ export async function POST(
     }
 
     const baseSubject = incomingEmail.subject?.trim() || '(No subject)';
-    const replySubject = /^re:/i.test(baseSubject)
-      ? baseSubject
-      : `Re: ${baseSubject}`;
+    let replySubject: string = body?.subject || '';
+    if (!replySubject) {
+      replySubject = /^re:/i.test(baseSubject)
+        ? baseSubject
+        : `Re: ${baseSubject}`;
+    }
 
     // CRITICAL FIX: Ensure fromAddress is the connected Gmail account, not the invited user's email
     // For business accounts, use the connected Gmail account email (e.g., support@company.com)
@@ -274,6 +261,34 @@ export async function POST(
     }
 
     console.log(`[Reply API] Sending email FROM: ${fromAddress} (userEmail: ${userEmail})`);
+
+    // Handle forwarded attachments from original message
+    if (body?.forwardAttachments && body.forwardAttachments.length > 0) {
+      console.log(`[Reply] Fetching ${body.forwardAttachments.length} forwarded attachments from message ${emailId}`);
+      const gmail = getGmailClient(tokens);
+
+      for (const att of body.forwardAttachments) {
+        try {
+          const attResponse = await gmail.users.messages.attachments.get({
+            userId: 'me',
+            messageId: emailId,
+            id: att.id,
+          });
+
+          if (attResponse.data.data) {
+            // Gmail returns base64url, our AttachmentPayload expects base64
+            const base64 = attResponse.data.data.replace(/-/g, '+').replace(/_/g, '/');
+            attachments.push({
+              filename: att.filename,
+              mimeType: att.mimeType,
+              data: base64,
+            });
+          }
+        } catch (error) {
+          console.warn(`[Reply] Failed to fetch forwarded attachment ${att.id}:`, error);
+        }
+      }
+    }
 
     const sentMessage = await sendReplyMessage(tokens, {
       to: replyRecipient,
@@ -362,7 +377,8 @@ export async function POST(
               await updateTicketStatus(ticket.id, 'open', userEmail, businessId);
               // Refresh ticket object after status update
               const { getTicketById } = await import('@/lib/tickets');
-              const refreshedTicket = await getTicketById(ticket.id, userEmail, businessId);
+              // Correct arguments: ticketId, currentUserId, canViewAll, userEmail
+              const refreshedTicket = await getTicketById(ticket.id, userId, true, userEmail);
               if (refreshedTicket) {
                 ticket = refreshedTicket;
               }

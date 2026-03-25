@@ -7,7 +7,8 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
 import { useToast } from "@/components/ui/use-toast"
-import { ArrowLeft, ChevronDown, ChevronUp, Sparkles, Loader2, Mail, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Paperclip, Code, Bold, Italic, Underline, Strikethrough, List, ListOrdered, Quote, AlignLeft, AlignCenter, AlignRight, Highlighter, Type, FileText, Download } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronUp, Sparkles, Loader2, Mail, ShoppingBag, Link as LinkIcon, Image as ImageIcon, Paperclip, Code, Bold, Italic, Underline, Strikethrough, List, ListOrdered, Quote, AlignLeft, AlignCenter, AlignRight, Highlighter, Type, FileText, Download, ArrowRight } from "lucide-react"
+import { Label } from "@/components/ui/label"
 import { EmailContentViewer } from "@/components/email-content-viewer"
 import { AttachmentList } from "@/components/attachment-list"
 import { htmlToText } from "@/lib/html-to-text"
@@ -115,6 +116,8 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
   const linkDialogRef = useRef<HTMLDivElement | null>(null)
   const draftAutoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  const [isForwarding, setIsForwarding] = useState(false)
+  const [forwardTo, setForwardTo] = useState("")
 
   // Get current user ID for auto-assignment
   useEffect(() => {
@@ -289,9 +292,10 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
           setSending(false)
           setSendingAction(null)
           setSendSuccess(false)
-          setError(null)
           setConversationSummary("")
           setSummaryExpanded(false)
+          setIsForwarding(false)
+          setForwardTo("")
 
           // End transition after content loads
           setIsTransitioning(false)
@@ -521,6 +525,46 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     }
   }
 
+  const handleForward = () => {
+    const latestMsg = threadMessages[threadMessages.length - 1]
+    if (!latestMsg) return
+
+    // Create a "Forwarded message" header similar to Gmail
+    const dateStr = formatDate(latestMsg.date)
+    const forwardHeader = `
+<br>
+<br>
+---------- Forwarded message ---------<br>
+From: <b>${latestMsg.from.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</b><br>
+Date: ${dateStr}<br>
+Subject: ${latestMsg.subject}<br>
+To: ${latestMsg.to.replace(/</g, '&lt;').replace(/>/g, '&gt;')}<br>
+<br>
+${latestMsg.body || latestMsg.snippet || ""}
+`
+    const plainTextBody = (latestMsg.body ? toPlainText(latestMsg.body) : latestMsg.snippet) || ""
+    const forwardText = `\n\n---------- Forwarded message ---------\nFrom: ${latestMsg.from}\nDate: ${dateStr}\nSubject: ${latestMsg.subject}\nTo: ${latestMsg.to}\n\n${plainTextBody}`
+
+    setDraftHtml(forwardHeader)
+    setDraftText(forwardText)
+    // Synchronize editor if it's already mounted
+    if (editorRef.current) {
+      editorRef.current.innerHTML = forwardHeader
+    }
+
+    setIsForwarding(true)
+    setShowDraft(true)
+    setDraftMinimized(false)
+    setSendSuccess(false)
+    setForwardTo("")
+    
+    // Auto-focus the recipient field after a short delay
+    setTimeout(() => {
+      const toInput = document.getElementById('forward-to-input')
+      toInput?.focus()
+    }, 100)
+  }
+
   const handleGenerateDraft = async () => {
     if (!emailId) return
 
@@ -690,7 +734,7 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         window.dispatchEvent(new CustomEvent('ticketUpdated', {
           detail: {
             ticketId: ticketId,
-            status: 'closed',
+            status: isForwarding ? 'closed' : 'pending',
             assigneeUserId: currentUserId
           }
         }));
@@ -710,6 +754,9 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
     // Perform actual send in background (non-blocking)
     const performSend = async () => {
       try {
+        const latestMsg = threadMessages[threadMessages.length - 1];
+        const forwardSubject = latestMsg?.subject?.startsWith("Fwd:") ? latestMsg.subject : `Fwd: ${latestMsg?.subject || ''}`;
+
         const response = await fetch(`/api/emails/${emailId}/reply`, {
           method: "POST",
           headers: {
@@ -721,7 +768,10 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
             draftId: draftId || null,
             attachments: attachments.map(att => ({ filename: att.name, mimeType: att.type, data: att.data })),
             assignToUser: true, // Auto-assign to self
-            closeTicket: opts?.closeTicket // Close if requested
+            closeTicket: isForwarding ? true : opts?.closeTicket, // Close if requested or if forwarding
+            to: isForwarding ? forwardTo : undefined,
+            subject: isForwarding ? forwardSubject : undefined,
+            forwardAttachments: isForwarding ? (latestMsg?.attachments?.map(a => ({ id: a.id, filename: a.filename, mimeType: a.mimeType })) || []) : []
           }),
         })
 
@@ -1471,28 +1521,39 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
               {showShopifySidebar ? "Hide" : "Show"} Customer Info
             </Button>
           )}
-          <Button
-            onClick={handleGenerateDraft}
-            disabled={generating || showDraft}
-            className="w-full h-11 text-base font-semibold shadow-md hover:shadow-lg"
-          >
-            {generating ? (
-              <>
-                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                Generating draft...
-              </>
-            ) : showDraft ? (
-              <>
-                <Sparkles className="w-5 h-5 mr-2" />
-                Draft generated
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-5 h-5 mr-2" />
-                Generate AI draft
-              </>
-            )}
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={handleGenerateDraft}
+              disabled={generating || showDraft}
+              className="flex-1 h-11 text-base font-semibold shadow-md hover:shadow-lg"
+            >
+              {generating ? (
+                <>
+                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : showDraft && !isForwarding ? (
+                <>
+                  <Sparkles className="w-5 h-5 mr-2" />
+                  Draft ready
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-5 h-5 mr-2" />
+                  AI Draft
+                </>
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleForward}
+              disabled={showDraft && isForwarding}
+              className="flex-1 h-11 text-base font-semibold shadow-md hover:shadow-lg"
+            >
+              <ArrowRight className="w-5 h-5 mr-2" />
+              Forward
+            </Button>
+          </div>
         </div>
 
         {showDraft && (
@@ -1500,8 +1561,17 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
             <div className="bg-card rounded-lg shadow-lg border border-border overflow-hidden max-h-[60vh] flex flex-col">
               <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-border bg-muted/50">
                 <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-primary" />
-                  AI-Generated Draft
+                  {isForwarding ? (
+                    <>
+                      <ArrowRight className="w-4 h-4 text-primary" />
+                      Forwarding Email
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4 text-primary" />
+                      AI-Generated Draft
+                    </>
+                  )}
                 </h3>
                 <Button
                   variant="ghost"
@@ -1523,6 +1593,40 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
                 </div>
               ) : (
                 <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  {isForwarding && (
+                    <div className="space-y-2">
+                      <Label htmlFor="forward-to-input" className="text-sm font-medium">To:</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="forward-to-input"
+                          placeholder="recipient1@example.com, recipient2@example.com"
+                          value={forwardTo}
+                          onChange={(e) => setForwardTo(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && forwardTo.trim()) {
+                              handleSendReply()
+                            }
+                          }}
+                          className="h-10 flex-1"
+                        />
+                        <Button
+                          onClick={() => handleSendReply()}
+                          disabled={sending || !forwardTo.trim()}
+                          className="h-10 px-4"
+                          title="Forward now"
+                        >
+                          {sending ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <>
+                              <ArrowRight className="w-4 h-4 mr-1" />
+                              Forward
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                   <div className="space-y-3">
                     <div className="flex flex-wrap gap-1 items-center bg-muted/40 border border-border rounded-lg px-2 py-1.5">
                       <button type="button" onMouseDown={(e) => e.preventDefault()} className="h-7 w-7 inline-flex items-center justify-center rounded hover:bg-accent" onClick={() => execAndSync(() => applyCommand('bold'))} aria-label="Bold"><Bold className="w-3.5 h-3.5" /></button>
