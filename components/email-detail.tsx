@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label"
 import { EmailContentViewer } from "@/components/email-content-viewer"
 import { AttachmentList } from "@/components/attachment-list"
 import { htmlToText } from "@/lib/html-to-text"
-
+// Note: We have some duplicate utility functions here (toPlainText, textToHtml) to avoid coupling with the Gmail API response format in lib/gmail. These functions are simple and self-contained, so it's not a big deal to have them here for now. In the future, we can consider centralizing text/html conversion utilities if we find more use cases for them across the app.
 const toPlainText = (html: string) => {
   if (!html) return ""
   const tmp = typeof window !== "undefined" ? document.createElement("div") : null
