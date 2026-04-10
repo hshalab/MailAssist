@@ -1207,7 +1207,7 @@ async function callGroqAPI(prompt: string, apiKey: string, temperature?: number)
   // For OpenAI: gpt-4o, gpt-4-turbo, gpt-3.5-turbo
   // For Groq: llama-3.3-70b-versatile, etc.
   const models = isOpenAI
-    ? ['gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo']
+    ? ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo']
     : ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'llama-3-70b-8192'];
 
   let lastError: Error | null = null;

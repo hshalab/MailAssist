@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -8,8 +8,9 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/components/ui/use-toast"
-import { Loader2, Sparkles, Send, CheckCircle, RotateCcw, X } from "lucide-react"
+import { Loader2, Sparkles, Send, CheckCircle, RotateCcw, X, MessageSquare } from "lucide-react"
 import RichTextEditor from "@/components/rich-text-editor"
+import QuickRepliesSidebar from "@/components/quick-replies-sidebar"
 
 interface ComposeViewProps {
   currentUserId: string | null
@@ -33,7 +34,15 @@ export default function ComposeView({ currentUserId, onEmailSent, setActiveView 
   const [success, setSuccess] = useState<string | null>(null)
   const [showSuccess, setShowSuccess] = useState(false)
   const [sentTicketId, setSentTicketId] = useState<string | null>(null)
+  const [showQuickReplies, setShowQuickReplies] = useState(false)
+  const [isPolishing, setIsPolishing] = useState(false)
+  const [isMounted, setIsMounted] = useState(false)
   
+  // Hydration guard
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
+
   const resetForm = () => {
     setRecipient("")
     setRecipientName("")
@@ -46,6 +55,8 @@ export default function ComposeView({ currentUserId, onEmailSent, setActiveView 
     setSuccess(null)
     setShowSuccess(false)
     setSentTicketId(null)
+    setShowQuickReplies(false)
+    setIsPolishing(false)
   }
 
   const handleGenerateDraft = async () => {
@@ -163,9 +174,82 @@ export default function ComposeView({ currentUserId, onEmailSent, setActiveView 
     }
   }
 
+  const handleSelectQuickReply = useCallback((content: string) => {
+    // Convert newlines to HTML
+    const htmlContent = content
+      .split('\n\n')
+      .map((para: string) => `<p>${para.replace(/\n/g, '<br>')}</p>`)
+      .join('')
+      
+    setBodyHtml(prev => prev ? `${prev}${htmlContent}` : htmlContent)
+    setBodyText(prev => prev ? `${prev}\n\n${content}` : content)
+  }, [])
+
+  const handlePolish = async () => {
+    if (!bodyText.trim() || isPolishing) return
+
+    setIsPolishing(true)
+    setError(null)
+
+    try {
+      const response = await fetch("/api/compose/rewrite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: bodyText,
+          tone: "friendly", // Default tone
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+        throw new Error(errorData.error || "Failed to polish draft")
+      }
+
+      const data = await response.json()
+      const polished = data.rewritten || ""
+      
+      // Convert plain text to HTML
+      const htmlPolished = polished
+        .split('\n\n')
+        .map((para: string) => `<p>${para.replace(/\n/g, '<br>')}</p>`)
+        .join('')
+        
+      setBodyHtml(htmlPolished)
+      setBodyText(polished)
+      
+      toast({
+        title: "Draft Polished",
+        description: "AI has rewritten your message to be more customer-friendly.",
+      })
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to polish draft"
+      setError(errorMessage)
+      toast({ 
+        title: "Polish Failed", 
+        description: errorMessage, 
+        variant: "destructive" 
+      })
+    } finally {
+      setIsPolishing(false)
+    }
+  }
+
+  if (!isMounted) {
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-transparent">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 text-primary animate-spin" />
+          <p className="text-sm text-muted-foreground">Initializing assistant...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="h-full w-full overflow-y-auto bg-background">
-      <div className="p-6 md:p-8 lg:p-10 space-y-8 max-w-5xl mx-auto">
+    <div className="h-full w-full overflow-hidden flex relative min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="p-6 md:p-8 lg:p-12 space-y-8 w-full max-w-[1600px] mx-auto">
         {showSuccess ? (
           <Card className="p-10 text-center space-y-8 bg-emerald-50 dark:bg-emerald-950/30 border-2 border-emerald-500/30 shadow-2xl relative overflow-hidden">
             <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 via-transparent to-transparent" />
@@ -294,21 +378,64 @@ export default function ComposeView({ currentUserId, onEmailSent, setActiveView 
 
               {/* AI Mode: Context Input */}
               {composeMode === 'ai' && (
-                <div className="space-y-2">
-                  <Label htmlFor="context" className="text-sm font-medium flex items-center gap-1.5">
-                    Context for AI <span className="text-[var(--status-urgent)]">*</span>
-                  </Label>
-                  <Textarea
-                    id="context"
-                    placeholder="Describe the purpose of this email, what you want to achieve, and any specific details..."
-                    value={context}
-                    onChange={(e) => setContext(e.target.value)}
-                    rows={5}
-                    className="resize-none transition-all focus:ring-2 focus:ring-primary/20"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Be specific about the recipient's situation and your goals.
-                  </p>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="context" className="text-sm font-medium flex items-center gap-1.5">
+                      Context for AI <span className="text-[var(--status-urgent)]">*</span>
+                    </Label>
+                    <Textarea
+                      id="context"
+                      placeholder="Describe the purpose of this email, what you want to achieve, and any specific details..."
+                      value={context}
+                      onChange={(e) => setContext(e.target.value)}
+                      rows={5}
+                      className="resize-none transition-all duration-300 focus:ring-2 focus:ring-primary/20 hover:border-primary/50"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Be specific about the recipient's situation and your goals.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Toolbar for AI Polish and Quick Replies */}
+              {(composeMode === 'manual' || bodyHtml) && (
+                <div className="flex items-center justify-between gap-3 p-3 bg-muted/30 rounded-xl border border-border/40 backdrop-blur-sm animate-in fade-in slide-in-from-top-2 duration-500">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowQuickReplies(!showQuickReplies)}
+                      className={`h-9 px-4 transition-all duration-300 ${showQuickReplies ? 'bg-primary/10 border-primary text-primary shadow-inner' : 'hover:border-primary/50'}`}
+                    >
+                      <MessageSquare className="w-4 h-4 mr-2" />
+                      {showQuickReplies ? "Hide Quick Replies" : "Quick Replies"}
+                    </Button>
+                    
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handlePolish}
+                      disabled={isPolishing || !bodyText.trim()}
+                      className="h-9 px-4 transition-all duration-300 hover:border-primary/50 group"
+                    >
+                      {isPolishing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Polishing...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4 mr-2 transition-transform duration-500 group-hover:rotate-12 group-hover:scale-110" />
+                          Polish with AI
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  
+                  <div className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-widest hidden sm:block">
+                    Drafting Assistant Active
+                  </div>
                 </div>
               )}
 
@@ -398,5 +525,17 @@ export default function ComposeView({ currentUserId, onEmailSent, setActiveView 
         )}
       </div>
     </div>
+      
+    {/* Quick Replies Sidebar */}
+    {showQuickReplies && (
+      <div className="w-[350px] border-l border-border/50 animate-in slide-in-from-right duration-300 ease-out shadow-[-10px_0_30px_-15px_rgba(0,0,0,0.1)]">
+        <QuickRepliesSidebar
+          onSelectReply={handleSelectQuickReply}
+          currentUserId={currentUserId}
+          onClose={() => setShowQuickReplies(false)}
+        />
+      </div>
+    )}
+  </div>
   )
 }

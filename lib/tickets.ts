@@ -258,6 +258,20 @@ export async function classifyTicketToDepartmentAsync(
   threadId?: string | null
 ): Promise<void> {
   try {
+    // 1) QUICK CHECK: Skip if already classified (save costs)
+    if (supabase) {
+      const { data: existing } = await supabase
+        .from('tickets')
+        .select('department_id, classification_confidence')
+        .eq('id', ticketId)
+        .maybeSingle();
+      
+      if (existing?.department_id || (existing?.classification_confidence !== null && existing?.classification_confidence !== undefined)) {
+        console.log(`[Ticket] Ticket ${ticketId} already has classification (${existing.classification_confidence}%), skipping.`);
+        return;
+      }
+    }
+
     // Determine account scope
     const { getCurrentUser } = await import('./session');
     const currentUser = await getCurrentUser();

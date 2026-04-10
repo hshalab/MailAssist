@@ -126,7 +126,7 @@ Use this context to understand the ongoing conversation and classify appropriate
     
     === EMAIL CONTENT ===
     Subject: "${emailContent.subject}"
-    Body: "${htmlToText(emailContent.body)}"
+    Body: "${htmlToText(emailContent.body).substring(0, 1500)}"
     
     Respond with ONLY valid JSON in this exact format:
     {
@@ -174,12 +174,12 @@ Use this context to understand the ongoing conversation and classify appropriate
 }
 
 /**
- * Call Groq API for classification
+ * Call OpenAI API for classification
  */
 // Cal OpenAI API for classification
 async function callOpenAIForClassification(prompt: string, apiKey: string): Promise<string> {
     const REQUEST_TIMEOUT = 10000; // 10 seconds for faster classification
-    const model = 'gpt-5.2'; // Faster model for classification
+    const model = 'gpt-4o-mini'; // Much cheaper and sufficient for classification
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
