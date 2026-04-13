@@ -39,7 +39,10 @@ export async function GET(request: NextRequest) {
 
     const users = await getAllUsers(businessSession?.businessId, sharedGmailEmail);
 
-    return NextResponse.json({ users });
+    return NextResponse.json(
+      { users },
+      { headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=30' } }
+    );
   } catch (error) {
     console.error('Error fetching users:', error);
     return NextResponse.json(

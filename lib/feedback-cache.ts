@@ -87,45 +87,44 @@ async function fetchFeedbackFromDB(
             return new Map();
         }
 
+        // Batch-fetch all email bodies in a single query (avoids N+1 DB calls)
+        const threadIds = data
+            .map(f => f.tickets?.thread_id)
+            .filter((id): id is string => Boolean(id));
+
+        const bodyByThread = new Map<string, string>();
+        if (threadIds.length > 0) {
+            const { data: emailRows } = await supabase
+                .from('emails')
+                .select('thread_id, body')
+                .in('thread_id', threadIds)
+                .order('date', { ascending: true });
+
+            // Keep only the first (oldest) email per thread
+            for (const row of emailRows ?? []) {
+                if (row.thread_id && !bodyByThread.has(row.thread_id)) {
+                    bodyByThread.set(row.thread_id, (row.body ?? '').substring(0, 200));
+                }
+            }
+        }
+
         // Group by department
         const grouped = new Map<string, FeedbackExample[]>();
 
         for (const feedback of data) {
             const deptName = feedback.departments?.name;
-            const ticketId = feedback.ticket_id;
+            if (!deptName || !feedback.ticket_id) continue;
 
-            if (!deptName || !ticketId) continue;
-
-            // Fetch email body for this ticket using thread_id
             const threadId = feedback.tickets?.thread_id;
-            let bodyContent = '';
-
-            if (threadId) {
-                const { data: emailData } = await supabase
-                    .from('emails')
-                    .select('body')
-                    .eq('thread_id', threadId)
-                    .order('date', { ascending: true })
-                    .limit(1)
-                    .maybeSingle();
-
-                bodyContent = emailData?.body?.substring(0, 500) || '';
-            }
-
             const example: FeedbackExample = {
                 subject: feedback.tickets?.subject || '',
-                body: bodyContent,
+                body: threadId ? (bodyByThread.get(threadId) ?? '') : '',
                 departmentName: deptName,
             };
 
-            if (!grouped.has(deptName)) {
-                grouped.set(deptName, []);
-            }
-
+            if (!grouped.has(deptName)) grouped.set(deptName, []);
             const examples = grouped.get(deptName)!;
-            if (examples.length < MAX_EXAMPLES_PER_DEPT) {
-                examples.push(example);
-            }
+            if (examples.length < MAX_EXAMPLES_PER_DEPT) examples.push(example);
         }
 
         return grouped;

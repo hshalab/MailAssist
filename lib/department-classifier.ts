@@ -28,7 +28,7 @@ const CONFIDENCE_THRESHOLD = 60; // Minimum confidence to auto-assign (increased
 
 /**
  * Classify an email to the most appropriate department using AI
- * Uses OpenAI API with gpt-5.2 for fast classification
+ * Uses OpenAI gpt-4o-mini for fast, cheap classification
  */
 export async function classifyEmailToDepartment(
     emailContent: EmailContent,
@@ -110,30 +110,16 @@ ${emailContent.threadContext}
 Use this context to understand the ongoing conversation and classify appropriately.\n`;
     }
 
-    // Generic system prompt - no hardcoded rules
-    const prompt = `You are an expert email classification assistant. Your goal is to map the email to the correct department based on its content and intent.
-    
-    === AVAILABLE DEPARTMENTS ===
-    ${departmentList}
-    
-    ${senderSection}${customerHistorySection}${threadContextSection}${feedbackSection}
-    
-    === GUIDELINES ===
-    1. **Analyze Intent**: Read the email body to understand the core request (e.g., "Where is my order?" -> Orders, "I want to return this" -> Returns).
-    2. **Consistency is Key**: Similar emails must ALWAYS go to the same department.
-    3. **Use Context**: If the customer has a history with a department, that is a strong signal.
-    4. **No Hallucinations**: If it doesn't match a department, return 0 (Unclassified).
-    
-    === EMAIL CONTENT ===
-    Subject: "${emailContent.subject}"
-    Body: "${htmlToText(emailContent.body).substring(0, 1500)}"
-    
-    Respond with ONLY valid JSON in this exact format:
-    {
-      "departmentNumber": <integer from 1 to ${departments.length}, or 0 for Unclassified>,
-      "confidence": <integer from 0-100>,
-      "reasoning": "<brief explanation>"
-    }`;
+    const prompt = `Classify this email to the correct department. Reply with ONLY valid JSON.
+
+DEPARTMENTS:
+${departmentList}
+${senderSection}${customerHistorySection}${threadContextSection}${feedbackSection}
+EMAIL:
+Subject: "${emailContent.subject}"
+Body: "${htmlToText(emailContent.body).substring(0, 1500)}"
+
+JSON format: {"departmentNumber":<1-${departments.length} or 0 if unclear>,"confidence":<0-100>,"reasoning":"<one sentence>"}"`;
 
 
     try {
@@ -196,7 +182,7 @@ async function callOpenAIForClassification(prompt: string, apiKey: string): Prom
                 messages: [
                     {
                         role: 'system',
-                        content: 'You are an email classification assistant. You always respond with valid JSON only, no other text.',
+                        content: 'Respond with valid JSON only.',
                     },
                     {
                         role: 'user',

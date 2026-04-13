@@ -1203,12 +1203,12 @@ async function callGroqAPI(prompt: string, apiKey: string, temperature?: number)
     ? 'https://api.openai.com/v1/chat/completions'
     : 'https://api.groq.com/openai/v1/chat/completions';
 
-  // Allow using different models based on provider
-  // For OpenAI: gpt-4o, gpt-4-turbo, gpt-3.5-turbo
-  // For Groq: llama-3.3-70b-versatile, etc.
+  // Single model per provider — no escalation to expensive models on failure.
+  // gpt-4o-mini is 10-20x cheaper than gpt-4o and sufficient for draft generation.
+  // Groq: free tier, llama-3.3-70b is the best available.
   const models = isOpenAI
-    ? ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo']
-    : ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'llama-3-70b-8192'];
+    ? ['gpt-4o-mini']
+    : ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile'];
 
   let lastError: Error | null = null;
 

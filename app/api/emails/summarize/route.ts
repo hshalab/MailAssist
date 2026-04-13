@@ -72,19 +72,19 @@ export async function POST(request: NextRequest) {
                 'Authorization': `Bearer ${openaiApiKey}`,
             },
             body: JSON.stringify({
-                model: 'gpt-5.2', // Fast and capable model
+                model: 'gpt-4o-mini',
                 messages: [
                     {
                         role: 'system',
-                        content: 'You are a helpful assistant. Extract the core message and meaning while ignoring technical metadata, CSS, or formatting tags. Provide a brief 2-3 sentence summary that captures the main points and any action items. Write in a natural, human-like manner. Use paragraphs instead of bullet points. Avoid robotic formatting.'
+                        content: 'Summarize email conversations in 2-3 sentences. Be direct and factual. No bullet points.'
                     },
                     {
                         role: 'user',
-                        content: `Summarize this email conversation (which may contain raw HTML):\n\n${cleanedContent}`
+                        content: `Summarize this email conversation in 2-3 sentences:\n\n${cleanedContent.slice(0, 3000)}`
                     }
                 ],
-                temperature: 1,
-                max_completion_tokens: 200,
+                temperature: 0.3,
+                max_completion_tokens: 120,
             }),
         })
 

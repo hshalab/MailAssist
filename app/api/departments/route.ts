@@ -29,10 +29,10 @@ export async function GET(request: NextRequest) {
 
         const departments = await getAllDepartments(scopeEmail, businessId);
 
-        return NextResponse.json({
-            success: true,
-            departments,
-        });
+        return NextResponse.json(
+            { success: true, departments },
+            { headers: { 'Cache-Control': 'private, max-age=300, stale-while-revalidate=60' } }
+        );
     } catch (error) {
         console.error('Error fetching departments:', error);
         return NextResponse.json(

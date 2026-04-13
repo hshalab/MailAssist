@@ -1342,25 +1342,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           console.error('[Tickets] Secondary data failed:', err)
         })
 
-        // STEP 3: Trigger Gmail sync in the background
-        // This is the slowest part (can take 1-3 seconds) - runs after UI is visible
-        console.log('[Tickets] STEP 3: Triggering background Gmail sync...')
-        try {
-          await fetch('/api/emails?type=inbox&maxResults=10', {
-            cache: 'no-store',
-            headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
-          })
-          console.log('[Tickets] Background sync completed - checking for new tickets...')
-
-          // STEP 4: SILENT REFRESH
-          // If the sync created new tickets, fetch them again silently to update the UI
-          if (fetchTicketsRef.current) {
-            await fetchTicketsRef.current({ silent: true })
-            console.log('[Tickets] Silent refresh complete')
-          }
-        } catch (syncErr) {
-          console.error('[Tickets] Background sync failed (non-blocking):', syncErr)
-        }
+        // NOTE: No manual Gmail sync needed here.
+        // New emails are delivered via Gmail Pub/Sub webhook → /api/webhooks/gmail
+        // which creates tickets instantly. Supabase Realtime then pushes updates to the UI.
       } catch (err) {
         console.error('[Tickets] Error loading data:', err)
         // Ensure we never get stuck in loading state if initialization fails.
@@ -1666,37 +1650,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // If tab is visible: Poll every 5 seconds (Super fast / Instant feel)
   // If tab is hidden: Poll every 30 seconds (Background sync)
   useEffect(() => {
-    // Function to (optionally) trigger lightweight email sync and fetch tickets.
-    // IMPORTANT: Do not hammer /api/emails every 5s — it can indirectly trigger /api/emails/sync
-    // and cause the page to look like it's "stuck loading".
+    // Safety-net polling: Supabase Realtime is the primary delivery mechanism for
+    // ticket changes. This poll only exists to recover from dropped WS connections.
+    // Gmail push webhook handles new email → ticket creation, so no email fetch needed.
     const doSyncAndFetch = async () => {
-      // If we are within the post-action suppression window (e.g. right after a
-      // close or send), skip this poll cycle entirely.  The optimistic state is
-      // already correct; firing a fetch here before the server PATCH commits
-      // would return stale data and overwrite the optimistic close/pending state.
       if (Date.now() < suppressRealtimeFetchUntil.current) {
         console.log('[Poll] Skipping poll cycle — within post-action suppression window')
         return
       }
-
-      // Throttle the lightweight inbox check to at most once per 2 minutes.
-      // The primary goal of this poll is to refresh tickets, not continuously sync Gmail.
-      const now = Date.now()
-      ;(doSyncAndFetch as any).__lastEmailCheckAt = (doSyncAndFetch as any).__lastEmailCheckAt || 0
-      const lastEmailCheckAt = (doSyncAndFetch as any).__lastEmailCheckAt as number
-      const EMAIL_CHECK_TTL = 300_000 // 5 minutes
-      if (now - lastEmailCheckAt > EMAIL_CHECK_TTL) {
-        ;(doSyncAndFetch as any).__lastEmailCheckAt = now
-        try {
-          await fetch('/api/emails?type=inbox&maxResults=5', {
-            cache: 'no-store',
-            headers: { 'Cache-Control': 'no-cache, no-store' }
-          })
-        } catch {
-          // Ignore errors (non-blocking)
-        }
-      }
-
       await fetchTickets({ silent: true })
     }
 

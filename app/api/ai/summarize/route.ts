@@ -90,19 +90,19 @@ export async function POST(request: NextRequest) {
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-5.2',
+        model: 'gpt-4o-mini',
         messages: [
           {
             role: 'system',
-            content: 'You are a helpful assistant that generates concise email conversation summaries. Provide a brief 2-3 sentence summary of what the conversation is about. Be direct and factual, but write in a natural, human-like manner. Use paragraphs instead of bullet points. Avoid robotic formatting.',
+            content: 'You summarize email conversations in 2-3 sentences. Be direct and factual. No bullet points.',
           },
           {
             role: 'user',
-            content: `Summarize this email conversation in 2-3 sentences:\n\n${plainTextConversation}`,
+            content: `Summarize this email conversation in 2-3 sentences:\n\n${plainTextConversation.slice(0, 3000)}`,
           },
         ],
-        temperature: 1,
-        max_completion_tokens: 150,
+        temperature: 0.3,
+        max_completion_tokens: 120,
       }),
     })
 

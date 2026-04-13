@@ -27,16 +27,17 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: error.message }, { status: 500 });
         }
 
+        const cacheHeaders = { 'Cache-Control': 'private, max-age=300, stale-while-revalidate=60' }
+
         // Return default settings if none exist
         if (!data) {
-            return NextResponse.json({
-                auto_classify_days: 30,
-            });
+            return NextResponse.json({ auto_classify_days: 30 }, { headers: cacheHeaders });
         }
 
-        return NextResponse.json({
-            auto_classify_days: data.auto_classify_days,
-        });
+        return NextResponse.json(
+            { auto_classify_days: data.auto_classify_days },
+            { headers: cacheHeaders }
+        );
     } catch (error) {
         console.error('Error in GET /api/settings:', error);
         return NextResponse.json(

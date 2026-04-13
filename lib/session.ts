@@ -218,6 +218,24 @@ export interface SessionUser {
   accountType: 'business' | 'personal'
 }
 
+// Module-level session cache — reduces repeated DB hits within the same serverless instance.
+// TTL is short (15s) so stale data is never a real problem (e.g. role changes, logouts).
+const _sessionCache = new Map<string, { data: SessionUser | null; expiresAt: number }>()
+const SESSION_CACHE_TTL = 15_000 // 15 seconds
+
+// Module-level admin Supabase client — reused across requests in the same instance.
+// Avoids creating a new connection on every validateBusinessSession() call.
+let _adminClient: ReturnType<typeof import('@supabase/supabase-js')['createClient']> | null = null
+function getAdminClient() {
+  if (_adminClient) return _adminClient
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY
+  if (!url || !key) return supabase
+  const { createClient: cc } = require('@supabase/supabase-js')
+  _adminClient = cc(url, key, { auth: { persistSession: false } })
+  return _adminClient
+}
+
 /**
  * Check if user has valid business session
  * Returns user data if session is valid, null otherwise
@@ -232,20 +250,15 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
       return null
     }
 
-    // CRITICAL FIX: Use a dedicated Service Role client for session validation
-    // The shared 'supabase' client might be initialized with Anon key, which can fail RLS checks for sessions
-    // or return 0 rows if RLS is strict. Session validation happens on server, so we can use Service Role.
-    let validationClient = supabase;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-
-    if (serviceRoleKey && supabaseUrl) {
-      const { createClient } = await import('@supabase/supabase-js');
-      validationClient = createClient(supabaseUrl, serviceRoleKey, {
-        auth: { persistSession: false }
-      });
-      // console.log('[Session] Created dedicated Service Role client for validation');
+    // Serve from cache if fresh (avoids 2 DB queries per API call)
+    const cacheKey = `${sessionToken}:${currentUserId ?? ''}`
+    const cached = _sessionCache.get(cacheKey)
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.data
     }
+
+    // Use cached admin client — avoids creating a new Supabase connection per request.
+    const validationClient = getAdminClient() ?? supabase
 
     // Check if session exists and is not expired
     const { data: session, error: sessionError } = await validationClient!
@@ -254,15 +267,18 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
       .eq('session_token', sessionToken)
       .maybeSingle()
 
+    const cacheNull = (ttl = SESSION_CACHE_TTL) => {
+      _sessionCache.set(cacheKey, { data: null, expiresAt: Date.now() + ttl })
+      return null
+    }
+
     if (sessionError) {
       console.error('[Session] Database error validating session:', sessionError);
       return null;
     }
 
     if (!session) {
-      // Session not found - valid case, just return null without noisy logs
-      // console.log('[Session] Session not found for token:', sessionToken?.substring(0, 5));
-      return null;
+      return cacheNull()
     }
 
     // Check if session is expired
@@ -346,7 +362,7 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
       }
     }
 
-    return {
+    const result: SessionUser = {
       id: user.id,
       name: user.name,
       email: user.email,
@@ -355,6 +371,15 @@ export async function validateBusinessSession(): Promise<SessionUser | null> {
       businessName: business?.business_name || 'Unknown Business',
       accountType: user.business_id !== null ? 'business' : 'personal',
     }
+
+    // Cache result; prune stale entries if map grows large
+    _sessionCache.set(cacheKey, { data: result, expiresAt: Date.now() + SESSION_CACHE_TTL })
+    if (_sessionCache.size > 200) {
+      const now = Date.now()
+      for (const [k, v] of _sessionCache) if (now >= v.expiresAt) _sessionCache.delete(k)
+    }
+
+    return result
   } catch (error) {
     console.error('[Session] Validation error:', error)
     return null

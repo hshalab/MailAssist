@@ -35,13 +35,10 @@ export async function GET(request: NextRequest) {
 
     const stats = await getAIUsageStats(userEmail, startDate, endDate, businessId);
 
-    return NextResponse.json({
-      stats,
-      dateRange: {
-        startDate: startDate.toISOString(),
-        endDate: endDate.toISOString(),
-      },
-    });
+    return NextResponse.json(
+      { stats, dateRange: { startDate: startDate.toISOString(), endDate: endDate.toISOString() } },
+      { headers: { 'Cache-Control': 'private, max-age=300, stale-while-revalidate=60' } }
+    );
   } catch (error) {
     console.error('Error fetching AI usage stats:', error);
     return NextResponse.json(

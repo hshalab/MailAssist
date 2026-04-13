@@ -4,7 +4,6 @@ import { loadBusinessTokens, saveTokens, saveStoredEmails } from '@/lib/storage'
 import { GenericEmailProvider } from '@/lib/generic-provider';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0; // Never cache
 
 export async function GET() {
     try {
@@ -86,16 +85,18 @@ export async function GET() {
         }
 
         // Return list of connected emails
-        return NextResponse.json({
-            accounts: accounts.map(acc => ({
-                email: acc.email,
-                connectedAt: acc.tokens.updated_at || new Date().toISOString(),
-                status: 'connected',
-                provider: acc.tokens.provider || 'gmail'
-            })),
-            // Include session email for debugging
-            sessionEmail: sessionEmail || null
-        });
+        return NextResponse.json(
+            {
+                accounts: accounts.map(acc => ({
+                    email: acc.email,
+                    connectedAt: acc.tokens.updated_at || new Date().toISOString(),
+                    status: 'connected',
+                    provider: acc.tokens.provider || 'gmail'
+                })),
+                sessionEmail: sessionEmail || null
+            },
+            { headers: { 'Cache-Control': 'private, max-age=120, stale-while-revalidate=30' } }
+        );
 
     } catch (error) {
         console.error('Error listing accounts:', error);
