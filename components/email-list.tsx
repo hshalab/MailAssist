@@ -315,7 +315,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     const pollInterval = setInterval(() => {
       console.log('Auto-polling for new emails...')
       fetchEmails(limit, false, true)
-    }, 30000) // 30 seconds
+    }, 300000) // 5 minutes (realtime handles instant updates)
 
     return () => clearInterval(pollInterval)
   }, [limit, selectedEmail])

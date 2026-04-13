@@ -1684,7 +1684,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       const now = Date.now()
       ;(doSyncAndFetch as any).__lastEmailCheckAt = (doSyncAndFetch as any).__lastEmailCheckAt || 0
       const lastEmailCheckAt = (doSyncAndFetch as any).__lastEmailCheckAt as number
-      const EMAIL_CHECK_TTL = 120_000 // 2 minutes
+      const EMAIL_CHECK_TTL = 300_000 // 5 minutes
       if (now - lastEmailCheckAt > EMAIL_CHECK_TTL) {
         ;(doSyncAndFetch as any).__lastEmailCheckAt = now
         try {
@@ -1710,11 +1710,10 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (intervalId) clearInterval(intervalId)
 
       const isVisible = document.visibilityState === 'visible'
-      // Poll tickets less frequently to reduce server load and improve performance
-      // Reduced from 15s → 30s (active), 60s → 120s (background)
-      const delay = isVisible ? 30000 : 120000 // 30s active, 2min background
+      // Supabase Realtime handles instant updates; polling is just a safety net.
+      const delay = isVisible ? 60000 : 300000 // 60s active, 5min background
 
-      console.log(`[Tickets] Polling started: ${isVisible ? 'ACTIVE (30s)' : 'BACKGROUND (120s)'}`)
+      console.log(`[Tickets] Polling started: ${isVisible ? 'ACTIVE (60s)' : 'BACKGROUND (5min)'}`)
 
       intervalId = setInterval(doSyncAndFetch, delay)
     }
@@ -1986,38 +1985,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [selectedTicket])
 
-  const fetchTypingIndicator = async () => {
-    if (!selectedTicket) return
-    try {
-      const response = await fetch(`/api/tickets/${selectedTicket.id}/typing`, {
-        method: 'GET',
-        credentials: 'include',
-      }).catch((networkError) => {
-        // Network error - silently fail (typing indicator is not critical)
-        return null
-      })
-
-      if (response && response.ok) {
-        const data = await response.json()
-        const typingUserIds = data.typingUsers || []
-        // Always log to debug
-        if (typingUserIds.length > 0) {
-          console.log('[Typing Indicator] Setting typing users:', typingUserIds, 'Current state:', typingUsers)
-        }
-        setTypingUsers(prev => {
-          // Only update if different to avoid unnecessary re-renders
-          if (JSON.stringify(prev.sort()) !== JSON.stringify(typingUserIds.sort())) {
-            console.log('[Typing Indicator] State changed from', prev, 'to', typingUserIds)
-            return typingUserIds
-          }
-          return prev
-        })
-      }
-    } catch (err) {
-      // Silently fail - typing indicator is not critical
-    }
-  }
-
   useEffect(() => {
     if (selectedTicket) {
       // Clear previous state immediately to avoid stale data
@@ -2028,31 +1995,42 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       fetchNotes()
       setConversationSummary("")
       setSummaryExpanded(false)
-      // Start polling for typing indicators when ticket is selected
-      fetchTypingIndicator() // Fetch immediately
-      const typingInterval = setInterval(() => {
-        fetchTypingIndicator()
-      }, 2000) // Poll every 2 seconds
 
-      return () => clearInterval(typingInterval)
+      // Typing indicators via Supabase Broadcast — zero Vercel function calls.
+      // Each user broadcasts their typing state directly to other clients.
+      if (supabaseBrowser && currentUserId) {
+        const ch = supabaseBrowser
+          .channel(`typing:${selectedTicket.id}`)
+          .on('broadcast', { event: 'typing' }, (payload: any) => {
+            const { userId: uid, typing } = payload.payload ?? {}
+            if (!uid || uid === currentUserId) return
+            setTypingUsers(prev =>
+              typing ? [...new Set([...prev, uid])] : prev.filter(id => id !== uid)
+            )
+          })
+          .subscribe()
+
+        return () => {
+          supabaseBrowser.removeChannel(ch)
+          setTypingUsers([])
+          setConversationSummary("")
+          setSummaryExpanded(false)
+        }
+      }
     } else {
       setTypingUsers([]) // Clear when no ticket selected
       setConversationSummary("")
       setSummaryExpanded(false)
     }
-  }, [selectedTicket?.id]) // Only re-fetch when the actual ticket changes, not when its status updates
+  }, [selectedTicket?.id, currentUserId]) // Re-run when ticket or user changes
 
-  const updateTypingStatus = async (typing: boolean) => {
-    if (!selectedTicket || !currentUserId) return
-    try {
-      await fetch(`/api/tickets/${selectedTicket.id}/typing`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ typing }),
-      })
-    } catch {
-      // Silently fail - typing indicator is not critical
-    }
+  const updateTypingStatus = (typing: boolean) => {
+    if (!selectedTicket || !currentUserId || !supabaseBrowser) return
+    // Send via Supabase Broadcast — no Vercel function invocation
+    supabaseBrowser
+      .channel(`typing:${selectedTicket.id}`)
+      .send({ type: 'broadcast', event: 'typing', payload: { userId: currentUserId, typing } })
+      .catch(() => {}) // silently fail — typing indicator is not critical
   }
 
   const handleTyping = () => {

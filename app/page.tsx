@@ -1075,6 +1075,12 @@ function PageContent() {
   // NEW: Automatic periodic auto-classification (every hour)
   useEffect(() => {
     if (!isConnected) return
+    
+    // DISABLE on Vercel - use cron jobs instead to avoid excessive CPU usage
+    if (typeof window !== 'undefined' && window.location.hostname !== 'localhost') {
+      console.log('[Auto-Classify] Disabled in production - using cron jobs instead')
+      return
+    }
 
     const AUTO_CLASSIFY_INTERVAL_MS = 60 * 60 * 1000 // 1 hour
     let intervalId: NodeJS.Timeout

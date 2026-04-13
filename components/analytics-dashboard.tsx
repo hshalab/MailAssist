@@ -108,7 +108,7 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
       if (dateRange.startDate && dateRange.endDate) {
         fetchAnalytics(new Date(dateRange.startDate), new Date(dateRange.endDate))
       }
-    }, 60000) // Refresh every minute
+    }, 600000) // Refresh every 10 minutes
     return () => clearInterval(interval)
   }, [autoRefresh, canViewAnalytics, dateRange])
 
