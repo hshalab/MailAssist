@@ -6,6 +6,7 @@ import { google, Auth } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { getValidTokens } from './token-refresh';
 import { storeSentEmail, getCurrentUserEmail } from './storage';
+import { decodeHtmlEntities } from './html-to-text';
 
 // Initialize OAuth2 client
 export function getOAuth2Client(): Auth.OAuth2Client {
@@ -419,6 +420,38 @@ export async function stopHistoryWatch(
 }
 
 /**
+ * Modify labels for multiple Gmail messages in one request.
+ */
+export async function batchModifyMessageLabels(
+  tokens: { access_token?: string | null; refresh_token?: string | null },
+  messageIds: string[],
+  addLabelIds: string[] = [],
+  removeLabelIds: string[] = []
+) {
+  if (!messageIds || messageIds.length === 0) return;
+
+  const gmail = getGmailClient(tokens);
+  await gmail.users.messages.batchModify({
+    userId: 'me',
+    requestBody: {
+      ids: messageIds,
+      addLabelIds,
+      removeLabelIds,
+    },
+  });
+}
+
+/**
+ * Move messages out of spam and into inbox.
+ */
+export async function moveMessagesOutOfSpam(
+  tokens: { access_token?: string | null; refresh_token?: string | null },
+  messageIds: string[]
+) {
+  return batchModifyMessageLabels(tokens, messageIds, ['INBOX'], ['SPAM']);
+}
+
+/**
  * Fetch new message IDs since a given historyId using Gmail History API.
  * This is much faster than fetching all inbox messages because it only
  * returns changes (new messages added) since the last sync.
@@ -757,7 +790,7 @@ function parseEmailMessage(message: any, metadataOnly: boolean = false) {
     id: message.id,
     threadId: message.threadId,
     messageId: messageIdHeader,
-    snippet: message.snippet || '',
+    snippet: decodeHtmlEntities(message.snippet || ''),
     subject,
     from: getHeader('from'),
     to: getHeader('to'),

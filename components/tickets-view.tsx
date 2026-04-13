@@ -1079,30 +1079,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery, activeTab === 'closed' ? 'closed' : 'active', statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, fetchTicketCounts, sortOrder, loading])
 
-  // IntersectionObserver for infinite scroll (load more on scroll)
-  useEffect(() => {
-    const sentinel = loadMoreSentinelRef.current
-    if (!sentinel || !hasMore || loading || loadingMore || tickets.length === 0) return
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0]
-        console.log('[Tickets] Sentinel intersection:', entry.isIntersecting, 'Page:', page, 'HasMore:', hasMore, 'Loading:', loading, 'LoadingMore:', loadingMore)
-
-        if (entry.isIntersecting && !loadingMore && !loading && hasMore) {
-          console.log('[Tickets] Sentinel visible - triggering load more. Next Page:', page + 1)
-          fetchTickets({ pageNum: page + 1 })
-        }
-      },
-      { threshold: 0.1, rootMargin: '200px' }
-    )
-
-    observer.observe(sentinel)
-
-    return () => {
-      observer.disconnect()
-    }
-  }, [hasMore, loading, loadingMore, page, fetchTickets, tickets.length])
+  // We keep pagination explicit now instead of auto-loading on scroll.
+  // The Load more button is still available at the bottom of the list.
 
   // Removed derived ticketCounts useMemo - now using state
 
@@ -1270,6 +1248,36 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     return () => clearTimeout(prefetchTimer)
   }, [activeSearchQuery, statusFilter, assigneeFilter, departmentFilter, tagsFilter, fetchTickets])
 
+  // Listen for refresh flag from email-list (when unspamming emails)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'tickets_needs_refresh' && e.newValue === 'true') {
+        console.log('[Tickets] Refresh flag detected via storage event - fetching page 1 immediately')
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('tickets_needs_refresh')
+        }
+        ticketCache.current = { active: [], closed: [] }
+        fetchTickets({ pageNum: 1, silent: false })
+      }
+    }
+
+    // Listen for direct event when emails are moved from spam
+    const handleEmailsMovedFromSpam = (e: Event) => {
+      if (e instanceof CustomEvent) {
+        console.log('[Tickets] Emails moved from spam event received - count:', e.detail?.count)
+        ticketCache.current = { active: [], closed: [] }
+        fetchTickets({ pageNum: 1, silent: false })
+      }
+    }
+
+    window.addEventListener('storage', handleStorageChange)
+    window.addEventListener('emailsMovedFromSpam', handleEmailsMovedFromSpam)
+    return () => {
+      window.removeEventListener('storage', handleStorageChange)
+      window.removeEventListener('emailsMovedFromSpam', handleEmailsMovedFromSpam)
+    }
+  }, [fetchTickets])
+
   useEffect(() => {
     const fetchAgentDepartments = async () => {
       if (currentUserRole !== "agent" || !currentUserId) return
@@ -1296,6 +1304,26 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     // This ensures email sync completes BEFORE fetching tickets
     (async () => {
       try {
+        // CHECK: If tickets need refresh (e.g. after unspamming emails), fetch immediately
+        const needsRefresh = typeof window !== 'undefined' && sessionStorage.getItem('tickets_needs_refresh') === 'true'
+        if (needsRefresh) {
+          console.log('[Tickets] Tickets needs refresh flag detected - fetching immediately')
+          if (typeof window !== 'undefined') {
+            sessionStorage.removeItem('tickets_needs_refresh')
+          }
+          // Force a direct refresh without waiting
+          try {
+            const result = await fetchTickets({ silent: false, pageNum: 1 })
+            console.log('[Tickets] Forced refresh completed:', result)
+            setLoading(false)
+            return
+          } catch (err) {
+            console.error('[Tickets] Forced refresh failed:', err)
+            setLoading(false)
+            return
+          }
+        }
+
         // STEP 1: FETCH TICKETS FIRST (Instant UI)
         await fetchTicketsRef.current?.({ silent: false, pageNum: 1 })
 
@@ -1534,7 +1562,18 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       console.log('🔔 Ticket update event received:', e.type)
       if (e instanceof CustomEvent && e.detail) {
         console.log('📦 Event detail:', e.detail)
-        const detail = e.detail as { ticketId?: string; status?: Ticket['status']; assigneeUserId?: string | null; switchToTab?: 'assigned' | 'closed' | 'unassigned' | 'open' }
+        const detail = e.detail as { ticketId?: string; status?: Ticket['status']; assigneeUserId?: string | null; switchToTab?: 'assigned' | 'closed' | 'unassigned' | 'open'; forceReset?: boolean }
+        
+        // Handle force reset (e.g., when emails are unspammed)
+        if (detail?.forceReset) {
+          console.log('🔄 Force reset requested - clearing cache and fetching from page 1')
+          ticketCache.current = { active: [], closed: [] }
+          // Fetch page 1 immediately without debouncing
+          console.log('🚀 Fetching tickets immediately after force reset...')
+          fetchTickets({ pageNum: 1, silent: false })
+          return
+        }
+        
         if (detail?.ticketId) {
           console.log('⚡ Optimistically updating ticket:', detail.ticketId, 'status:', detail.status, 'assignee:', detail.assigneeUserId)
 
@@ -1671,10 +1710,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (intervalId) clearInterval(intervalId)
 
       const isVisible = document.visibilityState === 'visible'
-      // Poll tickets frequently, but keep it reasonable to avoid UI churn.
-      const delay = isVisible ? 15000 : 60000 // 15s active, 60s background
+      // Poll tickets less frequently to reduce server load and improve performance
+      // Reduced from 15s → 30s (active), 60s → 120s (background)
+      const delay = isVisible ? 30000 : 120000 // 30s active, 2min background
 
-      console.log(`[Tickets] Polling started: ${isVisible ? 'FAST (15s)' : 'SLOW (60s)'}`)
+      console.log(`[Tickets] Polling started: ${isVisible ? 'ACTIVE (30s)' : 'BACKGROUND (120s)'}`)
 
       intervalId = setInterval(doSyncAndFetch, delay)
     }
@@ -4083,7 +4123,7 @@ ${latestMsg.body || ""}
               </div>
             )}
 
-            <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 w-full">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0 min-h-0 w-full">
               {/* Show skeleton only when loading AND we have no tickets to display (initial load) */}
               {(loading && tickets.length === 0) ? (
                 <div className="p-2 space-y-2">
@@ -4295,7 +4335,7 @@ ${latestMsg.body || ""}
               {/* Ensure we only show load more if we trust hasMore AND strict checks passed */}
               {hasMore && tickets.length > 0 && (
                 <div
-                  className="pt-4 pb-8 px-4 flex justify-center py-8" // Added padding to ensure visibility
+                  className="pt-4 pb-8 px-4 flex justify-center py-6"
                   ref={loadMoreSentinelRef}
                 >
                   <Button
@@ -4308,12 +4348,19 @@ ${latestMsg.body || ""}
                     {loadingMore ? (
                       <div className="flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Loading more tickets...</span>
+                        <span>Loading more...</span>
                       </div>
                     ) : (
-                      <span className="text-xs">Scroll to load more</span>
+                      <span className="text-xs">Load more tickets</span>
                     )}
                   </Button>
+                </div>
+              )}
+              
+              {/* Show end-of-list message when no more tickets */}
+              {!hasMore && tickets.length > 0 && (
+                <div className="pt-4 pb-8 px-4 flex justify-center">
+                  <span className="text-xs text-muted-foreground italic">No more tickets</span>
                 </div>
               )}
             </div>

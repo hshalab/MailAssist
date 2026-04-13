@@ -62,3 +62,47 @@ export function htmlToText(html: string): string {
 
   return text
 }
+
+/**
+ * Decode HTML entities in plain text snippets.
+ * Handles named entities and numeric entities like &#39; and &#x27;.
+ */
+export function decodeHtmlEntities(text: string): string {
+  if (!text) return ''
+
+  const namedEntities: Record<string, string> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+    '#39': "'",
+  }
+
+  return text
+    .replace(/&(#x?[0-9a-fA-F]+|[a-zA-Z]+);?/g, (_match, entity) => {
+      const key = String(entity)
+
+      if (namedEntities[key]) {
+        return namedEntities[key]
+      }
+
+      if (key.startsWith('#x') || key.startsWith('#X')) {
+        const codePoint = Number.parseInt(key.slice(2), 16)
+        if (Number.isFinite(codePoint)) {
+          return String.fromCodePoint(codePoint)
+        }
+      }
+
+      if (key.startsWith('#')) {
+        const codePoint = Number.parseInt(key.slice(1), 10)
+        if (Number.isFinite(codePoint)) {
+          return String.fromCodePoint(codePoint)
+        }
+      }
+
+      return _match
+    })
+    .replace(/\u00A0/g, ' ')
+}

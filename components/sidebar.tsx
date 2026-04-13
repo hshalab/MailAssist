@@ -68,8 +68,8 @@ export default function Sidebar({ activeView, setActiveView, onLogout, currentUs
   return (
     <aside
       className={`
-        hidden md:flex flex-col h-screen bg-card border-r border-border
-        transition-all duration-300 ease-out shadow-md
+        hidden md:flex flex-col h-screen overflow-hidden bg-card border-r border-border
+        transition-all duration-300 ease-out shadow-md hide-scrollbar
         ${isCollapsed ? "w-20" : "w-64"}
       `}
     >
@@ -109,7 +109,7 @@ export default function Sidebar({ activeView, setActiveView, onLogout, currentUs
       </div>
 
       {/* Navigation */}
-      <nav className={`flex-1 ${isCollapsed ? "px-2 py-4" : "px-3 py-6"} space-y-1`}>
+      <nav className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden hide-scrollbar ${isCollapsed ? "px-2 py-4" : "px-3 py-6"} space-y-1`}>
         {NAV_ITEMS.map((item) => {
           const isActive = activeView === item.id
           const Icon = item.icon

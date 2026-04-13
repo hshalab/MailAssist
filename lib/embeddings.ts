@@ -15,6 +15,11 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   const embeddingEnvKey = process.env.EMBEDDING_API_KEY;
   const provider = (process.env.EMBEDDING_PROVIDER || 'local').toLowerCase();
 
+  // Windows local ONNX bindings are the fragile path in this repo.
+  // If the provider resolves to local on Windows, prefer a remote provider
+  // so the app keeps running even when native binaries are unavailable.
+  const shouldAvoidLocalOnWindows = provider === 'local' && process.platform === 'win32';
+
   if (provider === 'openai') {
     const key = openAiKey || embeddingEnvKey;
     if (!key) {
@@ -27,7 +32,49 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     return generateEmbeddingHuggingFace(text, embeddingEnvKey);
   }
 
-  return generateEmbeddingLocal(text);
+  if (shouldAvoidLocalOnWindows) {
+    if (embeddingEnvKey) {
+      try {
+        return await generateEmbeddingHuggingFace(text, embeddingEnvKey);
+      } catch (huggingFaceError) {
+        console.warn('[Embeddings] Hugging Face fallback failed on Windows:', huggingFaceError);
+      }
+    }
+
+    if (openAiKey || embeddingEnvKey) {
+      const fallbackKey = openAiKey || embeddingEnvKey;
+      if (fallbackKey) {
+        try {
+          return await generateEmbeddingOpenAI(text, fallbackKey);
+        } catch (openAiError) {
+          console.warn('[Embeddings] OpenAI fallback failed on Windows, returning empty embedding:', openAiError);
+        }
+      }
+    }
+
+    console.warn('[Embeddings] Local ONNX disabled on Windows, returning empty embedding vector');
+    return [];
+  }
+
+  try {
+    return await generateEmbeddingLocal(text);
+  } catch (error) {
+    console.warn('[Embeddings] Local embedding backend unavailable, falling back:', error);
+
+    if (openAiKey || embeddingEnvKey) {
+      const fallbackKey = openAiKey || embeddingEnvKey;
+      if (fallbackKey) {
+        try {
+          return await generateEmbeddingOpenAI(text, fallbackKey);
+        } catch (openAiError) {
+          console.warn('[Embeddings] OpenAI fallback failed, returning empty embedding:', openAiError);
+        }
+      }
+    }
+
+    console.warn('[Embeddings] No fallback embedding provider configured, returning empty embedding vector');
+    return [];
+  }
 }
 
 /**
@@ -266,10 +313,15 @@ async function generateEmbeddingLocal(text: string): Promise<number[]> {
 async function getLocalPipeline() {
   if (!localPipelinePromise) {
     localPipelinePromise = (async () => {
-      const { pipeline } = await import('@xenova/transformers');
-      return pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-        quantized: true,
-      });
+      try {
+        const { pipeline } = await import('@xenova/transformers');
+        return pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+          quantized: true,
+        });
+      } catch (error) {
+        localPipelinePromise = null;
+        throw error;
+      }
     })();
   }
   return localPipelinePromise;

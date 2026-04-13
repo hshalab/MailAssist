@@ -668,10 +668,10 @@ function PageContent() {
   useEffect(() => {
     if (!shouldPoll) return
 
-    // Reduced polling frequency from 5s to 15s to reduce server load
+    // Reduced polling frequency from 15s to 30s to reduce server load and improve page responsiveness
     const interval = setInterval(() => {
       fetchSyncStatus()
-    }, 15000) // 15 seconds instead of 5
+    }, 30000) // 30 seconds instead of 15
 
     return () => {
       clearInterval(interval)
@@ -1171,7 +1171,7 @@ function PageContent() {
               currentUser={currentUser}
             />
           )}
-          <div className="flex flex-col flex-1 min-h-0">
+          <div className="flex flex-col flex-1 h-full min-h-0">
             <TopNav
               isConnected={isConnected}
               userProfile={userProfile}
@@ -1184,7 +1184,7 @@ function PageContent() {
               searchValue={globalSearch}
             />
             {renderMobileTabs()}
-            <main className="flex-1 overflow-auto">
+            <main className="flex-1 overflow-auto min-h-0">
               {renderView()}
             </main>
           </div>

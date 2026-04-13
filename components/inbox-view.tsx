@@ -223,8 +223,7 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
     onSelectEmail(id, emailData)
   }
 
-  // When switching between Inbox/Sent/Spam/Trash, clear the current selection
-  // so the detail view doesn't show stale data from the previous view.
+  // When switching between different email list views, clear selection
   useEffect(() => {
     onSelectEmail(null)
   }, [viewType, onSelectEmail])

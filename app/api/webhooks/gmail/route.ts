@@ -168,37 +168,11 @@ export async function POST(request: NextRequest) {
         }
 
         // --- Process spam messages ---
+        // Intentionally do NOT create tickets for spam automatically.
+        // Tickets should be created only when users move selected emails
+        // out of spam via the bulk-unspam flow.
         if (spamMessageIds.length > 0) {
-            try {
-                const spamEmails = await getMessagesByIds(tokens, spamMessageIds);
-                let spamTicketsCreated = 0;
-
-                for (const email of spamEmails) {
-                    try {
-                        await ensureTicketForEmail(
-                            {
-                                id: email.id,
-                                threadId: email.threadId,
-                                subject: email.subject,
-                                from: email.from,
-                                to: email.to,
-                                date: email.date,
-                                ownerEmail: notification.emailAddress,
-                            },
-                            false, // customer email (spam is always inbound)
-                            email.body,
-                            true  // isSpam — tags ticket with 'spam'
-                        );
-                        spamTicketsCreated++;
-                    } catch (spamEmailError) {
-                        console.warn(`[Gmail Webhook] Error processing spam email ${email.id}:`, spamEmailError);
-                    }
-                }
-
-                console.log(`[Gmail Webhook] Created ${spamTicketsCreated} spam ticket(s)`);
-            } catch (spamError) {
-                console.warn('[Gmail Webhook] Spam processing error (non-fatal):', spamError);
-            }
+            console.log(`[Gmail Webhook] Detected ${spamMessageIds.length} spam message(s); skipping ticket creation by design`);
         }
 
         // Update sync state

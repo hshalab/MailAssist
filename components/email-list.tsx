@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Mail, Plus, Paperclip } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { useToast } from "@/components/ui/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { ConnectImapForm } from "./connect-imap-form"
 
@@ -34,6 +35,7 @@ interface EmailListProps {
 }
 
 export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChange, viewType = "inbox", onRefreshReady, selectedAccount, searchQuery = "", hasConnectedAccounts = false }: EmailListProps) {
+  const { toast } = useToast()
   const [emails, setEmails] = useState<Email[]>([])
   // loading state is now initialized above with showSkeleton check
   const [loadingMore, setLoadingMore] = useState(false)
@@ -41,6 +43,8 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
   const [limit, setLimit] = useState(50) // Start with 50 emails for faster initial load
   const [hasMore, setHasMore] = useState(true)
   const [showImapForm, setShowImapForm] = useState(false)
+  const [selectedSpamIds, setSelectedSpamIds] = useState<Set<string>>(new Set())
+  const [bulkUnspamming, setBulkUnspamming] = useState(false)
   const listContainerRef = useRef<HTMLDivElement>(null)
 
   // PRODUCTION FIX: Use state instead of recalculating from sessionStorage to fix race condition
@@ -427,7 +431,7 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     }
   }, []) // Only set up listener once
 
-  // Auto-load more when scrolling near bottom
+  // Track scroll position for spam toolbar
   useEffect(() => {
     const container = listContainerRef.current?.closest('.overflow-y-auto')
     if (!container) return
@@ -443,13 +447,105 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
 
     container.addEventListener('scroll', handleScroll)
     return () => container.removeEventListener('scroll', handleScroll)
-  }, [loadingMore, hasMore, limit])
+  }, [loadingMore, hasMore, limit, viewType])
 
   const handleLoadMore = () => {
     if (loadingMore) return
     const nextLimit = limit + 50 // Load 50 more at a time
     fetchEmails(nextLimit, true)
   }
+
+  const isSpamView = viewType === 'spam'
+  const selectedSpamCount = selectedSpamIds.size
+
+  const toggleSpamSelection = (emailId: string, checked: boolean) => {
+    setSelectedSpamIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(emailId)
+      else next.delete(emailId)
+      return next
+    })
+  }
+
+  const toggleSelectAllVisibleSpam = () => {
+    if (!filteredEmails.length) return
+    setSelectedSpamIds((prev) => {
+      const allVisibleSelected = filteredEmails.every((e) => prev.has(e.id))
+      if (allVisibleSelected) {
+        const next = new Set(prev)
+        filteredEmails.forEach((e) => next.delete(e.id))
+        return next
+      }
+      const next = new Set(prev)
+      filteredEmails.forEach((e) => next.add(e.id))
+      return next
+    })
+  }
+
+  const handleBulkUnspam = async () => {
+    if (!selectedSpamIds.size) return
+
+    try {
+      setBulkUnspamming(true)
+
+      const selectedEmails = emails.filter((e) => selectedSpamIds.has(e.id))
+      const items = selectedEmails.map((email) => ({
+        id: email.id,
+        ownerEmail: email.ownerEmail,
+      }))
+
+      const response = await fetch('/api/emails/spam/bulk-unspam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to move selected emails out of spam')
+      }
+
+      // Properly extract success and failed counts from results
+      const failedIds = new Set<string>((data.results || []).filter((r: any) => !r.success).map((r: any) => r.id))
+      const movedIds = new Set<string>((data.results || []).filter((r: any) => r.success).map((r: any) => r.id))
+
+      if (movedIds.size > 0) {
+        // Remove moved emails from the list immediately
+        setEmails((prev) => prev.filter((e) => !movedIds.has(e.id)))
+        // Clear selection for moved emails
+        setSelectedSpamIds(new Set(Array.from(failedIds)))
+        
+        if (typeof window !== 'undefined') {
+          // Dispatch event to refresh tickets in the background (no forced navigation)
+          const event = new CustomEvent('ticketsForceRefresh', { 
+            detail: { forceReset: false }
+          })
+          window.dispatchEvent(event)
+        }
+      } else {
+        // No emails were moved successfully
+        setSelectedSpamIds(new Set())
+      }
+
+      toast({
+        title: 'Spam updated',
+        description: `${movedIds.size} moved to inbox${failedIds.size > 0 ? `, ${failedIds.size} failed` : ''}`,
+      })
+    } catch (error) {
+      toast({
+        title: 'Bulk action failed',
+        description: error instanceof Error ? error.message : 'Failed to process selected spam emails',
+        variant: 'destructive',
+      })
+    } finally {
+      setBulkUnspamming(false)
+    }
+  }
+
+  useEffect(() => {
+    setSelectedSpamIds(new Set())
+  }, [viewType, selectedAccount, searchQuery])
 
   const handleConnectGmail = async () => {
     try {
@@ -733,10 +829,32 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     : emails
 
   return (
-    <div className="p-3 space-y-2 overflow-x-hidden max-w-full" style={{ paddingTop: '0.75rem' }}>
+    <div ref={listContainerRef} className="relative p-3 space-y-2 overflow-x-hidden max-w-full" style={{ paddingTop: '0.75rem' }}>
+      {isSpamView && (
+        <div className="sticky top-0 z-50 rounded-xl border border-border/60 bg-background/95 backdrop-blur-md px-3 py-2 shadow-lg flex items-center justify-between gap-2" style={{ marginBottom: '0.5rem' }}>
+          <button
+            type="button"
+            className="text-xs font-medium text-primary hover:underline"
+            onClick={toggleSelectAllVisibleSpam}
+            disabled={!filteredEmails.length || bulkUnspamming}
+          >
+            {filteredEmails.length > 0 && filteredEmails.every((e) => selectedSpamIds.has(e.id)) ? 'Clear selection' : 'Select all'}
+          </button>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">{selectedSpamCount} selected</span>
+            <Button
+              size="sm"
+              onClick={handleBulkUnspam}
+              disabled={selectedSpamCount === 0 || bulkUnspamming}
+            >
+              {bulkUnspamming ? 'Moving...' : 'Not spam'}
+            </Button>
+          </div>
+        </div>
+      )}
       {filteredEmails.map((email, index) => (
         <button
-          key={`${email.id}-${index}`}
+          key={email.id}
           onClick={() => {
             // Get cached full email data if available
             const cachedEmail = emailCacheRef.current.get(email.id)
@@ -765,6 +883,16 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
           style={{ animationDelay: `${index * 15}ms` }}
         >
           <div className="flex gap-3 p-3 relative z-10">
+            {isSpamView && (
+              <input
+                type="checkbox"
+                checked={selectedSpamIds.has(email.id)}
+                onChange={(e) => toggleSpamSelection(email.id, e.target.checked)}
+                onClick={(e) => e.stopPropagation()}
+                className="mt-1 h-4 w-4"
+                aria-label={`Select ${email.subject || email.id}`}
+              />
+            )}
             {/* Avatar */}
             <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 ${getAvatarColor(email.from)
               } shadow-md`}>
