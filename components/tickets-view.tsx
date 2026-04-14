@@ -4091,7 +4091,9 @@ ${latestMsg.body || ""}
                     </Card>
                   ))}
                 </div>
-              ) : !filteredTickets.some(t => isTicketVisibleInTab(t, activeTab, currentUserId, assigneeFilter)) ? (
+              ) : !(activeSearchQuery
+                ? filteredTickets.length > 0
+                : filteredTickets.some(t => isTicketVisibleInTab(t, activeTab, currentUserId, assigneeFilter))) ? (
                 <div className="flex-1 flex items-center justify-center p-8">
                   <div className="text-center space-y-4 max-w-md">
                     <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mx-auto">
