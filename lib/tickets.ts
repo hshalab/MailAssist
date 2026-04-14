@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { getCurrentUserEmail } from './storage';
+import { isAIAutomationEnabled } from './ai-config';
 
 export type TicketStatus = 'open' | 'pending' | 'on_hold' | 'closed';
 export type TicketPriority = 'low' | 'medium' | 'high' | 'urgent';
@@ -258,6 +259,11 @@ export async function classifyTicketToDepartmentAsync(
   threadId?: string | null
 ): Promise<void> {
   try {
+    if (!isAIAutomationEnabled()) {
+      console.log('[Ticket] AI automation disabled, skipping ticket classification');
+      return;
+    }
+
     // 1) QUICK CHECK: Skip if already classified (save costs)
     if (supabase) {
       const { data: existing } = await supabase

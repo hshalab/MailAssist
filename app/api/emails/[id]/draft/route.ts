@@ -11,6 +11,7 @@ import { generateDraftReply } from '@/lib/ai-draft';
 import { listKnowledge } from '@/lib/knowledge';
 import { getGuardrails } from '@/lib/guardrails';
 import { getCurrentUserIdFromRequest, getSessionUserEmailFromRequest } from '@/lib/session';
+import { checkDailyLimit, checkRateLimit, getRequestIdentity } from '@/lib/rate-limit';
 
 type RouteContext =
   | { params: { id: string } }
@@ -135,6 +136,21 @@ export async function POST(
 
     // Get current user ID for logging
     const userId = getCurrentUserIdFromRequest(request);
+    const identity = userId || userEmail || getRequestIdentity(request.headers);
+    const shortWindow = checkRateLimit(`draft:${identity}`, 20, 60 * 1000);
+    if (!shortWindow.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Please wait before generating another draft.' },
+        { status: 429 }
+      );
+    }
+    const daily = checkDailyLimit(`draft-daily:${identity}`, 150);
+    if (!daily.allowed) {
+      return NextResponse.json(
+        { error: 'Daily draft limit reached for this account. Please try again tomorrow.' },
+        { status: 429 }
+      );
+    }
 
     // Get current user's name for replacing placeholders in draft
     let userName: string | null = null;

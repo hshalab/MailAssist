@@ -2,6 +2,7 @@
  * Embedding generation utilities
  * Supports multiple embedding APIs (Hugging Face free API, OpenAI, etc.)
  */
+import { allowOpenAIEmbeddingFallback } from './ai-config';
 
 interface EmbeddingResponse {
   embedding: number[];
@@ -19,6 +20,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   // If the provider resolves to local on Windows, prefer a remote provider
   // so the app keeps running even when native binaries are unavailable.
   const shouldAvoidLocalOnWindows = provider === 'local' && process.platform === 'win32';
+  const canUseOpenAIFallback = allowOpenAIEmbeddingFallback();
 
   if (provider === 'openai') {
     const key = openAiKey || embeddingEnvKey;
@@ -41,7 +43,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
       }
     }
 
-    if (openAiKey || embeddingEnvKey) {
+    if (canUseOpenAIFallback && (openAiKey || embeddingEnvKey)) {
       const fallbackKey = openAiKey || embeddingEnvKey;
       if (fallbackKey) {
         try {
@@ -61,7 +63,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   } catch (error) {
     console.warn('[Embeddings] Local embedding backend unavailable, falling back:', error);
 
-    if (openAiKey || embeddingEnvKey) {
+    if (canUseOpenAIFallback && (openAiKey || embeddingEnvKey)) {
       const fallbackKey = openAiKey || embeddingEnvKey;
       if (fallbackKey) {
         try {

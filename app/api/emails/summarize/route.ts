@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { validateBusinessSession, getCurrentUserIdFromRequest } from '@/lib/session'
+import { checkDailyLimit, checkRateLimit, getRequestIdentity } from '@/lib/rate-limit'
+import { getCachedSummary, setCachedSummary } from '@/lib/summary-cache'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,8 +13,32 @@ export const dynamic = 'force-dynamic'
  */
 export async function POST(request: NextRequest) {
     try {
+        const session = await validateBusinessSession()
+        const userId = getCurrentUserIdFromRequest(request)
+        if (!session && !userId) {
+            return NextResponse.json(
+                { error: 'Unauthorized' },
+                { status: 401 }
+            )
+        }
+        const identity = session?.id || userId || getRequestIdentity(request.headers)
+        const limiter = checkRateLimit(`emails-summarize:${identity}`, 30, 60 * 1000)
+        if (!limiter.allowed) {
+            return NextResponse.json(
+                { error: 'Rate limit exceeded. Try again in a minute.' },
+                { status: 429 }
+            )
+        }
+
         const body = await request.json()
         const { content } = body
+        const daily = checkDailyLimit(`emails-summarize-daily:${identity}`, 80)
+        if (!daily.allowed) {
+            return NextResponse.json(
+                { error: 'Daily summarize limit reached for this account.' },
+                { status: 429 }
+            )
+        }
 
         if (!content || typeof content !== 'string') {
             return NextResponse.json(
@@ -63,6 +90,10 @@ export async function POST(request: NextRequest) {
         if (cleanedContent.length > 4000) {
             cleanedContent = cleanedContent.substring(0, 4000) + '...'
         }
+        const cached = getCachedSummary(cleanedContent)
+        if (cached) {
+            return NextResponse.json({ summary: cached, cached: true })
+        }
 
         // Call OpenAI API for summarization
         const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -84,7 +115,7 @@ export async function POST(request: NextRequest) {
                     }
                 ],
                 temperature: 0.3,
-                max_completion_tokens: 120,
+                max_completion_tokens: 80,
             }),
         })
 
@@ -106,6 +137,7 @@ export async function POST(request: NextRequest) {
                 { status: 500 }
             )
         }
+        setCachedSummary(cleanedContent, summary)
 
         return NextResponse.json({ summary })
 

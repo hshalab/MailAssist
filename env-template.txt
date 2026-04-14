@@ -23,6 +23,12 @@ GROQ_API_KEY=your_groq_api_key_here
 # ============================================
 EMBEDDING_PROVIDER=local
 EMBEDDING_API_KEY=
+# Prevent paid OpenAI embedding fallback unless explicitly enabled
+ALLOW_OPENAI_EMBEDDING_FALLBACK=false
+
+# Disable automatic/background AI flows (ticket auto-classification)
+# Set to true only when you want AI automation running
+AI_AUTOMATION_ENABLED=false
 
 # ============================================
 # Frontend URL

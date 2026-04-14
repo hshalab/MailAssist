@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
+import { validateBusinessSession, getCurrentUserIdFromRequest } from "@/lib/session"
+import { checkDailyLimit, checkRateLimit, getRequestIdentity } from "@/lib/rate-limit"
+import { getCachedSummary, setCachedSummary } from "@/lib/summary-cache"
 
 /**
  * Convert HTML content to plain text for AI processing
@@ -61,7 +64,31 @@ function htmlToText(html: string): string {
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await validateBusinessSession()
+    const userId = getCurrentUserIdFromRequest(request)
+    if (!session && !userId) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      )
+    }
+    const identity = session?.id || userId || getRequestIdentity(request.headers)
+    const limiter = checkRateLimit(`ai-summarize:${identity}`, 30, 60 * 1000)
+    if (!limiter.allowed) {
+      return NextResponse.json(
+        { error: "Rate limit exceeded. Try again in a minute." },
+        { status: 429 }
+      )
+    }
+
     const { conversation } = await request.json()
+    const daily = checkDailyLimit(`ai-summarize-daily:${identity}`, 80)
+    if (!daily.allowed) {
+      return NextResponse.json(
+        { error: "Daily summarize limit reached for this account." },
+        { status: 429 }
+      )
+    }
 
     if (!conversation || typeof conversation !== "string") {
       return NextResponse.json(
@@ -81,6 +108,10 @@ export async function POST(request: NextRequest) {
 
     // Convert HTML to plain text for better AI processing
     const plainTextConversation = htmlToText(conversation)
+    const cached = getCachedSummary(plainTextConversation)
+    if (cached) {
+      return NextResponse.json({ summary: cached, cached: true })
+    }
 
     // Call OpenAI API to generate summary
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -102,7 +133,7 @@ export async function POST(request: NextRequest) {
           },
         ],
         temperature: 0.3,
-        max_completion_tokens: 120,
+        max_completion_tokens: 80,
       }),
     })
 
@@ -117,6 +148,7 @@ export async function POST(request: NextRequest) {
 
     const data = await response.json()
     const summary = data.choices?.[0]?.message?.content?.trim() || "Unable to generate summary."
+    setCachedSummary(plainTextConversation, summary)
 
     return NextResponse.json({ summary })
   } catch (error) {

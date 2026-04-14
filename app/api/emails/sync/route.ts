@@ -441,32 +441,28 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
 
     console.log(`[SYNC] Batch ${batchNumber}/${totalBatches}: ${successful} tickets created/updated, ${failed} skipped/failed`);
 
-    // Trigger auto-classification after each batch (runs during sync, works in production)
-    if (successful > 0) {
-      try {
-        console.log(`[SYNC] Triggering auto-classification for batch ${batchNumber} (${successful} new tickets)...`);
-        const { runAutoClassify } = await import('@/lib/auto-classify');
-
-        // Run classification synchronously (await it) so it happens during sync
-        // This ensures tickets are classified as they're created, not just at the end
-        // Works for both business and personal accounts
-        const classifyResult = await runAutoClassify({
-          limit: Math.min(successful, 30), // Smaller batch size per sync batch
-          businessId: businessIdForClassify,
-          userEmail: emailForAutoClassify
-        });
-
-        console.log(`[SYNC] Batch ${batchNumber} auto-classification completed: ${classifyResult.processed} processed, ${classifyResult.success} successful, ${classifyResult.failed} failed`);
-      } catch (error) {
-        console.error(`[SYNC] Auto-classification error for batch ${batchNumber} (non-blocking):`, error);
-        console.error(`[SYNC] Auto-classification error details:`, error instanceof Error ? error.stack : error);
-        // Don't throw - continue processing batches even if classification fails
-      }
-    }
-
     // Small delay between batches to avoid rate limits
     if (i + BATCH_SIZE < uniqueEmails.length) {
       await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
+  // Cost guard: trigger classification once per sync run instead of once per batch.
+  // This avoids repeated AI calls during large sync operations.
+  if (ticketsCreated > 0 && emailForAutoClassify) {
+    try {
+      const { runAutoClassify } = await import('@/lib/auto-classify');
+      const classifyLimit = Math.min(ticketsCreated, 5);
+      console.log(`[SYNC] Triggering one-shot auto-classification for ${classifyLimit} tickets`);
+      const classifyResult = await runAutoClassify({
+        limit: classifyLimit,
+        businessId: businessIdForClassify,
+        userEmail: emailForAutoClassify
+      });
+      console.log(`[SYNC] One-shot auto-classification completed: ${classifyResult.processed} processed, ${classifyResult.success} successful, ${classifyResult.failed} failed`);
+    } catch (error) {
+      console.error(`[SYNC] One-shot auto-classification error (non-blocking):`, error);
+      console.error(`[SYNC] One-shot auto-classification error details:`, error instanceof Error ? error.stack : error);
     }
   }
 

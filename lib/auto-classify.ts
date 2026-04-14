@@ -6,6 +6,7 @@
 import { getCurrentUser } from './session';
 import { supabase } from './supabase';
 import { classifyTicketToDepartmentAsync } from './tickets';
+import { isAIAutomationEnabled } from './ai-config';
 
 export interface AutoClassifyOptions {
     days?: number;
@@ -20,6 +21,11 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
     failed: number;
 }> {
     try {
+        if (!isAIAutomationEnabled()) {
+            console.log('[Auto-Classify] AI automation disabled via AI_AUTOMATION_ENABLED=false');
+            return { processed: 0, success: 0, failed: 0 };
+        }
+
         // Try to get current user, but allow server-side calls without user context
         let user = null;
         try {
@@ -57,7 +63,7 @@ export async function runAutoClassify(options: AutoClassifyOptions = {}): Promis
         }
 
         const days = options.days || defaultDays;
-        const limit = Math.min(options.limit || 30, 50); // Default batch size: 30, max 50
+        const limit = Math.min(options.limit || 15, 20); // Cost saver: smaller default and lower hard cap
 
         // Calculate cutoff date
         const cutoffDate = new Date();

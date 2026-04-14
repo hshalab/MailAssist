@@ -133,7 +133,6 @@ function PageContent() {
         if (typeof window !== 'undefined') {
           sessionStorage.setItem('trigger_sync_after_connect', 'true')
           sessionStorage.setItem('trigger_backfill_after_sync', 'true')
-          sessionStorage.setItem('trigger_backfill_on_connect', 'true') // Also trigger immediately after connection
         }
       }
 
@@ -175,7 +174,6 @@ function PageContent() {
       if (typeof window !== 'undefined') {
         sessionStorage.setItem('trigger_sync_after_connect', 'true')
         sessionStorage.setItem('trigger_backfill_after_sync', 'true')
-        sessionStorage.setItem('trigger_backfill_on_connect', 'true') // Also trigger immediately after connection
         // Keep the skeleton flag - it will be cleared when emails load
         // Don't remove it here, let EmailList clear it
       }
@@ -1018,7 +1016,7 @@ function PageContent() {
         console.log('[Backfill] Initial sync complete, triggering auto-classification...')
         fetch('/api/departments/backfill', {
           method: 'POST',
-          body: JSON.stringify({ limit: 50 })
+          body: JSON.stringify({ limit: 10 })
         })
           .then(res => res.json())
           .then(data => {
@@ -1033,44 +1031,12 @@ function PageContent() {
     }
   }, [isSyncComplete, activeView])
 
-  // NEW: Trigger auto-classification immediately when Gmail is first connected
+  // Cost guard: do not trigger backfill directly on connection.
+  // Classification should happen after sync or via cron.
   useEffect(() => {
-    if (!isConnected || typeof window === 'undefined') return
-
-    const shouldTriggerOnConnect = sessionStorage.getItem('trigger_backfill_on_connect')
-    if (shouldTriggerOnConnect === 'true') {
-      sessionStorage.removeItem('trigger_backfill_on_connect')
-
-      // Wait a bit for initial sync to create some tickets, then classify
-      console.log('[Auto-Classify] Gmail connected, scheduling initial auto-classification...')
-      const timeoutId = setTimeout(async () => {
-        try {
-          console.log('[Auto-Classify] Running initial auto-classification after Gmail connection...')
-          const response = await fetch('/api/departments/backfill', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ limit: 50 }) // Larger batch for initial connection
-          })
-
-          if (response.ok) {
-            const data = await response.json()
-            console.log('[Auto-Classify] Initial classification result:', data)
-
-            // Refresh tickets view if we're on that screen
-            if (activeView === 'tickets') {
-              setTicketsVersion(v => v + 1)
-            }
-          } else {
-            console.warn('[Auto-Classify] Initial classification failed:', await response.text())
-          }
-        } catch (error) {
-          console.error('[Auto-Classify] Initial classification error:', error)
-        }
-      }, 2 * 60 * 1000) // Wait 2 minutes for initial sync to create tickets
-
-      return () => clearTimeout(timeoutId)
-    }
-  }, [isConnected, activeView])
+    if (typeof window === 'undefined') return
+    sessionStorage.removeItem('trigger_backfill_on_connect')
+  }, [isConnected])
 
   // NEW: Automatic periodic auto-classification (every hour)
   useEffect(() => {
@@ -1091,7 +1057,7 @@ function PageContent() {
         const response = await fetch('/api/departments/backfill', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ limit: 30 }) // Smaller batch for periodic runs
+          body: JSON.stringify({ limit: 10 }) // Cost guard for periodic runs
         })
 
         if (response.ok) {

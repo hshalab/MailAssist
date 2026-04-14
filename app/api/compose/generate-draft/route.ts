@@ -10,6 +10,7 @@ import { loadStoredEmails } from '@/lib/storage';
 import { listKnowledge } from '@/lib/knowledge';
 import { getGuardrails } from '@/lib/guardrails';
 import { getOpenAIApiKey } from '@/lib/ai-draft';
+import { checkDailyLimit, checkRateLimit, getRequestIdentity } from '@/lib/rate-limit';
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,6 +27,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'No Gmail account connected' },
         { status: 400 }
+      );
+    }
+    const identity = userId || userEmail || getRequestIdentity(request.headers);
+    const shortWindow = checkRateLimit(`compose-draft:${identity}`, 20, 60 * 1000);
+    if (!shortWindow.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Please wait before generating another draft.' },
+        { status: 429 }
+      );
+    }
+    const daily = checkDailyLimit(`compose-draft-daily:${identity}`, 150);
+    if (!daily.allowed) {
+      return NextResponse.json(
+        { error: 'Daily draft limit reached for this account. Please try again tomorrow.' },
+        { status: 429 }
       );
     }
 
