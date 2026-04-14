@@ -970,7 +970,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       // Let's simplify: If search is present, clear the implicit tab filters.
       if (activeSearchQuery) {
         // Reset URL to base and re-apply ONLY explicit filters + search
-        url = `/api/tickets?_=${timestamp}&nav=${navTimestamp}&page=${pageNum}&limit=${limit}&q=${encodeURIComponent(activeSearchQuery)}`
+        url = `/api/tickets?_=${timestamp}&nav=${navTimestamp}&page=${pageNum}&limit=${fetchLimit}&q=${encodeURIComponent(activeSearchQuery)}`
         if (selectedAccount !== 'all') url += `&account=${encodeURIComponent(selectedAccount)}`
         if (statusFilter !== 'all') url += `&status=${encodeURIComponent(statusFilter)}`
         if (priorityFilter !== 'all') url += `&priority=${priorityFilter}`
