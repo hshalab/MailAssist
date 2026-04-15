@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/use-toast"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { ConnectImapForm } from "./connect-imap-form"
+import { supabaseBrowser } from "@/lib/supabase-client"
 
 interface Email {
   id: string
@@ -304,21 +305,25 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     }
   }, [onRefreshReady, handleRefresh])
 
-  // Auto-poll for new emails every 30 seconds (silent refresh)
-  // PERFORMANCE: Skip polling if user has an email selected (reduces load)
+  // Supabase Realtime — refresh email list when a new ticket (email) is inserted
   useEffect(() => {
-    // Don't poll if user is viewing an email (reduces unnecessary requests)
-    if (selectedEmail) {
-      return () => { } // Return empty cleanup function to keep dependency array consistent
+    if (!supabaseBrowser) return
+
+    const channel = supabaseBrowser
+      .channel('email-list-tickets')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'tickets' },
+        () => {
+          fetchEmails(limit, false, true)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabaseBrowser?.removeChannel(channel)
     }
-
-    const pollInterval = setInterval(() => {
-      console.log('Auto-polling for new emails...')
-      fetchEmails(limit, false, true)
-    }, 300000) // 5 minutes (realtime handles instant updates)
-
-    return () => clearInterval(pollInterval)
-  }, [limit, selectedEmail])
+  }, [limit])
 
   // Initial fetch on mount and when viewType or selectedAccount changes
   useEffect(() => {

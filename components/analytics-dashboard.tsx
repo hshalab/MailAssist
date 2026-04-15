@@ -78,7 +78,6 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
   const [agentAnalytics, setAgentAnalytics] = useState<AgentAnalytics[]>([])
   const [dateRange, setDateRange] = useState({ startDate: "", endDate: "" })
   const [error, setError] = useState<string | null>(null)
-  const [autoRefresh, setAutoRefresh] = useState(false)
   const [departments, setDepartments] = useState<Record<string, string>>({})
 
   const canViewAnalytics = currentUserRole === "admin" || currentUserRole === "manager"
@@ -101,16 +100,7 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
     fetchDepartments()
   }, [canViewAnalytics])
 
-  // Auto-refresh effect
-  useEffect(() => {
-    if (!autoRefresh || !canViewAnalytics) return
-    const interval = setInterval(() => {
-      if (dateRange.startDate && dateRange.endDate) {
-        fetchAnalytics(new Date(dateRange.startDate), new Date(dateRange.endDate))
-      }
-    }, 600000) // Refresh every 10 minutes
-    return () => clearInterval(interval)
-  }, [autoRefresh, canViewAnalytics, dateRange])
+  // No auto-refresh — analytics load on navigation to the analytics view.
 
   const fetchDepartments = async () => {
     try {
@@ -392,15 +382,6 @@ export default function AnalyticsDashboard({ currentUserRole }: AnalyticsDashboa
             >
               📥 Export
             </button>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoRefresh}
-                onChange={(e) => setAutoRefresh(e.target.checked)}
-                className="rounded"
-              />
-              Auto-refresh
-            </label>
           </div>
         </div>
       </div>

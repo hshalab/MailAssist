@@ -136,7 +136,9 @@ export async function POST(
 
     // Check per-account AI feature toggle
     const { getAccountAISettings } = await import('@/lib/ai-config');
-    const aiSettings = await getAccountAISettings(userEmail, businessAccount?.businessId ?? null);
+    const { validateBusinessSession: _vbs } = await import('@/lib/session');
+    const _bSession = await _vbs();
+    const aiSettings = await getAccountAISettings(userEmail, _bSession?.businessId ?? null);
     if (!aiSettings.enable_ai_drafts) {
       return NextResponse.json(
         { error: 'AI draft generation is disabled for this account.' },

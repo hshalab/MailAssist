@@ -7,6 +7,7 @@ import ShopifySidebar from "@/components/shopify-sidebar"
 import { Button } from "@/components/ui/button"
 import { RefreshCw, Mail } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { supabaseBrowser } from "@/lib/supabase-client"
 
 interface InboxViewProps {
   selectedEmail: string | null
@@ -228,23 +229,25 @@ export default function InboxView({ selectedEmail, onSelectEmail, onDraftGenerat
     onSelectEmail(null)
   }, [viewType, onSelectEmail])
 
-  // Auto-refresh every 30 seconds to pick up department classifications
-  // PERFORMANCE: Skip auto-refresh if user has an email selected (reduces load)
+  // Supabase Realtime — update last-refresh timestamp when a new ticket arrives
   useEffect(() => {
-    // Don't auto-refresh if user is viewing an email (reduces unnecessary requests)
-    if (selectedEmail) {
-      return () => { } // Return empty cleanup function to keep dependency array consistent
+    if (!supabaseBrowser) return
+
+    const channel = supabaseBrowser
+      .channel('inbox-view-tickets')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'tickets' },
+        () => {
+          setLastRefreshTime(Date.now())
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabaseBrowser?.removeChannel(channel)
     }
-
-    const interval = setInterval(() => {
-      if (emailListRefresh && !listLoading) {
-        emailListRefresh()
-        setLastRefreshTime(Date.now())
-      }
-    }, 300000) // 5 minutes (realtime handles instant updates)
-
-    return () => clearInterval(interval)
-  }, [emailListRefresh, listLoading, selectedEmail])
+  }, [])
 
   // Memoized callback to prevent infinite loops
   const handleRefreshReady = useCallback((refreshFn: () => void) => {

@@ -29,6 +29,18 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    // Check per-account AI feature toggle
+    const { getAccountAISettings } = await import('@/lib/ai-config');
+    const { validateBusinessSession } = await import('@/lib/session');
+    const bSession = await validateBusinessSession();
+    const aiSettings = await getAccountAISettings(userEmail, bSession?.businessId ?? null);
+    if (!aiSettings.enable_ai_drafts) {
+      return NextResponse.json(
+        { error: 'AI draft generation is disabled for this account.' },
+        { status: 403 }
+      );
+    }
+
     const identity = userId || userEmail || getRequestIdentity(request.headers);
     const shortWindow = checkRateLimit(`compose-draft:${identity}`, 20, 60 * 1000);
     if (!shortWindow.allowed) {

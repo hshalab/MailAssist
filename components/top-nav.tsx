@@ -119,12 +119,10 @@ export default function TopNav({ isConnected, userProfile, currentUser, onLogout
     fetchNotifications()
 
     if (!currentUser?.id || !supabaseBrowser) {
-      // Fallback: poll every 5 minutes if realtime is unavailable (Realtime handles the real-time case)
-      const interval = setInterval(() => fetchNotifications({ showToast: true }), 300000)
-      return () => clearInterval(interval)
+      return
     }
 
-    // SUPABASE REALTIME NOTIFICATIONS (Replaces 10s polling)
+    // SUPABASE REALTIME NOTIFICATIONS
     console.log('[Notifications] Setting up realtime subscription for user:', currentUser.id)
     const channel = supabaseBrowser
       .channel(`notifications:${currentUser.id}`)

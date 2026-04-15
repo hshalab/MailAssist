@@ -1646,59 +1646,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }, [fetchTickets, selectedTicket])
 
-  // CHECK: Adaptive polling based on visibility
-  // If tab is visible: Poll every 5 seconds (Super fast / Instant feel)
-  // If tab is hidden: Poll every 30 seconds (Background sync)
+  // Initial fetch on mount — Realtime subscription handles all subsequent updates
   useEffect(() => {
-    // Safety-net polling: Supabase Realtime is the primary delivery mechanism for
-    // ticket changes. This poll only exists to recover from dropped WS connections.
-    // Gmail push webhook handles new email → ticket creation, so no email fetch needed.
-    const doSyncAndFetch = async () => {
-      if (Date.now() < suppressRealtimeFetchUntil.current) {
-        console.log('[Poll] Skipping poll cycle — within post-action suppression window')
-        return
-      }
-      await fetchTickets({ silent: true })
-    }
-
-    // Run immediately on mount
-    doSyncAndFetch()
-
-    let intervalId: NodeJS.Timeout
-
-    const startPolling = () => {
-      // Clear existing interval if any
-      if (intervalId) clearInterval(intervalId)
-
-      const isVisible = document.visibilityState === 'visible'
-      // Supabase Realtime handles instant updates; polling is just a safety net.
-      const delay = isVisible ? 60000 : 300000 // 60s active, 5min background
-
-      console.log(`[Tickets] Polling started: ${isVisible ? 'ACTIVE (60s)' : 'BACKGROUND (5min)'}`)
-
-      intervalId = setInterval(doSyncAndFetch, delay)
-    }
-
-    // Start initial polling
-    startPolling()
-
-    // Listen for visibility changes
-    const handleVisibilityChange = () => {
-      startPolling()
-      // If becoming visible, ALSO trigger an immediate fetch
-      if (document.visibilityState === 'visible') {
-        console.log('[Tickets] Tab active - forcing immediate check')
-        doSyncAndFetch()
-      }
-    }
-
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-
-    return () => {
-      console.log('[Tickets] Stopping auto-poll')
-      clearInterval(intervalId)
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-    }
+    fetchTickets({ silent: false })
   }, [fetchTickets])
 
   // Apply deep-linked ticket selection once tickets are loaded.
@@ -1887,40 +1837,8 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     return new Date(ticket.lastCustomerReplyAt) > new Date(lastSeen)
   }
 
-  // Light polling only for the currently selected ticket (every 2 minutes) to react
-  // when a new customer email arrives. Reduced frequency to minimize server load.
-  useEffect(() => {
-    if (!selectedTicket) return
-
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/tickets/${selectedTicket.id}`)
-        if (!res.ok) return
-        const data = await res.json().catch(() => null)
-        const updated: Ticket | undefined = data?.ticket
-        if (!updated) return
-
-        const prevReply = prevSelectedCustomerReplyRef.current
-        const currentReply = updated.lastCustomerReplyAt || null
-
-        if (currentReply && (!prevReply || new Date(currentReply) > new Date(prevReply))) {
-          toast({
-            title: "New customer reply",
-            description: updated.subject,
-          })
-          setSelectedTicket(updated)
-          prevSelectedCustomerReplyRef.current = currentReply
-          await fetchThread({ silent: true })
-          await markTicketViewed(updated, currentReply)
-          await fetchTickets({ silent: true })
-        }
-      } catch {
-        // ignore transient errors
-      }
-    }, 120000) // 2 minutes instead of 1 minute
-
-    return () => clearInterval(interval)
-  }, [selectedTicket?.id])
+  // New customer replies on the selected ticket are delivered via the Realtime
+  // UPDATE subscription above (lastCustomerReplyAt change → toast + thread refetch).
 
   // Fetch departments for filter dropdown
   useEffect(() => {
