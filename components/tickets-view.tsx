@@ -1473,15 +1473,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
             )
           }
 
-          // Detect new customer reply on the currently selected ticket
+          // Detect new customer reply on the currently selected ticket.
+          // Use refs for comparison (always fresh) and pass ticketId explicitly
+          // to fetchThread so it doesn't rely on any stale closure state.
           const newReply = raw.last_customer_reply_at ?? null
           const prevReply = prevSelectedCustomerReplyRef.current
           const isSelectedTicket = raw.id === prevSelectedIdRef.current
           if (isSelectedTicket && newReply && (!prevReply || new Date(newReply) > new Date(prevReply))) {
             prevSelectedCustomerReplyRef.current = newReply
             toast({ title: 'New customer reply', description: raw.subject })
-            fetchThread({ silent: true })
-            markTicketViewed({ id: raw.id } as any, newReply)
+            fetchThread({ silent: true, ticketId: raw.id })
+            markTicketViewed({ id: raw.id, subject: raw.subject } as any, newReply)
           }
         }
       )
