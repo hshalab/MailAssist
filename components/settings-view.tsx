@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import ShopifySettings from "@/components/shopify-settings"
 import { AccountManager } from "@/components/account-manager"
 
@@ -26,16 +27,21 @@ interface SettingsViewProps {
   onSync: (maxResults?: number) => Promise<void>
   error?: string | null
   currentUserId?: string | null
+  currentUserRole?: "admin" | "manager" | "agent" | null
 }
 
-export default function SettingsView({ status, syncing, onSync, error }: SettingsViewProps) {
+export default function SettingsView({ status, syncing, onSync, error, currentUserRole }: SettingsViewProps) {
   const [message, setMessage] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
   const [autoClassifyDays, setAutoClassifyDays] = useState<number>(30)
+  const [enableAutoClassify, setEnableAutoClassify] = useState<boolean>(true)
+  const [enableAiDrafts, setEnableAiDrafts] = useState<boolean>(true)
+  const [enableAiSummarize, setEnableAiSummarize] = useState<boolean>(true)
   const [savingSettings, setSavingSettings] = useState(false)
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null)
 
-  // Load settings on mount
+  const isAdminOrManager = currentUserRole === 'admin' || currentUserRole === 'manager'
+
   useEffect(() => {
     loadSettings()
   }, [])
@@ -45,7 +51,10 @@ export default function SettingsView({ status, syncing, onSync, error }: Setting
       const response = await fetch('/api/settings')
       if (response.ok) {
         const data = await response.json()
-        setAutoClassifyDays(data.auto_classify_days || 30)
+        setAutoClassifyDays(data.auto_classify_days ?? 30)
+        setEnableAutoClassify(data.enable_auto_classify ?? true)
+        setEnableAiDrafts(data.enable_ai_drafts ?? true)
+        setEnableAiSummarize(data.enable_ai_summarize ?? true)
       }
     } catch (err) {
       console.error('Error loading settings:', err)
@@ -59,7 +68,12 @@ export default function SettingsView({ status, syncing, onSync, error }: Setting
       const response = await fetch('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ auto_classify_days: autoClassifyDays }),
+        body: JSON.stringify({
+          auto_classify_days: autoClassifyDays,
+          enable_auto_classify: enableAutoClassify,
+          enable_ai_drafts: enableAiDrafts,
+          enable_ai_summarize: enableAiSummarize,
+        }),
       })
 
       if (response.ok) {
@@ -206,6 +220,81 @@ export default function SettingsView({ status, syncing, onSync, error }: Setting
               </div>
             </CardContent>
           </Card>
+
+          {/* AI Feature Toggles — visible to admins and managers only */}
+          {isAdminOrManager && (
+            <Card className="border-border shadow-lg">
+              <CardHeader className="pb-6 pt-6 px-6">
+                <CardTitle className="text-lg font-bold">AI Features</CardTitle>
+                <CardDescription className="text-sm mt-2">
+                  Enable or disable AI features for this account. Disabling a feature stops all related OpenAI calls and reduces costs immediately.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6 px-6 pb-6">
+                {/* Ticket Auto-Classification */}
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-accent/5 px-5 py-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold">Ticket Auto-Classification</p>
+                    <p className="text-xs text-muted-foreground">
+                      Automatically assign incoming tickets to departments using AI. Disabling this saves the most cost.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={enableAutoClassify}
+                    onCheckedChange={setEnableAutoClassify}
+                    aria-label="Toggle ticket auto-classification"
+                  />
+                </div>
+
+                {/* AI Draft Generation */}
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-accent/5 px-5 py-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold">AI Draft Generation</p>
+                    <p className="text-xs text-muted-foreground">
+                      Generate email reply drafts and new email drafts using AI.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={enableAiDrafts}
+                    onCheckedChange={setEnableAiDrafts}
+                    aria-label="Toggle AI draft generation"
+                  />
+                </div>
+
+                {/* AI Summarization */}
+                <div className="flex items-center justify-between gap-4 rounded-xl border border-border bg-accent/5 px-5 py-4">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold">AI Email Summarization</p>
+                    <p className="text-xs text-muted-foreground">
+                      Summarize email threads and conversations using AI.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={enableAiSummarize}
+                    onCheckedChange={setEnableAiSummarize}
+                    aria-label="Toggle AI summarization"
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <Button
+                    onClick={saveSettings}
+                    disabled={savingSettings}
+                    size="lg"
+                    className="shadow-md hover:shadow-lg w-full sm:w-auto"
+                  >
+                    {savingSettings ? "Saving..." : "Save AI Settings"}
+                  </Button>
+
+                  {settingsMessage && (
+                    <div className="text-sm font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border-2 border-emerald-200 dark:border-emerald-900/50 rounded-xl px-5 py-4">
+                      {settingsMessage}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="border-border/40 shadow-md">
             <CardHeader className="pb-6 pt-6 px-6">

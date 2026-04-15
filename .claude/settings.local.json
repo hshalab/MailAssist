@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -rn \"retry\\\\|Retry\\\\|retries\\\\|maxRetries\\\\|for.*attempt\" /C/Users/Salman/Downloads/MailAssist/MailAssist/lib/*.ts)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|json\\)$\")",
+      "Bash(grep -r \"user_settings\\\\|business_settings\" /c/Users/Salman/Downloads/MailAssist/MailAssist/supabase_schema*.sql)",
+      "Bash(find:*)",
+      "Bash(ls -la /c/Users/Salman/Downloads/MailAssist/MailAssist/components/*.tsx)",
+      "Bash(grep -E '\\\\.\\(ts|tsx|js|jsx|json\\)$|^d')"
+    ]
+  }
+}

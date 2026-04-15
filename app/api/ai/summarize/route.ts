@@ -73,6 +73,14 @@ export async function POST(request: NextRequest) {
       )
     }
     const identity = session?.id || userId || getRequestIdentity(request.headers)
+
+    // Check per-account AI feature toggle
+    const { getAccountAISettings } = await import('@/lib/ai-config')
+    const aiCfg = await getAccountAISettings(session?.email ?? null, session?.businessId ?? null)
+    if (!aiCfg.enable_ai_summarize) {
+      return NextResponse.json({ error: 'AI summarization is disabled for this account.' }, { status: 403 })
+    }
+
     const limiter = checkRateLimit(`ai-summarize:${identity}`, 30, 60 * 1000)
     if (!limiter.allowed) {
       return NextResponse.json(
@@ -82,7 +90,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { conversation } = await request.json()
-    const daily = checkDailyLimit(`ai-summarize-daily:${identity}`, 80)
+    const daily = await checkDailyLimit(`ai-summarize-daily:${identity}`, 20)
     if (!daily.allowed) {
       return NextResponse.json(
         { error: "Daily summarize limit reached for this account." },
@@ -108,7 +116,7 @@ export async function POST(request: NextRequest) {
 
     // Convert HTML to plain text for better AI processing
     const plainTextConversation = htmlToText(conversation)
-    const cached = getCachedSummary(plainTextConversation)
+    const cached = await getCachedSummary(plainTextConversation)
     if (cached) {
       return NextResponse.json({ summary: cached, cached: true })
     }
@@ -148,7 +156,7 @@ export async function POST(request: NextRequest) {
 
     const data = await response.json()
     const summary = data.choices?.[0]?.message?.content?.trim() || "Unable to generate summary."
-    setCachedSummary(plainTextConversation, summary)
+    await setCachedSummary(plainTextConversation, summary)
 
     return NextResponse.json({ summary })
   } catch (error) {

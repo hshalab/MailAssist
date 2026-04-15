@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
         { status: 429 }
       );
     }
-    const daily = checkDailyLimit(`compose-draft-daily:${identity}`, 150);
+    const daily = await checkDailyLimit(`compose-draft-daily:${identity}`, 30);
     if (!daily.allowed) {
       return NextResponse.json(
         { error: 'Daily draft limit reached for this account. Please try again tomorrow.' },

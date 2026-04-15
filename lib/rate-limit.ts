@@ -1,14 +1,9 @@
-type Bucket = {
-  count: number;
-  resetAt: number;
-};
+import { supabase } from './supabase';
 
+// Short-window buckets stay in-memory: per-minute limits are per-instance by design.
+// A few extra requests across concurrent instances is acceptable.
+type Bucket = { count: number; resetAt: number };
 const buckets = new Map<string, Bucket>();
-const dailyBuckets = new Map<string, { count: number; dayKey: string }>();
-
-function now() {
-  return Date.now();
-}
 
 function normalizeKey(key: string) {
   return key.trim().toLowerCase();
@@ -16,7 +11,7 @@ function normalizeKey(key: string) {
 
 export function checkRateLimit(key: string, maxRequests: number, windowMs: number) {
   const id = normalizeKey(key);
-  const current = now();
+  const current = Date.now();
   const bucket = buckets.get(id);
 
   if (!bucket || current >= bucket.resetAt) {
@@ -40,22 +35,45 @@ export function getRequestIdentity(headers: Headers, fallback = 'anonymous') {
   return ip;
 }
 
-export function checkDailyLimit(key: string, maxPerDay: number) {
+/**
+ * Daily limits backed by Supabase so they persist across all serverless instances.
+ * Requires the `rate_limits` table (see supabase_migrations/20260415_add_rate_limits_and_summary_cache.sql).
+ *
+ * Note: the SELECT → UPSERT is not atomic, so up to [concurrency] extra requests
+ * may slip through under heavy parallel load. This is acceptable for cost-control purposes.
+ */
+export async function checkDailyLimit(
+  key: string,
+  maxPerDay: number
+): Promise<{ allowed: boolean; remaining: number }> {
   const id = normalizeKey(key);
-  const dayKey = new Date().toISOString().slice(0, 10);
-  const current = dailyBuckets.get(id);
+  const dayKey = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
-  if (!current || current.dayKey !== dayKey) {
-    dailyBuckets.set(id, { count: 1, dayKey });
-    return { allowed: true, remaining: maxPerDay - 1 };
+  try {
+    const { data } = await supabase
+      .from('rate_limits')
+      .select('count')
+      .eq('key', id)
+      .eq('day_key', dayKey)
+      .single();
+
+    const currentCount = (data?.count as number) ?? 0;
+
+    if (currentCount >= maxPerDay) {
+      return { allowed: false, remaining: 0 };
+    }
+
+    await supabase
+      .from('rate_limits')
+      .upsert(
+        { key: id, day_key: dayKey, count: currentCount + 1, updated_at: new Date().toISOString() },
+        { onConflict: 'key,day_key' }
+      );
+
+    return { allowed: true, remaining: maxPerDay - currentCount - 1 };
+  } catch (err) {
+    // Fail open: allow the request if the DB is unreachable so users aren't blocked by infra issues
+    console.error('[rate-limit] DB error, allowing request:', err);
+    return { allowed: true, remaining: maxPerDay };
   }
-
-  if (current.count >= maxPerDay) {
-    return { allowed: false, remaining: 0 };
-  }
-
-  current.count += 1;
-  dailyBuckets.set(id, current);
-  return { allowed: true, remaining: maxPerDay - current.count };
 }
-

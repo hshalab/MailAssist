@@ -693,18 +693,21 @@ function PageContent() {
     if (!isConnected) return
 
     const backgroundSyncInterval = setInterval(() => {
+      // Skip if tab is hidden (user switched away) — no point spending CPU/API calls
+      if (typeof document !== 'undefined' && document.hidden) {
+        console.log('[Background Sync] Skipping - tab is hidden')
+        return
+      }
       // Only sync if not already syncing (check both UI state and server state)
       if (!syncInProgress && !syncStatus?.processing) {
         console.log('[Background Sync] Starting automatic background sync...')
-        // Use silent sync (smaller batch, doesn't show UI updates)
         startSync(100, true).catch(err => {
           console.error('[Background Sync] Failed:', err)
-          // Don't show error to user for background syncs
         })
       } else {
         console.log('[Background Sync] Skipping - sync already in progress')
       }
-    }, 10 * 60 * 1000) // Every 10 minutes instead of 5
+    }, 60 * 60 * 1000) // Every 60 minutes (reduced from 10 min to cut AI classification costs)
 
     return () => clearInterval(backgroundSyncInterval)
   }, [isConnected, syncInProgress, syncStatus?.processing, startSync])
@@ -846,6 +849,7 @@ function PageContent() {
             onSync={startSync}
             error={syncError}
             currentUserId={currentUserId}
+            currentUserRole={currentUser?.role as "admin" | "manager" | "agent" | null}
           />
         )
       case "users":

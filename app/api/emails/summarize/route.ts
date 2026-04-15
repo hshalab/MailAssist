@@ -22,6 +22,14 @@ export async function POST(request: NextRequest) {
             )
         }
         const identity = session?.id || userId || getRequestIdentity(request.headers)
+
+        // Check per-account AI feature toggle
+        const { getAccountAISettings } = await import('@/lib/ai-config')
+        const aiCfg = await getAccountAISettings(session?.email ?? null, session?.businessId ?? null)
+        if (!aiCfg.enable_ai_summarize) {
+          return NextResponse.json({ error: 'AI summarization is disabled for this account.' }, { status: 403 })
+        }
+
         const limiter = checkRateLimit(`emails-summarize:${identity}`, 30, 60 * 1000)
         if (!limiter.allowed) {
             return NextResponse.json(
@@ -32,7 +40,7 @@ export async function POST(request: NextRequest) {
 
         const body = await request.json()
         const { content } = body
-        const daily = checkDailyLimit(`emails-summarize-daily:${identity}`, 80)
+        const daily = await checkDailyLimit(`emails-summarize-daily:${identity}`, 20)
         if (!daily.allowed) {
             return NextResponse.json(
                 { error: 'Daily summarize limit reached for this account.' },
@@ -90,7 +98,7 @@ export async function POST(request: NextRequest) {
         if (cleanedContent.length > 4000) {
             cleanedContent = cleanedContent.substring(0, 4000) + '...'
         }
-        const cached = getCachedSummary(cleanedContent)
+        const cached = await getCachedSummary(cleanedContent)
         if (cached) {
             return NextResponse.json({ summary: cached, cached: true })
         }
@@ -123,8 +131,8 @@ export async function POST(request: NextRequest) {
             const errorText = await openaiResponse.text()
             console.error('OpenAI API error:', openaiResponse.status, errorText)
             return NextResponse.json(
-                { error: `OpenAI API error: ${openaiResponse.status} ${openaiResponse.statusText}` },
-                { status: openaiResponse.status }
+                { error: 'Failed to generate summary' },
+                { status: 500 }
             )
         }
 
@@ -137,14 +145,14 @@ export async function POST(request: NextRequest) {
                 { status: 500 }
             )
         }
-        setCachedSummary(cleanedContent, summary)
+        await setCachedSummary(cleanedContent, summary)
 
         return NextResponse.json({ summary })
 
     } catch (error) {
         console.error('Error summarizing email:', error)
         return NextResponse.json(
-            { error: error instanceof Error ? error.message : 'Internal server error' },
+            { error: 'Internal server error' },
             { status: 500 }
         )
     }

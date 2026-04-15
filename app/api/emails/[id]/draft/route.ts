@@ -134,6 +134,16 @@ export async function POST(
       userEmail = await getCurrentUserEmail();
     }
 
+    // Check per-account AI feature toggle
+    const { getAccountAISettings } = await import('@/lib/ai-config');
+    const aiSettings = await getAccountAISettings(userEmail, businessAccount?.businessId ?? null);
+    if (!aiSettings.enable_ai_drafts) {
+      return NextResponse.json(
+        { error: 'AI draft generation is disabled for this account.' },
+        { status: 403 }
+      );
+    }
+
     // Get current user ID for logging
     const userId = getCurrentUserIdFromRequest(request);
     const identity = userId || userEmail || getRequestIdentity(request.headers);
@@ -144,7 +154,7 @@ export async function POST(
         { status: 429 }
       );
     }
-    const daily = checkDailyLimit(`draft-daily:${identity}`, 150);
+    const daily = await checkDailyLimit(`draft-daily:${identity}`, 30);
     if (!daily.allowed) {
       return NextResponse.json(
         { error: 'Daily draft limit reached for this account. Please try again tomorrow.' },
@@ -227,7 +237,7 @@ export async function POST(
       // CRITICAL: Only load emails from the same account (ownerEmail) for custom per-account learning
       (async () => {
         const storedEmails = await loadStoredEmails({ 
-          limit: 50, // Reduced from 100 to 50 for faster loading
+          limit: 15, // Reduced to 15 to shrink prompt size and cut costs
           includeReceived: false,
           ownerEmail: accountEmail || undefined // Filter by account email for custom embeddings
         });

@@ -448,9 +448,15 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
   }
 
   // Cost guard: trigger classification once per sync run instead of once per batch.
-  // This avoids repeated AI calls during large sync operations.
+  // Respect the per-account AI feature toggle before calling OpenAI.
   if (ticketsCreated > 0 && emailForAutoClassify) {
     try {
+      const { getAccountAISettings } = await import('@/lib/ai-config');
+      const aiSettings = await getAccountAISettings(emailForAutoClassify, businessIdForClassify);
+      if (!aiSettings.enable_auto_classify) {
+        console.log('[SYNC] Auto-classify disabled for this account — skipping');
+        // Skip the block below by jumping to finally-equivalent
+      } else {
       const { runAutoClassify } = await import('@/lib/auto-classify');
       const classifyLimit = Math.min(ticketsCreated, 5);
       console.log(`[SYNC] Triggering one-shot auto-classification for ${classifyLimit} tickets`);
@@ -460,6 +466,7 @@ async function processInboxEmailsForTickets(inboxEmails: any[], businessId?: str
         userEmail: emailForAutoClassify
       });
       console.log(`[SYNC] One-shot auto-classification completed: ${classifyResult.processed} processed, ${classifyResult.success} successful, ${classifyResult.failed} failed`);
+      } // end enable_auto_classify check
     } catch (error) {
       console.error(`[SYNC] One-shot auto-classification error (non-blocking):`, error);
       console.error(`[SYNC] One-shot auto-classification error details:`, error instanceof Error ? error.stack : error);
