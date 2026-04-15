@@ -1472,6 +1472,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
               prev?.id === raw.id ? ({ ...prev, ...patch } as Ticket) : prev
             )
           }
+
+          // Detect new customer reply on the currently selected ticket
+          const newReply = raw.last_customer_reply_at ?? null
+          const prevReply = prevSelectedCustomerReplyRef.current
+          const isSelectedTicket = raw.id === prevSelectedIdRef.current
+          if (isSelectedTicket && newReply && (!prevReply || new Date(newReply) > new Date(prevReply))) {
+            prevSelectedCustomerReplyRef.current = newReply
+            toast({ title: 'New customer reply', description: raw.subject })
+            fetchThread({ silent: true })
+            markTicketViewed({ id: raw.id } as any, newReply)
+          }
         }
       )
       .subscribe((status) => {
