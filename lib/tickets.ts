@@ -284,6 +284,14 @@ export async function classifyTicketToDepartmentAsync(
     const businessId = currentUser?.businessId || null;
     const scopeEmail = businessId ? null : (userEmail || null);
 
+    // Check per-account setting before doing any AI work
+    const { getAccountAISettings } = await import('./ai-config');
+    const aiSettings = await getAccountAISettings(scopeEmail, businessId);
+    if (!aiSettings.enable_auto_classify) {
+      console.log('[Ticket] Auto-classify disabled in admin settings, skipping classification');
+      return;
+    }
+
     // Get all departments for this account
     const { getAllDepartments } = await import('./departments');
     const departments = await getAllDepartments(scopeEmail, businessId);
