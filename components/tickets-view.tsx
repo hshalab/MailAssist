@@ -1392,6 +1392,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       .catch(err => console.error('Failed to prefetch closed tickets', err))
   }, [loading]) // Run once after initial loading finishes
 
+  // Periodic silent refresh every 60 seconds to keep tickets list up to date
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() < suppressRealtimeFetchUntil.current) return
+      const currentLimit = page * 200
+      fetchTicketsRef.current?.({ silent: true, pageNum: 1, limit: currentLimit })
+    }, 60000)
+    return () => clearInterval(intervalId)
+  }, [page])
+
   // Supabase Realtime subscription for instant ticket updates
   // This enables new tickets to appear automatically when emails arrive
   useEffect(() => {

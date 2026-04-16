@@ -36,9 +36,19 @@ export async function POST(request: NextRequest) {
     let inboxEmails: any[] = [];
     let userEmail: string | null = null;
 
+    // Check AI settings before any expensive fetching — skip sent emails entirely
+    // if AI drafts are disabled (sent emails are only needed for embedding-based draft suggestions).
+    const { getAccountAISettings: getAICfg } = await import('@/lib/ai-config');
+    const aiCfgEarly = await getAICfg(null, businessSession?.businessId ?? null);
+    const fetchSentEmailsEnabled = aiCfgEarly.enable_ai_drafts;
+
+    if (!fetchSentEmailsEnabled) {
+      console.log('[SYNC] AI drafts disabled — skipping sent email fetch entirely');
+    }
+
     if (businessSession) {
       console.log('[SYNC] Business session detected:', businessSession.businessId);
-      const { fetchAllSentEmails, fetchAllInboxEmails } = await import('@/lib/email-service');
+      const { fetchAllInboxEmails } = await import('@/lib/email-service');
       const { loadBusinessTokens } = await import('@/lib/storage');
 
       // CRITICAL FIX: Distribute email limit fairly across all accounts
@@ -52,10 +62,13 @@ export async function POST(request: NextRequest) {
 
       console.log(`[SYNC] Distributing ${maxResults} emails across ${accountCount} accounts (${perAccountLimit} per account)`);
 
-      // Fetch from all accounts with fair distribution
-      sentEmails = await fetchAllSentEmails(businessSession.businessId, perAccountLimit, businessSession.email);
+      // Only fetch sent emails if AI drafts are enabled (they're only used for embeddings)
+      if (fetchSentEmailsEnabled) {
+        const { fetchAllSentEmails } = await import('@/lib/email-service');
+        sentEmails = await fetchAllSentEmails(businessSession.businessId, perAccountLimit, businessSession.email);
+      }
 
-      // Also fetch inbox emails to create tickets from them
+      // Always fetch inbox emails to create tickets from them
       console.log('[SYNC] Fetching inbox emails to create tickets...');
       inboxEmails = await fetchAllInboxEmails(businessSession.businessId, perAccountLimit, undefined, businessSession.email);
 
@@ -99,7 +112,10 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      sentEmails = await fetchSentEmails(tokens, maxResults);
+      // Only fetch sent emails when AI drafts are enabled (used for embeddings only)
+      if (fetchSentEmailsEnabled) {
+        sentEmails = await fetchSentEmails(tokens, maxResults);
+      }
 
       // Also fetch inbox emails to create tickets
       console.log('[SYNC] Fetching inbox emails to create tickets...');
@@ -138,11 +154,15 @@ export async function POST(request: NextRequest) {
       queued: currentSyncState.queued
     });
 
+    // embeddingsNeeded reuses the early AI settings check (fetchSentEmailsEnabled)
+    const embeddingsNeeded = fetchSentEmailsEnabled;
+
     // OPTIMIZED: Only check for emails with embeddings AND ownerEmail using a lightweight query
     // Emails without ownerEmail need to be regenerated for account-specific learning
+    // Skip entirely when AI drafts are off — no point querying embeddings we won't generate.
     let emailsWithEmbeddings = new Set<string>();
 
-    if (supabase && userEmail) {
+    if (embeddingsNeeded && supabase && userEmail) {
       try {
         // Only fetch IDs that have embeddings AND ownerEmail (properly scoped)
         const { data: existingEmails } = await supabase
@@ -170,7 +190,8 @@ export async function POST(request: NextRequest) {
 
     // Filter out emails that already have embeddings AND ownerEmail
     // Emails without ownerEmail will be regenerated with proper account scoping
-    const newEmails = sentEmails.filter(e => !emailsWithEmbeddings.has(e.id));
+    // When embeddings are disabled, newEmails is empty so no processing happens.
+    const newEmails = embeddingsNeeded ? sentEmails.filter(e => !emailsWithEmbeddings.has(e.id)) : [];
 
     if (newEmails.length === 0) {
       // Mark as complete if no new emails
@@ -206,10 +227,14 @@ export async function POST(request: NextRequest) {
     // Process a batch synchronously (await it) so it completes within timeout
     // Frontend will call sync again to continue processing remaining emails
     const BATCH_SIZE = 50; // Process 50 emails per request (maximized for speed)
-    const batchToProcess = newEmails.slice(0, BATCH_SIZE);
-    const remainingEmails = newEmails.slice(BATCH_SIZE);
+    const batchToProcess = embeddingsNeeded ? newEmails.slice(0, BATCH_SIZE) : [];
+    const remainingEmails = embeddingsNeeded ? newEmails.slice(BATCH_SIZE) : [];
 
-    console.log(`[SYNC] Processing batch: ${batchToProcess.length} emails, ${remainingEmails.length} remaining`);
+    if (!embeddingsNeeded) {
+      console.log('[SYNC] AI drafts disabled — skipping embedding generation for sent emails');
+    } else {
+      console.log(`[SYNC] Processing batch: ${batchToProcess.length} emails, ${remainingEmails.length} remaining`);
+    }
 
     let batchProcessed = 0;
     let batchErrors = 0;

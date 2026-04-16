@@ -20,6 +20,20 @@ export async function generateEmbedding(text: string): Promise<number[]> {
   // If the provider resolves to local on Windows, prefer a remote provider
   // so the app keeps running even when native binaries are unavailable.
   const shouldAvoidLocalOnWindows = provider === 'local' && process.platform === 'win32';
+
+  // On Vercel serverless, running ONNX locally burns CPU seconds rapidly.
+  // Skip to a remote provider or return empty embedding to avoid high bills.
+  const isVercel = process.env.VERCEL === '1';
+  if (provider === 'local' && isVercel) {
+    if (embeddingEnvKey) {
+      try { return await generateEmbeddingHuggingFace(text, embeddingEnvKey); } catch {}
+    }
+    if (openAiKey) {
+      try { return await generateEmbeddingOpenAI(text, openAiKey); } catch {}
+    }
+    // No remote provider configured — skip embedding rather than burn CPU on ONNX
+    return [];
+  }
   const canUseOpenAIFallback = allowOpenAIEmbeddingFallback();
 
   if (provider === 'openai') {
