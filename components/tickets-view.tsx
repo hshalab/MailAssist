@@ -1423,9 +1423,15 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           table: 'tickets',
         },
         (payload) => {
-          console.log('[Realtime] New ticket created:', payload.new)
-          // Refresh tickets to get the new one with all joined data
-          fetchSingleTicket(payload.new.id)
+          const ticketId = (payload.new as { id?: string })?.id
+          if (ticketId) {
+            // Happy path: RLS allowed the payload through
+            fetchSingleTicket(ticketId)
+          } else {
+            // RLS filtered payload.new to {} (anon key, no JWT) — do a silent full refresh
+            const currentLimit = page * 200
+            fetchTickets({ silent: true, pageNum: 1, limit: currentLimit })
+          }
         }
       )
       .on(
@@ -1508,13 +1514,11 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         supabaseBrowser.removeChannel(channel)
       }
     }
-  }, [fetchTickets])
+  }, [fetchTickets, page])
 
   // Refresh tickets when window gains focus or visibility changes (to catch updates from inbox)
   // Use debouncing to prevent rapid re-fetches that cause flickering
   useEffect(() => {
-    console.log('🎧 Setting up event listeners in tickets-view')
-
     // Debounce ref to prevent multiple rapid fetches
     let refreshTimeoutId: NodeJS.Timeout | null = null
     let lastFetchTime = 0
@@ -1660,7 +1664,6 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     // This prevents duplicate fetches that can cause flickering
 
     return () => {
-      console.log('🔇 Removing event listeners')
       if (refreshTimeoutId) clearTimeout(refreshTimeoutId)
       window.removeEventListener('focus', handleFocus)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
