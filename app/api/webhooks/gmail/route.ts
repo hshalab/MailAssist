@@ -154,7 +154,10 @@ export async function POST(request: NextRequest) {
             // Auto-classify new tickets
             if (ticketsCreated > 0) {
                 try {
-                    const { getAccountAISettings } = await import('@/lib/ai-config');
+                    const { isAIAutomationEnabled, getAccountAISettings } = await import('@/lib/ai-config');
+                    if (!isAIAutomationEnabled()) {
+                        console.log('[Gmail Webhook] AI_AUTOMATION_ENABLED=false — skipping classify');
+                    } else {
                     const aiSettings = await getAccountAISettings(notification.emailAddress, tokenData.business_id);
                     if (!aiSettings.enable_auto_classify) {
                         console.log('[Gmail Webhook] Auto-classify disabled for this account — skipping');
@@ -167,6 +170,7 @@ export async function POST(request: NextRequest) {
                     });
                     console.log(`[Gmail Webhook] Classified ${classifyResult.success} tickets`);
                     } // end enable_auto_classify check
+                    } // end isAIAutomationEnabled check
                 } catch (classifyError) {
                     console.warn('[Gmail Webhook] Classification error:', classifyError);
                 }

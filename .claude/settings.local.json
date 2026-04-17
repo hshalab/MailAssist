@@ -7,7 +7,10 @@
       "Bash(grep -r \"user_settings\\\\|business_settings\" /c/Users/Salman/Downloads/MailAssist/MailAssist/supabase_schema*.sql)",
       "Bash(find:*)",
       "Bash(ls -la /c/Users/Salman/Downloads/MailAssist/MailAssist/components/*.tsx)",
-      "Bash(grep -E '\\\\.\\(ts|tsx|js|jsx|json\\)$|^d')"
+      "Bash(grep -E '\\\\.\\(ts|tsx|js|jsx|json\\)$|^d')",
+      "Bash(ls -la .env*)",
+      "Bash(ls -la env-template.txt)",
+      "Bash(npx tsc *)"
     ]
   }
 }

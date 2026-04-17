@@ -11,6 +11,7 @@ import { supabase } from './supabase';
 import { getValidTokens } from './token-refresh';
 import { getUserProfile } from './gmail';
 import { getSessionUserEmail, validateBusinessSession } from './session';
+import { isAIAutomationEnabled } from './ai-config';
 
 /**
  * Get current user's email address for data scoping
@@ -521,6 +522,22 @@ export async function storeSentEmail(email: {
     return match ? match[1].toLowerCase() : emailStr?.toLowerCase() || '';
   };
   const ownerEmail = extractEmailAddress(email.from);
+
+  // Global kill-switch: skip OpenAI embedding generation entirely when AI is off.
+  // Store the email with an empty embedding so the row is still persisted; AI
+  // drafts simply won't have similarity context until the switch is flipped back.
+  if (!isAIAutomationEnabled()) {
+    const storedEmail: StoredEmail = {
+      ...email,
+      body: trimmedBody,
+      embedding: [],
+      isSent: true,
+      isReply: isReply,
+      ownerEmail: ownerEmail || undefined,
+    };
+    await saveStoredEmails([storedEmail]);
+    return storedEmail;
+  }
 
   // Generate embeddings for ALL sent emails (not just replies)
   // This allows the AI to learn from the user's complete writing style

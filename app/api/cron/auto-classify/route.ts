@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { createClient } from '@supabase/supabase-js';
+import { isAIAutomationEnabled } from '@/lib/ai-config';
 
 // Force dynamic to ensure this route is always built as a serverless function
 export const dynamic = 'force-dynamic';
@@ -29,6 +30,17 @@ export async function GET(request: NextRequest) {
     if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
         console.log('[CRON] Unauthorized request - invalid or missing CRON_SECRET');
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Global kill-switch: bail out before hitting Gmail or OpenAI when AI is off.
+    if (!isAIAutomationEnabled()) {
+        console.log('[CRON] AI_AUTOMATION_ENABLED=false — skipping job entirely');
+        return NextResponse.json({
+            success: true,
+            skipped: true,
+            reason: 'AI_AUTOMATION_ENABLED=false',
+            duration: Date.now() - startTime,
+        });
     }
 
     console.log('[CRON] Starting incremental sync and classify job...');

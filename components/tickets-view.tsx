@@ -1342,9 +1342,20 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           console.error('[Tickets] Secondary data failed:', err)
         })
 
-        // NOTE: No manual Gmail sync needed here.
-        // New emails are delivered via Gmail Pub/Sub webhook → /api/webhooks/gmail
-        // which creates tickets instantly. Supabase Realtime then pushes updates to the UI.
+        // Trigger a background Gmail pull so any messages that arrived while the
+        // Pub/Sub webhook was down (or before the user signed in) get turned into
+        // tickets. /api/emails runs Smart Sync which calls ensureTicketForEmail
+        // for the top 10 recent threads. Non-blocking — we refetch tickets after.
+        ;(async () => {
+          try {
+            const res = await fetch('/api/emails?type=inbox&maxResults=50', { cache: 'no-store' })
+            if (res.ok) {
+              await fetchTicketsRef.current?.({ silent: true, pageNum: 1 })
+            }
+          } catch (syncErr) {
+            console.warn('[Tickets] Background Gmail sync failed:', syncErr)
+          }
+        })()
       } catch (err) {
         console.error('[Tickets] Error loading data:', err)
         // Ensure we never get stuck in loading state if initialization fails.
