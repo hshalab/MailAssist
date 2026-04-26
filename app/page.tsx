@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, Suspense } from "react"
+import { useState, useEffect, useCallback, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import TopNav from "@/components/top-nav"
 import Sidebar, { type SidebarView } from "@/components/sidebar"
@@ -71,7 +71,7 @@ function PageContent() {
   const [syncBaseline, setSyncBaseline] = useState(0)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [hideSyncToast, setHideSyncToast] = useState(false)
-  const [syncContinueCount, setSyncContinueCount] = useState(0) // Safety counter
+  const syncContinueCountRef = useRef(0) // Safety counter — ref so useCallback closures see live value
   const LOCAL_STORAGE_KEY = "gmail_connected"
   const [loggingOut, setLoggingOut] = useState(false)
   const [globalSearch, setGlobalSearch] = useState<string>("")
@@ -285,6 +285,9 @@ function PageContent() {
     if (!isConnected) return
 
     const doRefresh = () => {
+      // Always run regardless of visibility: access tokens expire at 60 min,
+      // so skipping at 45 min would leave the user with an expired token on
+      // their next visit. ~32 calls/day, not a request-volume concern.
       fetch('/api/auth/refresh-tokens', { method: 'POST', credentials: 'include' })
         .then(res => res.json())
         .then(data => {
@@ -608,13 +611,26 @@ function PageContent() {
       await fetchSyncStatus()
 
       if (data?.continue) {
-        setSyncContinueCount(prev => prev + 1)
+        // Hard cap on continuation chain — prevents runaway loops if backend
+        // keeps returning continue=true (data corruption / pagination bug).
+        // Worst-case maxResults=2000 with BATCH_SIZE=50 ⇒ ~40 continuations.
+        // Using a ref because startSync is a useCallback whose deps do not
+        // include this counter, so a state value would be stale in the closure.
+        const MAX_CONTINUE_CHAIN = 50
+        if (syncContinueCountRef.current >= MAX_CONTINUE_CHAIN) {
+          console.warn('[Sync] Continuation cap reached, stopping chain')
+          syncContinueCountRef.current = 0
+          if (!silent) setSyncInProgress(false)
+          return
+        }
+        syncContinueCountRef.current += 1
+        // 3s back-off (was 1s) — reduces request volume during long syncs
+        // and gives Vercel function pool time to recycle.
         setTimeout(() => {
           startSync(maxResults, silent)
-        }, 1000)
+        }, 3000)
       } else if (!data?.continue) {
-        // Reset counter when sync completes
-        setSyncContinueCount(0)
+        syncContinueCountRef.current = 0
         if (!silent) {
           setSyncInProgress(false)
         }
@@ -666,10 +682,10 @@ function PageContent() {
   useEffect(() => {
     if (!shouldPoll) return
 
-    // Reduced polling frequency from 15s to 30s to reduce server load and improve page responsiveness
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return
       fetchSyncStatus()
-    }, 30000) // 30 seconds instead of 15
+    }, 90000) // 90s; pauses when tab hidden to cut idle requests
 
     return () => {
       clearInterval(interval)
@@ -687,30 +703,10 @@ function PageContent() {
     }
   }, [isConnected, syncStatus?.processing, syncInProgress, startSync])
 
-  // Automatic background sync - runs every 10 minutes when connected
-  // Increased interval to reduce server load
-  useEffect(() => {
-    if (!isConnected) return
-
-    const backgroundSyncInterval = setInterval(() => {
-      // Skip if tab is hidden (user switched away) — no point spending CPU/API calls
-      if (typeof document !== 'undefined' && document.hidden) {
-        console.log('[Background Sync] Skipping - tab is hidden')
-        return
-      }
-      // Only sync if not already syncing (check both UI state and server state)
-      if (!syncInProgress && !syncStatus?.processing) {
-        console.log('[Background Sync] Starting automatic background sync...')
-        startSync(100, true).catch(err => {
-          console.error('[Background Sync] Failed:', err)
-        })
-      } else {
-        console.log('[Background Sync] Skipping - sync already in progress')
-      }
-    }, 60 * 60 * 1000) // Every 60 minutes (reduced from 10 min to cut AI classification costs)
-
-    return () => clearInterval(backgroundSyncInterval)
-  }, [isConnected, syncInProgress, syncStatus?.processing, startSync])
+  // Background sync removed: Gmail Pub/Sub webhook (/api/webhooks/gmail)
+  // delivers new emails in real-time, and the nightly cron in vercel.json
+  // covers any gaps. The in-app interval was duplicating that work and
+  // burning Vercel edge requests for every connected user.
 
   const checkAuthStatus = async () => {
     try {
