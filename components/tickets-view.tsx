@@ -1403,14 +1403,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       .catch(err => console.error('Failed to prefetch closed tickets', err))
   }, [loading]) // Run once after initial loading finishes
 
-  // Periodic silent refresh every 60 seconds to keep tickets list up to date
+  // Fallback refresh every 10 minutes in case Supabase Realtime drops the
+  // connection (idle close, network blip). The webhook → Realtime pipeline is
+  // the primary delivery path; this is a safety net only.
   useEffect(() => {
     const intervalId = setInterval(() => {
       if (document.visibilityState !== 'visible') return
       if (Date.now() < suppressRealtimeFetchUntil.current) return
       const currentLimit = page * 200
       fetchTicketsRef.current?.({ silent: true, pageNum: 1, limit: currentLimit })
-    }, 60000)
+    }, 600000)
     return () => clearInterval(intervalId)
   }, [page])
 
@@ -1424,6 +1426,15 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     console.log('[Realtime] Setting up tickets subscription...')
 
+    // Leading-edge: first INSERT renders immediately so the user sees new
+    // tickets instantly. During a sync burst, additional INSERTs in the next
+    // 2 s are coalesced into one trailing list refresh instead of N
+    // fetchSingleTicket calls.
+    let trailingIds: string[] = []
+    let trailingTimer: ReturnType<typeof setTimeout> | null = null
+    let lastFetchAt = 0
+    const BURST_COOLDOWN_MS = 2000
+
     const channel = supabaseBrowser
       .channel('tickets-realtime')
       .on(
@@ -1435,13 +1446,29 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         },
         (payload) => {
           const ticketId = (payload.new as { id?: string })?.id
-          if (ticketId) {
-            // Happy path: RLS allowed the payload through
-            fetchSingleTicket(ticketId)
+          const elapsed = Date.now() - lastFetchAt
+
+          if (elapsed >= BURST_COOLDOWN_MS) {
+            // First event (or post-cooldown): act immediately for instant UX.
+            lastFetchAt = Date.now()
+            if (ticketId) {
+              fetchSingleTicket(ticketId)
+            } else {
+              const currentLimit = page * 200
+              fetchTickets({ silent: true, pageNum: 1, limit: currentLimit })
+            }
           } else {
-            // RLS filtered payload.new to {} (anon key, no JWT) — do a silent full refresh
-            const currentLimit = page * 200
-            fetchTickets({ silent: true, pageNum: 1, limit: currentLimit })
+            // Inside cooldown: queue for one trailing bulk refresh.
+            if (ticketId) trailingIds.push(ticketId)
+            if (!trailingTimer) {
+              trailingTimer = setTimeout(() => {
+                trailingTimer = null
+                trailingIds = []
+                lastFetchAt = Date.now()
+                const currentLimit = page * 200
+                fetchTickets({ silent: true, pageNum: 1, limit: currentLimit })
+              }, BURST_COOLDOWN_MS - elapsed)
+            }
           }
         }
       )
@@ -1521,6 +1548,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
 
     return () => {
       console.log('[Realtime] Cleaning up tickets subscription')
+      if (trailingTimer) clearTimeout(trailingTimer)
       if (supabaseBrowser) {
         supabaseBrowser.removeChannel(channel)
       }
@@ -1790,9 +1818,16 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
     }
   }
 
-  // Supabase realtime for ticket_updates
+  // Supabase realtime for ticket_updates.
+  // Leading-edge: an assignment/status change refreshes the list immediately
+  // so the user sees it instantly. During sync bursts, additional events in
+  // the next 3 s coalesce into one trailing list refresh.
   useEffect(() => {
     if (!supabaseBrowser) return
+    let listRefreshTimer: ReturnType<typeof setTimeout> | null = null
+    let lastListFetchAt = 0
+    const LIST_COOLDOWN_MS = 3000
+
     const channel = supabaseBrowser!
       .channel("ticket-updates")
       .on(
@@ -1802,20 +1837,24 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
           const ticketId = (payload.new as any)?.ticket_id as string | undefined
           if (!ticketId) return
 
-          // If we are within the post-Send suppression window, skip the fetchTickets.
-          // The assignment PATCH may not have completed yet on the server, so fetching
-          // now would return stale data and flip the UI back to the wrong tab.
           if (Date.now() < suppressRealtimeFetchUntil.current) {
             console.log('[Realtime] Suppressing fetchTickets during post-send window for ticket:', ticketId)
             return
           }
 
-          await fetchTickets({ silent: true })
+          const elapsed = Date.now() - lastListFetchAt
+          if (elapsed >= LIST_COOLDOWN_MS) {
+            lastListFetchAt = Date.now()
+            fetchTickets({ silent: true })
+          } else if (!listRefreshTimer) {
+            listRefreshTimer = setTimeout(() => {
+              listRefreshTimer = null
+              lastListFetchAt = Date.now()
+              fetchTickets({ silent: true })
+            }, LIST_COOLDOWN_MS - elapsed)
+          }
 
-          // Only refresh/navigate if the user is still looking at this ticket
-          // AND it is NOT the ticket they just sent a reply to (guard against
-          // the narrow React-flush race where the old subscription fires before
-          // the new one is set up, snapping the user back to the sent ticket).
+          // Detail refresh only for the currently-selected ticket — bounded.
           if (selectedTicket?.id === ticketId && ticketId !== lastSentTicketIdRef.current) {
             try {
               const res = await fetch(`/api/tickets/${ticketId}`)
@@ -1837,6 +1876,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       .subscribe()
 
     return () => {
+      if (listRefreshTimer) clearTimeout(listRefreshTimer)
       if (supabaseBrowser) {
         supabaseBrowser.removeChannel(channel)
       }

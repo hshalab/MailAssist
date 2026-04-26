@@ -305,9 +305,22 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
     }
   }, [onRefreshReady, handleRefresh])
 
-  // Supabase Realtime — refresh email list when a new ticket (email) is inserted
+  // Supabase Realtime — refresh email list when new tickets arrive.
+  // Leading-edge debounce: a single new email refreshes the list immediately,
+  // but during a sync burst (hundreds of INSERTs in seconds) we coalesce
+  // additional events into at most one trailing refresh per 5-second window.
   useEffect(() => {
     if (!supabaseBrowser) return
+
+    let lastFetchAt = 0
+    let trailingTimer: ReturnType<typeof setTimeout> | null = null
+    const COOLDOWN_MS = 5000
+
+    const doFetch = () => {
+      lastFetchAt = Date.now()
+      if (typeof document !== 'undefined' && document.hidden) return
+      fetchEmails(limit, false, true)
+    }
 
     const channel = supabaseBrowser
       .channel('email-list-tickets')
@@ -315,12 +328,21 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'tickets' },
         () => {
-          fetchEmails(limit, false, true)
+          const elapsed = Date.now() - lastFetchAt
+          if (elapsed >= COOLDOWN_MS) {
+            doFetch()
+          } else if (!trailingTimer) {
+            trailingTimer = setTimeout(() => {
+              trailingTimer = null
+              doFetch()
+            }, COOLDOWN_MS - elapsed)
+          }
         }
       )
       .subscribe()
 
     return () => {
+      if (trailingTimer) clearTimeout(trailingTimer)
       supabaseBrowser?.removeChannel(channel)
     }
   }, [limit])
