@@ -3,7 +3,6 @@
 import React, { useEffect, useRef, useState } from "react"
 import DOMPurify from "isomorphic-dompurify"
 import { cn } from "@/lib/utils"
-import { useTheme } from "next-themes"
 
 interface EmailContentViewerProps {
     content: string
@@ -20,8 +19,6 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
     const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(true)
     const [blockedRemoteCount, setBlockedRemoteCount] = useState(0)
     const iframeRef = useRef<HTMLIFrameElement>(null)
-    const { theme, resolvedTheme } = useTheme()
-    const isDarkMode = (theme === "dark" || resolvedTheme === "dark")
 
     // Reset remote image permissions when switching emails
     useEffect(() => {
@@ -305,11 +302,12 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
         }
     }, [processedContent])
 
-    // Build the iframe HTML content with proper theme-matching colors
-    // Match website background: white in light mode, dark teal in dark mode
-    const canvasBg = isDarkMode ? '#0d1418' : '#ffffff'  // website dark bg for dark, white for light
-    const fallbackText = isDarkMode ? '#e2e8f0' : '#1f2937'  // slate-200 for dark, gray-800 for light
-    const fallbackLink = isDarkMode ? '#60a5fa' : '#2563eb'  // blue-400 for dark, blue-600 for light
+    // Always render the email body on a white "paper" canvas, regardless of app theme.
+    // Email inline CSS (text colors, backgrounds, branded styling) is designed for white;
+    // forcing dark-mode rewrites breaks marketing emails. Gmail/Outlook follow the same pattern.
+    const canvasBg = '#ffffff'
+    const fallbackText = '#1f2937'
+    const fallbackLink = '#2563eb'
 
     const iframeHtml = `
         <!DOCTYPE html>
@@ -318,7 +316,7 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
-                :root { color-scheme: ${isDarkMode ? 'dark' : 'light'}; }
+                :root { color-scheme: light; }
                 * { box-sizing: border-box; }
                 html, body {
                     margin: 0;
@@ -387,8 +385,8 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 blockquote {
                     margin: 0 0 1em 0;
                     padding-left: 12px;
-                    border-left: 3px solid ${isDarkMode ? '#4a5568' : '#cbd5e0'};
-                    color: ${isDarkMode ? '#a0aec0' : '#718096'};
+                    border-left: 3px solid #cbd5e0;
+                    color: #718096;
                 }
                 /* Gmail-style collapsed quotes */
                 .gmail-quote[data-collapsed="true"] blockquote {
@@ -413,22 +411,22 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 }
                 /* Quote header with expand button */
                 .quote-header {
-                    color: ${isDarkMode ? '#a0aec0' : '#718096'};
+                    color: #718096;
                     font-size: 0.9em;
                     margin-top: 1em;
                 }
                 .quote-header .expand-quote {
-                    background: ${isDarkMode ? '#374151' : '#e5e7eb'};
+                    background: #e5e7eb;
                     border: none;
                     border-radius: 4px;
                     padding: 2px 8px;
                     margin-left: 8px;
                     cursor: pointer;
                     font-size: 0.85em;
-                    color: ${isDarkMode ? '#93c5fd' : '#0b57d0'};
+                    color: #0b57d0;
                 }
                 .quote-header .expand-quote:hover {
-                    background: ${isDarkMode ? '#4b5563' : '#d1d5db'};
+                    background: #d1d5db;
                 }
                 .quote-header:not(.expanded) + .quoted-content {
                     display: none;
@@ -436,16 +434,8 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 .quote-header.expanded + .quoted-content {
                     display: block;
                     padding-left: 12px;
-                    border-left: 3px solid ${isDarkMode ? '#4a5568' : '#cbd5e0'};
-                    color: ${isDarkMode ? '#a0aec0' : '#718096'};
-                }
-                /* Print-friendly styles */
-                @media print {
-                    body { background: white !important; color: black !important; }
-                    a { color: blue !important; }
-                    .gmail-quote blockquote, .quoted-content { max-height: none !important; }
-                    .gmail-quote blockquote::after { display: none !important; }
-                    .expand-quote { display: none !important; }
+                    border-left: 3px solid #cbd5e0;
+                    color: #718096;
                 }
             </style>
         </head>
@@ -456,9 +446,15 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
     `
 
     return (
-        <div className={cn("email-content-viewer w-full rounded-lg border-0", className)} aria-busy={loading}>
+        <div
+            className={cn(
+                "email-content-viewer w-full rounded-lg border border-border dark:border-white/10 dark:shadow-lg dark:shadow-black/20 overflow-hidden bg-white",
+                className
+            )}
+            aria-busy={loading}
+        >
             {blockedRemoteCount > 0 && !remoteImagesAllowed && (
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-900 dark:text-amber-200 rounded-t-lg">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
                     <span>{blockedRemoteCount} remote image{blockedRemoteCount === 1 ? '' : 's'} blocked for privacy.</span>
                     <button
                         onClick={() => setRemoteImagesAllowed(true)}
@@ -468,9 +464,9 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     </button>
                 </div>
             )}
-            <div className="relative rounded-lg">
+            <div className="relative bg-white p-2">
                 {loading && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80 backdrop-blur-sm">
                         <span className="text-sm text-muted-foreground">Loading message…</span>
                     </div>
                 )}
@@ -479,13 +475,13 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     sandbox="allow-same-origin"
                     srcDoc={iframeHtml}
                     className={cn(
-                        "w-full border-0 block transition-opacity rounded-lg",
+                        "w-full border-0 block transition-opacity",
                         loading ? "opacity-0" : "opacity-100"
                     )}
                     style={{
                         height: `${iframeHeight}px`,
                         minHeight: '300px',
-                        background: isDarkMode ? '#0d1418' : '#ffffff',
+                        background: '#ffffff',
                     }}
                     onLoad={() => {
                         measureHeight()

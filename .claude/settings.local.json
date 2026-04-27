@@ -10,7 +10,9 @@
       "Bash(grep -E '\\\\.\\(ts|tsx|js|jsx|json\\)$|^d')",
       "Bash(ls -la .env*)",
       "Bash(ls -la env-template.txt)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   }
 }
