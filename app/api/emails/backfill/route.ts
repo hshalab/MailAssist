@@ -21,7 +21,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getGmailClient, parseEmailMessage } from '@/lib/gmail';
+import { getGmailClient, getMessagesByIds } from '@/lib/gmail';
 import { ensureTicketForEmail } from '@/lib/tickets';
 import { getValidTokens } from '@/lib/token-refresh';
 import { loadBusinessTokens, getCurrentUserEmail } from '@/lib/storage';
@@ -180,21 +180,7 @@ export async function POST(request: NextRequest) {
                         continue;
                     }
 
-                    const fetched = await Promise.all(
-                        idsToFetch.map(async (id) => {
-                            try {
-                                const r = await gmail.users.messages.get({
-                                    userId: 'me',
-                                    id,
-                                    format: 'full',
-                                });
-                                return parseEmailMessage(r.data, false);
-                            } catch (err) {
-                                console.warn(`[Backfill] ${email}: failed to fetch ${id}:`, err);
-                                return null;
-                            }
-                        })
-                    );
+                    const fetched = await getMessagesByIds(tokens, idsToFetch);
 
                     for (const e of fetched) {
                         if (!e) {
