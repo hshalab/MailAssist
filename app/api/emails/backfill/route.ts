@@ -54,6 +54,10 @@ export const maxDuration = 60;
 // return a clean response with a resumption token instead of a 504.
 const SOFT_DEADLINE_MS = 50_000;
 const PAGE_SIZE = 100;
+// Safety cap: never create more than this many tickets in a single HTTP call.
+// Prevents a runaway loop from spamming inserts. Resume token is returned so
+// the client can call again to continue.
+const MAX_CREATES_PER_CALL = 500;
 
 interface AccountResult {
     email: string;
@@ -73,6 +77,11 @@ export async function POST(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const query = searchParams.get('q') || 'in:inbox';
     const initialPageToken = searchParams.get('pageToken') || undefined;
+    // dryRun=true does the entire pre-check + identification flow but skips
+    // ensureTicketForEmail. Use this to preview how many tickets WOULD be
+    // created before actually writing anything.
+    const dryRun = searchParams.get('dryRun') === 'true';
+    let totalCreatedThisCall = 0;
 
     try {
         const businessSession = await validateBusinessSession();
@@ -207,6 +216,21 @@ export async function POST(request: NextRequest) {
                             const fromEmail = fromMatch ? fromMatch[1].toLowerCase() : (e.from || '').toLowerCase();
                             const isFromAgent = fromEmail === lowerEmail || fromEmail.includes(lowerEmail);
 
+                            // Hard cap protection: never create more than MAX_CREATES_PER_CALL
+                            // tickets in a single HTTP call. Stops a runaway from spamming inserts.
+                            if (totalCreatedThisCall >= MAX_CREATES_PER_CALL && !dryRun) {
+                                result.nextPageToken = pageToken || null;
+                                console.warn(`[Backfill] Hit MAX_CREATES_PER_CALL (${MAX_CREATES_PER_CALL}). Returning resume token.`);
+                                break pageLoop;
+                            }
+
+                            if (dryRun) {
+                                // Identification only — no DB writes.
+                                result.ticketsCreated++;
+                                totalCreatedThisCall++;
+                                continue;
+                            }
+
                             const ticket = await ensureTicketForEmail(
                                 {
                                     id: e.id,
@@ -225,8 +249,15 @@ export async function POST(request: NextRequest) {
                             if (ticket) {
                                 const ticketCreatedAt = new Date(ticket.created_at || 0).getTime();
                                 const isNew = Date.now() - ticketCreatedAt < 5000;
-                                if (isNew) result.ticketsCreated++;
-                                else result.ticketsExisting++;
+                                if (isNew) {
+                                    result.ticketsCreated++;
+                                    totalCreatedThisCall++;
+                                } else {
+                                    // Defense-in-depth: pre-filter should have caught this.
+                                    // If we land here, log loudly so we can investigate scoping mismatches.
+                                    result.ticketsExisting++;
+                                    console.warn(`[Backfill] ${email}: pre-filter miss — thread ${e.threadId} already had ticket, dedup'd by ensureTicketForEmail`);
+                                }
                             } else {
                                 result.ticketsExisting++;
                             }
@@ -265,6 +296,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
             success: true,
+            dryRun,
             durationMs: duration,
             completed: allCompleted,
             resumePageToken: firstResume,
