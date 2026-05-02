@@ -72,6 +72,15 @@ function PageContent() {
   const [syncError, setSyncError] = useState<string | null>(null)
   const [hideSyncToast, setHideSyncToast] = useState(false)
   const syncContinueCountRef = useRef(0) // Safety counter — ref so useCallback closures see live value
+  // Live refs for state read inside startSync. Reading from refs (instead of
+  // including the state in startSync's dep array) keeps startSync's identity
+  // stable across renders. Without this, every setSyncStatus call recreates
+  // startSync, which retriggered the main mount-effect, which called
+  // fetchSyncStatus again — a render → fetch → state-update → render loop
+  // that hammered /api/emails/sync and /api/auth/profile multiple times per
+  // second and blew through Vercel's edge-request quota.
+  const syncStatusRef = useRef<SyncStats | null>(null)
+  const syncTargetRef = useRef<number | null>(null)
   const LOCAL_STORAGE_KEY = "gmail_connected"
   const [loggingOut, setLoggingOut] = useState(false)
   const [globalSearch, setGlobalSearch] = useState<string>("")
@@ -546,13 +555,16 @@ function PageContent() {
       const response = await fetch("/api/emails/sync", { cache: "no-store" })
       if (!response.ok) return null
       const data: SyncStats = await response.json()
+      syncStatusRef.current = data
       setSyncStatus(data)
       if (typeof data.processing === "boolean") {
         setSyncInProgress(data.processing)
         if (!data.processing) {
+          syncTargetRef.current = null
           setSyncTarget(null)
           setSyncBaseline(0)
         } else if (typeof data.queued === "number") {
+          syncTargetRef.current = data.queued
           setSyncTarget(data.queued)
         }
       }
@@ -578,8 +590,10 @@ function PageContent() {
       if (response.status === 202 && data?.processing) {
         if (!silent) {
           setSyncInProgress(true)
-          setSyncTarget(data.queued ?? syncTarget ?? maxResults)
-          setSyncBaseline(syncStatus?.sentWithEmbeddings ?? 0)
+          const nextTarget = data.queued ?? syncTargetRef.current ?? maxResults
+          syncTargetRef.current = nextTarget
+          setSyncTarget(nextTarget)
+          setSyncBaseline(syncStatusRef.current?.sentWithEmbeddings ?? 0)
         }
         return
       }
@@ -602,10 +616,12 @@ function PageContent() {
         throw new Error(message)
       }
 
-      const baseline = syncStatus?.sentWithEmbeddings ?? 0
+      const baseline = syncStatusRef.current?.sentWithEmbeddings ?? 0
       if (!silent) {
         setSyncBaseline(baseline)
-        setSyncTarget(data?.queued ?? maxResults)
+        const nextTarget = data?.queued ?? maxResults
+        syncTargetRef.current = nextTarget
+        setSyncTarget(nextTarget)
         setSyncInProgress(true)
       }
       await fetchSyncStatus()
@@ -636,7 +652,9 @@ function PageContent() {
         }
       }
     },
-    [isConnected, syncStatus, fetchSyncStatus, syncTarget]
+    // syncStatus and syncTarget read from refs above so startSync stays stable
+    // across renders. fetchSyncStatus is already stable (only depends on isConnected).
+    [isConnected, fetchSyncStatus]
   )
 
   // Separate effect to trigger sync after Gmail connection
@@ -675,7 +693,11 @@ function PageContent() {
       setSyncTarget(null)
       setSyncBaseline(0)
     }
-  }, [isConnected, hasAutoSynced, fetchSyncStatus, startSync])
+    // Intentionally only react to auth state changes. Including the function
+    // refs caused this effect to re-run on every render (because their
+    // identity changes when state inside them changes), causing a fetch storm.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, hasAutoSynced])
 
   const shouldPoll = syncInProgress || (syncStatus?.processing ?? false)
 
@@ -701,7 +723,9 @@ function PageContent() {
         setSyncError(err instanceof Error ? err.message : "Failed to resume sync")
       })
     }
-  }, [isConnected, syncStatus?.processing, syncInProgress, startSync])
+    // Same reason as above — keep startSync identity out of the dep array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, syncStatus?.processing, syncInProgress])
 
   // Background sync removed: Gmail Pub/Sub webhook (/api/webhooks/gmail)
   // delivers new emails in real-time, and the nightly cron in vercel.json
