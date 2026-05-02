@@ -32,9 +32,14 @@ interface GmailNotification {
     historyId: string;
 }
 
+// Bumped on every behavior change so we can confirm in logs which version
+// is actually running. If you see a webhook log without this version line,
+// the deploy hasn't picked up the latest code.
+const WEBHOOK_VERSION = 'v2-multi-token-2026-05-02b';
+
 export async function POST(request: NextRequest) {
     const startTime = Date.now();
-    console.log('[Gmail Webhook] Received push notification');
+    console.log(`[Gmail Webhook ${WEBHOOK_VERSION}] Received push notification`);
 
     try {
         // Parse the Pub/Sub message
@@ -70,26 +75,30 @@ export async function POST(request: NextRequest) {
         // one with a business_id (workspace). PostgREST's .single() errors out
         // (PGRST116 "more than one row") in that case, which used to make the
         // webhook silently drop every notification for that account.
-        // Strategy: prefer the business-scoped row so downstream agent-email
-        // lookups by business_id work; fall back to a personal row.
+        // Strategy: case-insensitive match (Gmail Pub/Sub email casing has been
+        // observed to vary), prefer the business-scoped row so downstream
+        // agent-email lookups by business_id work, fall back to personal.
+        const lookupEmail = notification.emailAddress.trim().toLowerCase();
         const { data: tokenRows, error: tokenError } = await adminClient
             .from('tokens')
             .select('user_email, access_token, refresh_token, business_id')
-            .eq('user_email', notification.emailAddress)
+            .ilike('user_email', lookupEmail)
             .order('business_id', { ascending: false, nullsFirst: false });
 
+        console.log(`[Gmail Webhook ${WEBHOOK_VERSION}] Token lookup for ${lookupEmail} returned ${tokenRows?.length ?? 0} row(s); error=${tokenError ? tokenError.message : 'none'}`);
+
         if (tokenError) {
-            console.error(`[Gmail Webhook] Token lookup failed for ${notification.emailAddress}:`, tokenError);
+            console.error(`[Gmail Webhook ${WEBHOOK_VERSION}] Token lookup failed for ${lookupEmail}:`, tokenError);
             return NextResponse.json({ success: true }); // ACK to avoid retry storm
         }
 
         if (!tokenRows || tokenRows.length === 0) {
-            console.log(`[Gmail Webhook] No token found for ${notification.emailAddress}`);
+            console.log(`[Gmail Webhook ${WEBHOOK_VERSION}] No token found for ${lookupEmail}`);
             return NextResponse.json({ success: true }); // ACK
         }
 
         if (tokenRows.length > 1) {
-            console.log(`[Gmail Webhook] Found ${tokenRows.length} token rows for ${notification.emailAddress}; using business-scoped row first`);
+            console.log(`[Gmail Webhook ${WEBHOOK_VERSION}] Found ${tokenRows.length} token rows for ${lookupEmail}; using business-scoped row first (business_id=${tokenRows[0].business_id ?? 'NULL'})`);
         }
 
         const tokenData = tokenRows[0];
