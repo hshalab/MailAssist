@@ -144,7 +144,17 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     return `<img ${beforeSrc}src="${proxiedSrc}" ${hasLoading ? '' : 'loading="lazy" '} ${hasDecoding ? '' : 'decoding="async" '} ${afterSrc}>`
                 }
 
-                // For cid/data/relative images just ensure lazy/async
+                // Unresolved cid: refs (Yahoo/IMAP attachments we couldn't match).
+                // Replace with a styled placeholder so users see something nice
+                // instead of a browser broken-image icon + raw alt text.
+                if (srcValue.toLowerCase().startsWith('cid:')) {
+                    const altMatch = (beforeSrc + afterSrc).match(/\balt=["']([^"']*)["']/i)
+                    const label = altMatch ? altMatch[1] : 'Inline image unavailable'
+                    const escaped = label.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    return `<span class="cid-placeholder" role="img" aria-label="${escaped}">🖼  ${escaped}</span>`
+                }
+
+                // For data/relative images just ensure lazy/async
                 return `<img ${beforeSrc}src="${srcValue}" ${hasLoading ? '' : 'loading="lazy" '} ${hasDecoding ? '' : 'decoding="async" '} ${afterSrc}>`
             }
         )
@@ -364,10 +374,11 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     height: auto;
                     border-radius: 6px;
                 }
-                /* Broken-image placeholder: show alt text inside a styled card instead
-                   of the browser's broken-image icon + raw alt text. This catches Yahoo/IMAP
-                   inline images whose cid: refs we couldn't resolve to attachments. */
-                img.broken-img-placeholder {
+                /* Placeholder for unresolved cid: refs (Yahoo/IMAP inline images
+                   whose attachments we couldn't match). Replaces what would
+                   otherwise render as a broken-image icon + raw "Photo attachment"
+                   alt text. Works without iframe scripts. */
+                .cid-placeholder {
                     display: inline-flex;
                     align-items: center;
                     gap: 8px;
@@ -379,8 +390,8 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     border-radius: 8px;
                     font-size: 13px;
                     font-style: italic;
-                    text-decoration: none;
                     line-height: 1.4;
+                    margin: 4px 0;
                 }
                 img[data-remote-blocked="true"] {
                     background: repeating-linear-gradient(45deg, #f7f7f7, #f7f7f7 10px, #e5e5e5 10px, #e5e5e5 20px);
@@ -461,31 +472,6 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
         </head>
         <body>
 <div class="email-body${isPlainTextContent ? ' plain-text' : ''}">${processedContent}</div>
-<script>
-    // Replace broken images (cid refs we couldn't resolve, dead remote URLs) with
-    // a styled inline placeholder showing the original alt text — much nicer than
-    // the browser's default broken-image icon + raw alt text.
-    (function () {
-        function handleBroken(img) {
-            if (img.dataset.fallbackApplied === '1') return;
-            img.dataset.fallbackApplied = '1';
-            var label = img.getAttribute('alt') || img.getAttribute('title') || 'Image unavailable';
-            var span = document.createElement('span');
-            span.className = 'broken-img-placeholder-text';
-            span.style.cssText = 'display:inline-flex;align-items:center;gap:8px;padding:10px 14px;min-height:44px;border:1px dashed #d1d5db;background:#f3f4f6;color:#4b5563;border-radius:8px;font-size:13px;font-style:italic;line-height:1.4;';
-            span.textContent = '\\uD83D\\uDDBC  ' + label;
-            if (img.parentNode) img.parentNode.replaceChild(span, img);
-        }
-        var imgs = document.querySelectorAll('img');
-        imgs.forEach(function (img) {
-            if (img.complete && img.naturalWidth === 0 && !img.getAttribute('data-remote-blocked')) {
-                handleBroken(img);
-            } else {
-                img.addEventListener('error', function () { handleBroken(img); });
-            }
-        });
-    })();
-</script>
         </body>
         </html>
     `
