@@ -1077,7 +1077,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (!silent) setLoading(false)
       setLoadingMore(false)
     }
-  }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery, activeTab === 'closed' ? 'closed' : 'active', statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, fetchTicketCounts, sortOrder, loading])
+    // Intentionally OMIT `loading` from the dep list. fetchTickets calls
+    // setLoading(true) at start and setLoading(false) at end, so including
+    // `loading` would give fetchTickets a new identity on every call. That
+    // re-triggers any useEffect depending on fetchTickets (e.g. the prefetch
+    // effect below), which fires fetchTickets again — causing /api/tickets
+    // and /api/tickets/counts to be hit several times per second.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery, activeTab === 'closed' ? 'closed' : 'active', statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, fetchTicketCounts, sortOrder])
 
   // We keep pagination explicit now instead of auto-loading on scroll.
   // The Load more button is still available at the bottom of the list.
