@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
         const body: PubSubMessage = await request.json();
 
         if (!body.message?.data) {
-            console.log('[Gmail Webhook] No message data');
+            console.warn('[Gmail Webhook] Malformed Pub/Sub envelope: no message.data. Acking to prevent retries.', { keys: Object.keys(body || {}) });
             return NextResponse.json({ success: true }); // ACK to Pub/Sub
         }
 
@@ -201,11 +201,15 @@ export async function POST(request: NextRequest) {
         });
 
     } catch (error) {
-        console.error('[Gmail Webhook] Error:', error);
-        // Always return 200 to ACK the message (prevents Pub/Sub retries)
+        // CRITICAL: Loud error logging — this used to swallow silently and the
+        // outage went undetected for days. ACK is intentional (200) so Pub/Sub
+        // doesn't retry-storm us, but every error MUST be visible in Vercel logs.
+        const message = error instanceof Error ? error.message : String(error);
+        const stack = error instanceof Error ? error.stack : undefined;
+        console.error('[Gmail Webhook] FATAL — failed to process notification', { message, stack });
         return NextResponse.json({
             success: false,
-            error: error instanceof Error ? error.message : String(error),
+            error: message,
         });
     }
 }

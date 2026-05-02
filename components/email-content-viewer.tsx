@@ -305,7 +305,8 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
     // Always render the email body on a white "paper" canvas, regardless of app theme.
     // Email inline CSS (text colors, backgrounds, branded styling) is designed for white;
     // forcing dark-mode rewrites breaks marketing emails. Gmail/Outlook follow the same pattern.
-    const canvasBg = '#ffffff'
+    // We soften the canvas a touch (#fafafa) so it doesn't burn against dark UI chrome.
+    const canvasBg = '#fafafa'
     const fallbackText = '#1f2937'
     const fallbackLink = '#2563eb'
 
@@ -361,6 +362,25 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 img {
                     max-width: 100%;
                     height: auto;
+                    border-radius: 6px;
+                }
+                /* Broken-image placeholder: show alt text inside a styled card instead
+                   of the browser's broken-image icon + raw alt text. This catches Yahoo/IMAP
+                   inline images whose cid: refs we couldn't resolve to attachments. */
+                img.broken-img-placeholder {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 10px 14px;
+                    min-height: 44px;
+                    border: 1px dashed #d1d5db;
+                    background: #f3f4f6;
+                    color: #4b5563;
+                    border-radius: 8px;
+                    font-size: 13px;
+                    font-style: italic;
+                    text-decoration: none;
+                    line-height: 1.4;
                 }
                 img[data-remote-blocked="true"] {
                     background: repeating-linear-gradient(45deg, #f7f7f7, #f7f7f7 10px, #e5e5e5 10px, #e5e5e5 20px);
@@ -441,6 +461,31 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
         </head>
         <body>
 <div class="email-body${isPlainTextContent ? ' plain-text' : ''}">${processedContent}</div>
+<script>
+    // Replace broken images (cid refs we couldn't resolve, dead remote URLs) with
+    // a styled inline placeholder showing the original alt text — much nicer than
+    // the browser's default broken-image icon + raw alt text.
+    (function () {
+        function handleBroken(img) {
+            if (img.dataset.fallbackApplied === '1') return;
+            img.dataset.fallbackApplied = '1';
+            var label = img.getAttribute('alt') || img.getAttribute('title') || 'Image unavailable';
+            var span = document.createElement('span');
+            span.className = 'broken-img-placeholder-text';
+            span.style.cssText = 'display:inline-flex;align-items:center;gap:8px;padding:10px 14px;min-height:44px;border:1px dashed #d1d5db;background:#f3f4f6;color:#4b5563;border-radius:8px;font-size:13px;font-style:italic;line-height:1.4;';
+            span.textContent = '\\uD83D\\uDDBC  ' + label;
+            if (img.parentNode) img.parentNode.replaceChild(span, img);
+        }
+        var imgs = document.querySelectorAll('img');
+        imgs.forEach(function (img) {
+            if (img.complete && img.naturalWidth === 0 && !img.getAttribute('data-remote-blocked')) {
+                handleBroken(img);
+            } else {
+                img.addEventListener('error', function () { handleBroken(img); });
+            }
+        });
+    })();
+</script>
         </body>
         </html>
     `
@@ -448,14 +493,19 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
     return (
         <div
             className={cn(
-                "email-content-viewer w-full rounded-lg border border-border dark:border-white/10 dark:shadow-lg dark:shadow-black/20 overflow-hidden bg-white",
+                "email-content-viewer w-full rounded-xl overflow-hidden",
+                "border border-zinc-200 dark:border-white/10",
+                "shadow-sm dark:shadow-lg dark:shadow-black/30",
+                "bg-zinc-50 dark:bg-zinc-900/40",
                 className
             )}
             aria-busy={loading}
         >
             {blockedRemoteCount > 0 && !remoteImagesAllowed && (
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
-                    <span>{blockedRemoteCount} remote image{blockedRemoteCount === 1 ? '' : 's'} blocked for privacy.</span>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 dark:border-white/10 bg-amber-50 dark:bg-amber-900/20 px-4 py-2.5 text-sm text-amber-900 dark:text-amber-200">
+                    <span>
+                        <span className="font-medium">{blockedRemoteCount}</span> remote image{blockedRemoteCount === 1 ? '' : 's'} blocked for privacy.
+                    </span>
                     <button
                         onClick={() => setRemoteImagesAllowed(true)}
                         className="rounded-md bg-amber-600 px-3 py-1 text-xs font-medium text-white shadow-sm transition hover:bg-amber-700"
@@ -464,31 +514,33 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     </button>
                 </div>
             )}
-            <div className="relative bg-white p-2">
-                {loading && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80 backdrop-blur-sm">
-                        <span className="text-sm text-muted-foreground">Loading message…</span>
-                    </div>
-                )}
-                <iframe
-                    ref={iframeRef}
-                    sandbox="allow-same-origin"
-                    srcDoc={iframeHtml}
-                    className={cn(
-                        "w-full border-0 block transition-opacity",
-                        loading ? "opacity-0" : "opacity-100"
+            <div className="relative p-3 sm:p-4">
+                <div className="rounded-lg overflow-hidden border border-zinc-200/80 dark:border-white/5 bg-[#fafafa] dark:ring-1 dark:ring-white/5">
+                    {loading && (
+                        <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-50/70 dark:bg-zinc-900/60 backdrop-blur-sm">
+                            <span className="text-sm text-zinc-600 dark:text-zinc-300">Loading message…</span>
+                        </div>
                     )}
-                    style={{
-                        height: `${iframeHeight}px`,
-                        minHeight: '300px',
-                        background: '#ffffff',
-                    }}
-                    onLoad={() => {
-                        measureHeight()
-                        setLoading(false)
-                    }}
-                    title="Email content"
-                />
+                    <iframe
+                        ref={iframeRef}
+                        sandbox="allow-same-origin"
+                        srcDoc={iframeHtml}
+                        className={cn(
+                            "w-full border-0 block transition-opacity",
+                            loading ? "opacity-0" : "opacity-100"
+                        )}
+                        style={{
+                            height: `${iframeHeight}px`,
+                            minHeight: '300px',
+                            background: '#fafafa',
+                        }}
+                        onLoad={() => {
+                            measureHeight()
+                            setLoading(false)
+                        }}
+                        title="Email content"
+                    />
+                </div>
             </div>
         </div>
     )
