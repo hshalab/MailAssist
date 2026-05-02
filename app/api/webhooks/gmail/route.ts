@@ -64,17 +64,35 @@ export async function POST(request: NextRequest) {
             auth: { persistSession: false }
         });
 
-        // Get token for this email address
-        const { data: tokenData, error: tokenError } = await adminClient
+        // Get token for this email address.
+        // CRITICAL: We do NOT use .single() here. The same user_email can have
+        // multiple rows in `tokens` — one with NULL business_id (personal) and
+        // one with a business_id (workspace). PostgREST's .single() errors out
+        // (PGRST116 "more than one row") in that case, which used to make the
+        // webhook silently drop every notification for that account.
+        // Strategy: prefer the business-scoped row so downstream agent-email
+        // lookups by business_id work; fall back to a personal row.
+        const { data: tokenRows, error: tokenError } = await adminClient
             .from('tokens')
             .select('user_email, access_token, refresh_token, business_id')
             .eq('user_email', notification.emailAddress)
-            .single();
+            .order('business_id', { ascending: false, nullsFirst: false });
 
-        if (tokenError || !tokenData) {
+        if (tokenError) {
+            console.error(`[Gmail Webhook] Token lookup failed for ${notification.emailAddress}:`, tokenError);
+            return NextResponse.json({ success: true }); // ACK to avoid retry storm
+        }
+
+        if (!tokenRows || tokenRows.length === 0) {
             console.log(`[Gmail Webhook] No token found for ${notification.emailAddress}`);
             return NextResponse.json({ success: true }); // ACK
         }
+
+        if (tokenRows.length > 1) {
+            console.log(`[Gmail Webhook] Found ${tokenRows.length} token rows for ${notification.emailAddress}; using business-scoped row first`);
+        }
+
+        const tokenData = tokenRows[0];
 
         // Import functions
         const { getNewMessagesFromHistory, getMessagesByIds } = await import('@/lib/gmail');
