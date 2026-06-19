@@ -135,7 +135,7 @@ export async function GET(request: NextRequest) {
         orphaned: accounts.filter(a => a.status === 'orphaned_no_token').length,
     };
 
-    const overallHealthy = summary.stale === 0 && summary.never_synced === 0;
+    const overallHealthy = summary.stale === 0 && summary.never_synced === 0 && summary.orphaned === 0;
 
     return NextResponse.json({
         overall: overallHealthy ? 'healthy' : 'degraded',

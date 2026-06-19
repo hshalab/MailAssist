@@ -2121,6 +2121,13 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       console.error("Error fetching thread:", err)
       if (selectedTicketIdRef.current === targetTicketId) {
         setThreadMessages([])
+        if (!silent) {
+          setThreadError(
+            err instanceof TypeError
+              ? "Network error — check your connection and retry."
+              : `Couldn't load this conversation.${err instanceof Error ? ` ${err.message}` : ''}`
+          )
+        }
       }
     } finally {
       if (selectedTicketIdRef.current === targetTicketId) {
