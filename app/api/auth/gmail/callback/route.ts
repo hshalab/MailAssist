@@ -1,6 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTokensFromCode, getUserProfile } from '@/lib/gmail';
+import { getTokensFromCode, getUserProfile, startHistoryWatch } from '@/lib/gmail';
 import { saveTokens } from '@/lib/storage';
+
+async function activateWatchSafely(
+    tokens: { access_token?: string | null; refresh_token?: string | null },
+    label: string
+): Promise<void> {
+    if (!process.env.GMAIL_HISTORY_TOPIC) {
+        console.warn(`[OAuth ${label}] GMAIL_HISTORY_TOPIC not configured — skipping watch activation. Real-time email delivery WILL NOT WORK until this is set.`);
+        return;
+    }
+    try {
+        const watchInfo = await startHistoryWatch(tokens);
+        console.log(`[OAuth ${label}] Gmail watch activated. expiration=${watchInfo.expiration} historyId=${watchInfo.historyId}`);
+    } catch (watchError) {
+        console.error(`[OAuth ${label}] Failed to activate Gmail watch — Pub/Sub notifications will not arrive until watch is set up. Error:`, watchError);
+    }
+}
 import { setSessionUserEmailInResponse, setCurrentUserIdInResponse } from '@/lib/session';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
@@ -368,6 +384,10 @@ export async function GET(request: NextRequest) {
       // 5. Save Tokens (Linked to this user's business if they have one)
       await saveTokens(tokens, businessId || undefined, gmailEmail);
 
+      // Activate Gmail Pub/Sub watch immediately so this account starts receiving
+      // real-time notifications. Failure here must NOT break sign-in.
+      await activateWatchSafely(tokens, 'Login');
+
       // Get final user role after potential promotion
       const { data: finalUser } = await supabase
         .from('users')
@@ -568,6 +588,11 @@ export async function GET(request: NextRequest) {
         throw new Error('Failed to save tokens');
       }
       console.log(`[OAuth Connect] Successfully saved tokens for ${savedEmail}`);
+
+      // Activate Gmail Pub/Sub watch so this newly connected account starts
+      // receiving real-time notifications immediately. Best-effort — the
+      // daily renew-watches cron is a fallback if this fails.
+      await activateWatchSafely(tokens, 'Connect');
 
       // ============================================================
       // SECURITY FIX: Removed automatic user creation

@@ -27,6 +27,7 @@ import RichTextEditor from "@/components/rich-text-editor"
 import { EmailContentViewer } from "@/components/email-content-viewer"
 import { htmlToText } from "@/lib/html-to-text"
 import CustomerEmailTimeline from "@/components/customer-email-timeline"
+import EmailHealthBanner from "@/components/email-health-banner"
 
 
 
@@ -1077,7 +1078,14 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       if (!silent) setLoading(false)
       setLoadingMore(false)
     }
-  }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery, activeTab === 'closed' ? 'closed' : 'active', statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, fetchTicketCounts, sortOrder, loading])
+    // Intentionally OMIT `loading` from the dep list. fetchTickets calls
+    // setLoading(true) at start and setLoading(false) at end, so including
+    // `loading` would give fetchTickets a new identity on every call. That
+    // re-triggers any useEffect depending on fetchTickets (e.g. the prefetch
+    // effect below), which fires fetchTickets again — causing /api/tickets
+    // and /api/tickets/counts to be hit several times per second.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAccount, currentUserId, checkSyncStatus, activeSearchQuery, activeTab === 'closed' ? 'closed' : 'active', statusFilter, assigneeFilter, priorityFilter, departmentFilter, tagsFilter, fetchTicketCounts, sortOrder])
 
   // We keep pagination explicit now instead of auto-loading on scroll.
   // The Load more button is still available at the bottom of the list.
@@ -3577,6 +3585,9 @@ ${latestMsg.body || ""}
           id="ticket-list-panel"
         >
           <div ref={ticketListRef} tabIndex={-1} className="flex flex-col h-full overflow-hidden w-full" style={{ contain: 'layout' }}>
+            {/* Email delivery health — surfaces (and recovers) any client emails
+                that never became tickets. Renders nothing for non-admins. */}
+            <EmailHealthBanner onRecovered={() => fetchTickets({ silent: true })} />
             {/* Show creating indicator banner if tickets are being created */}
             {isCreatingTickets && tickets.length > 0 && (
               <div className="p-2 bg-primary/10 border-b border-primary/20 flex items-center gap-2 text-sm text-primary animate-in slide-in-from-top duration-300">
@@ -4170,13 +4181,13 @@ ${latestMsg.body || ""}
                       <div key={ticket.id} style={{ display: isVisible ? 'block' : 'none' }}>
                         <Card
                           data-ticket-id={ticket.id}
-                          className={`m-2 cursor-pointer relative transition-all duration-300 ease-out animate-in fade-in slide-in-from-left-4 ${isSelected
-                            ? "border-primary border-2 bg-muted/30 shadow-lg ring-2 ring-primary/20"
+                          className={`group m-2 cursor-pointer relative overflow-hidden rounded-lg transition-all duration-200 ease-out animate-in fade-in slide-in-from-left-2 ${isSelected
+                            ? "border-primary bg-primary/[0.04] shadow-md ring-1 ring-primary/30"
                             : isUnread
-                              ? "border-primary/60 bg-primary/5 hover:bg-primary/10 hover:shadow-md hover:border-primary/80"
-                              : "border-border/50 hover:bg-muted/50 hover:shadow-md hover:border-border"
+                              ? "border-primary/40 bg-primary/[0.03] hover:bg-primary/[0.06] hover:shadow-sm hover:border-primary/60"
+                              : "border-border/60 hover:bg-muted/40 hover:shadow-sm hover:border-border"
                             }`}
-                          style={{ animationDelay: `${index * 30}ms` }}
+                          style={{ animationDelay: `${Math.min(index, 12) * 25}ms` }}
                           onClick={(e) => {
                             if (isSelectMode) {
                               e.stopPropagation()
@@ -4188,10 +4199,12 @@ ${latestMsg.body || ""}
                             }
                           }}
                         >
-                          {isUnread && (
-                            <div className="absolute top-3 right-3 w-2.5 h-2.5 rounded-full bg-destructive shadow-sm animate-pulse ring-2 ring-destructive/30" aria-label="New reply" />
-                          )}
-                          <CardContent className="p-3 space-y-2">
+                          {/* Status-keyed left accent rail */}
+                          <span
+                            aria-hidden
+                            className={`absolute left-0 top-0 h-full w-[3px] ${getStatusColor(ticket.status)} ${isUnread || isSelected ? "opacity-100" : "opacity-50"} transition-opacity`}
+                          />
+                          <CardContent className="p-3 pl-4 space-y-2">
                             <div className="flex items-start justify-between gap-2 w-full">
                               {isSelectMode && (
                                 <Checkbox
@@ -4211,26 +4224,25 @@ ${latestMsg.body || ""}
                                   className="mt-0.5 flex-shrink-0"
                                 />
                               )}
-                              <h3 className={`font-medium text-sm line-clamp-2 flex-1 min-w-0 break-words overflow-wrap-anywhere ${isUnread ? "font-semibold text-foreground" : ""}`}>
+                              <h3 className={`text-sm line-clamp-2 flex-1 min-w-0 break-words overflow-wrap-anywhere tracking-tight ${isUnread ? "font-semibold text-foreground" : "font-medium text-foreground/90"}`}>
                                 {ticket.subject}
                               </h3>
                               <div className="flex gap-1 flex-shrink-0 items-center">
                                 {isUnread && (
-                                  <Badge variant="secondary" className="text-[11px] bg-primary/10 text-primary border border-primary/30">
-                                    New
-                                  </Badge>
-                                )}
-                                <Badge className={`${getStatusColor(ticket.status)} text-white text-xs transition-all duration-200`}>
-                                  {ticket.status}
-                                </Badge>
-                                {ticket.assigneeUserId && ticket.priority && (
-                                  <Badge className={`${getPriorityColor(ticket.priority)} text-white text-xs transition-all duration-200`}>
-                                    {ticket.priority}
-                                  </Badge>
+                                  <span className="h-2 w-2 rounded-full bg-destructive ring-2 ring-destructive/25 animate-pulse" aria-label="New reply" />
                                 )}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 flex-wrap">
+                            {/* Status + classification row */}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <Badge className={`${getStatusColor(ticket.status)} text-white text-[10px] h-4 px-1.5 capitalize font-medium border-0`}>
+                                {ticket.status.replace("_", " ")}
+                              </Badge>
+                              {ticket.assigneeUserId && ticket.priority && (
+                                <Badge className={`${getPriorityColor(ticket.priority)} text-white text-[10px] h-4 px-1.5 capitalize font-medium border-0`}>
+                                  {ticket.priority}
+                                </Badge>
+                              )}
                               {ticket.departmentName ? (
                                 <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-primary/30 text-primary bg-primary/5">
                                   {ticket.departmentName}
@@ -4241,24 +4253,23 @@ ${latestMsg.body || ""}
                                 </Badge>
                               )}
                             </div>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
-                              <Mail className="w-3 h-3 flex-shrink-0" />
+                            {/* Customer */}
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+                              <Mail className="w-3 h-3 flex-shrink-0 opacity-70" />
                               <span className="truncate min-w-0">{ticket.customerEmail}</span>
                             </div>
-                            {ticket.assigneeName ? (
-                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <User className="w-3 h-3" />
-                                <span>{ticket.assigneeName}</span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                <User className="w-3 h-3" />
-                                <span className="italic">Unassigned</span>
-                              </div>
-                            )}
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <Clock className="w-3 h-3" />
-                              <span>{formatDate(ticket.lastCustomerReplyAt)}</span>
+                            {/* Assignee + time footer */}
+                            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground pt-0.5 border-t border-border/40">
+                              <span className="flex items-center gap-1.5 min-w-0 pt-1">
+                                <User className="w-3 h-3 flex-shrink-0 opacity-70" />
+                                <span className={`truncate ${ticket.assigneeName ? "" : "italic opacity-80"}`}>
+                                  {ticket.assigneeName || "Unassigned"}
+                                </span>
+                              </span>
+                              <span className="flex items-center gap-1.5 flex-shrink-0 pt-1 tabular-nums">
+                                <Clock className="w-3 h-3 opacity-70" />
+                                {formatDate(ticket.lastCustomerReplyAt)}
+                              </span>
                             </div>
                           </CardContent>
                         </Card>
@@ -4777,17 +4788,32 @@ ${latestMsg.body || ""}
                       {!conversationMinimized && (
                         <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300 w-full max-w-full overflow-hidden">
                           {loadingThread ? (
-                            <div className="flex items-center justify-center py-12">
-                              <div className="flex flex-col items-center gap-3 animate-in fade-in duration-300">
-                                {/* Simple, smooth spinner */}
-                                <div className="relative w-12 h-12">
-                                  <div
-                                    className="absolute inset-0 rounded-full border-3 border-transparent border-t-primary animate-spin"
-                                    style={{ animationDuration: '0.8s', animationTimingFunction: 'ease-in-out' }}
-                                  ></div>
+                            /* Content-shaped skeletons keep the layout stable so switching
+                               tickets feels instant instead of flashing a blank spinner. */
+                            <div className="space-y-4" aria-busy="true" aria-label="Loading conversation">
+                              {[0, 1].map((i) => (
+                                <div
+                                  key={i}
+                                  className="rounded-lg border border-border/50 bg-background/60 p-4 animate-in fade-in duration-300"
+                                  style={{ animationDelay: `${i * 80}ms` }}
+                                >
+                                  <div className="flex items-start gap-3">
+                                    <Skeleton className="h-9 w-9 rounded-full flex-shrink-0" />
+                                    <div className="flex-1 space-y-2 min-w-0">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <Skeleton className="h-3.5 w-40" />
+                                        <Skeleton className="h-3 w-16" />
+                                      </div>
+                                      <div className="space-y-2 pt-1">
+                                        <Skeleton className="h-3 w-full" />
+                                        <Skeleton className="h-3 w-[92%]" />
+                                        <Skeleton className="h-3 w-[78%]" />
+                                        <Skeleton className="h-3 w-[60%]" />
+                                      </div>
+                                    </div>
+                                  </div>
                                 </div>
-                                <p className="text-sm font-medium text-muted-foreground">Loading conversation...</p>
-                              </div>
+                              ))}
                             </div>
                           ) : threadMessages.length === 0 ? (
                             <p className="text-sm text-muted-foreground animate-in fade-in duration-300">No messages yet</p>
@@ -4800,8 +4826,8 @@ ${latestMsg.body || ""}
                               return (
                                 <div
                                   key={key}
-                                  className="rounded-lg border border-border/50 bg-background/60 shadow-sm p-4 transition-all duration-300 ease-out hover:bg-muted/40 animate-in fade-in slide-in-from-left-4 w-full max-w-full overflow-hidden"
-                                  style={{ animationDelay: `${idx * 50}ms` }}
+                                  className="rounded-lg border border-border/50 bg-background/60 shadow-sm p-4 transition-all duration-300 ease-out hover:bg-muted/40 animate-in fade-in slide-in-from-left-2 w-full max-w-full overflow-hidden"
+                                  style={{ animationDelay: `${Math.min(idx, 6) * 35}ms` }}
                                 >
                                   <div className="flex items-start gap-3 w-full max-w-full">
                                     <div className="h-9 w-9 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold flex-shrink-0">

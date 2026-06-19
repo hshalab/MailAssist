@@ -144,7 +144,17 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     return `<img ${beforeSrc}src="${proxiedSrc}" ${hasLoading ? '' : 'loading="lazy" '} ${hasDecoding ? '' : 'decoding="async" '} ${afterSrc}>`
                 }
 
-                // For cid/data/relative images just ensure lazy/async
+                // Unresolved cid: refs (Yahoo/IMAP attachments we couldn't match).
+                // Replace with a styled placeholder so users see something nice
+                // instead of a browser broken-image icon + raw alt text.
+                if (srcValue.toLowerCase().startsWith('cid:')) {
+                    const altMatch = (beforeSrc + afterSrc).match(/\balt=["']([^"']*)["']/i)
+                    const label = altMatch ? altMatch[1] : 'Inline image unavailable'
+                    const escaped = label.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    return `<span class="cid-placeholder" role="img" aria-label="${escaped}">🖼  ${escaped}</span>`
+                }
+
+                // For data/relative images just ensure lazy/async
                 return `<img ${beforeSrc}src="${srcValue}" ${hasLoading ? '' : 'loading="lazy" '} ${hasDecoding ? '' : 'decoding="async" '} ${afterSrc}>`
             }
         )
@@ -305,7 +315,8 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
     // Always render the email body on a white "paper" canvas, regardless of app theme.
     // Email inline CSS (text colors, backgrounds, branded styling) is designed for white;
     // forcing dark-mode rewrites breaks marketing emails. Gmail/Outlook follow the same pattern.
-    const canvasBg = '#ffffff'
+    // We soften the canvas a touch (#fafafa) so it doesn't burn against dark UI chrome.
+    const canvasBg = '#fafafa'
     const fallbackText = '#1f2937'
     const fallbackLink = '#2563eb'
 
@@ -361,6 +372,26 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 img {
                     max-width: 100%;
                     height: auto;
+                    border-radius: 6px;
+                }
+                /* Placeholder for unresolved cid: refs (Yahoo/IMAP inline images
+                   whose attachments we couldn't match). Replaces what would
+                   otherwise render as a broken-image icon + raw "Photo attachment"
+                   alt text. Works without iframe scripts. */
+                .cid-placeholder {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 10px 14px;
+                    min-height: 44px;
+                    border: 1px dashed #d1d5db;
+                    background: #f3f4f6;
+                    color: #4b5563;
+                    border-radius: 8px;
+                    font-size: 13px;
+                    font-style: italic;
+                    line-height: 1.4;
+                    margin: 4px 0;
                 }
                 img[data-remote-blocked="true"] {
                     background: repeating-linear-gradient(45deg, #f7f7f7, #f7f7f7 10px, #e5e5e5 10px, #e5e5e5 20px);
@@ -448,14 +479,19 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
     return (
         <div
             className={cn(
-                "email-content-viewer w-full rounded-lg border border-border dark:border-white/10 dark:shadow-lg dark:shadow-black/20 overflow-hidden bg-white",
+                "email-content-viewer w-full rounded-xl overflow-hidden",
+                "border border-zinc-200 dark:border-white/10",
+                "shadow-sm dark:shadow-lg dark:shadow-black/30",
+                "bg-zinc-50 dark:bg-zinc-900/40",
                 className
             )}
             aria-busy={loading}
         >
             {blockedRemoteCount > 0 && !remoteImagesAllowed && (
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-900 dark:text-amber-200">
-                    <span>{blockedRemoteCount} remote image{blockedRemoteCount === 1 ? '' : 's'} blocked for privacy.</span>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 dark:border-white/10 bg-amber-50 dark:bg-amber-900/20 px-4 py-2.5 text-sm text-amber-900 dark:text-amber-200">
+                    <span>
+                        <span className="font-medium">{blockedRemoteCount}</span> remote image{blockedRemoteCount === 1 ? '' : 's'} blocked for privacy.
+                    </span>
                     <button
                         onClick={() => setRemoteImagesAllowed(true)}
                         className="rounded-md bg-amber-600 px-3 py-1 text-xs font-medium text-white shadow-sm transition hover:bg-amber-700"
@@ -464,31 +500,37 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     </button>
                 </div>
             )}
-            <div className="relative bg-white p-2">
-                {loading && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80 backdrop-blur-sm">
-                        <span className="text-sm text-muted-foreground">Loading message…</span>
-                    </div>
-                )}
-                <iframe
-                    ref={iframeRef}
-                    sandbox="allow-same-origin"
-                    srcDoc={iframeHtml}
-                    className={cn(
-                        "w-full border-0 block transition-opacity",
-                        loading ? "opacity-0" : "opacity-100"
+            <div className="relative p-3 sm:p-4">
+                <div className="rounded-lg overflow-hidden border border-zinc-200/80 dark:border-white/5 bg-[#fafafa] dark:ring-1 dark:ring-white/5">
+                    {loading && (
+                        <div className="absolute inset-0 z-10 flex flex-col gap-3 p-6 bg-[#fafafa] dark:bg-zinc-900/60">
+                            {/* Paper-like shimmer so the message area never flashes blank */}
+                            <div className="h-3 w-2/3 rounded bg-zinc-200/80 dark:bg-zinc-700/60 animate-pulse" />
+                            <div className="h-3 w-11/12 rounded bg-zinc-200/70 dark:bg-zinc-700/50 animate-pulse" style={{ animationDelay: '80ms' }} />
+                            <div className="h-3 w-5/6 rounded bg-zinc-200/70 dark:bg-zinc-700/50 animate-pulse" style={{ animationDelay: '160ms' }} />
+                            <div className="h-3 w-3/5 rounded bg-zinc-200/60 dark:bg-zinc-700/40 animate-pulse" style={{ animationDelay: '240ms' }} />
+                        </div>
                     )}
-                    style={{
-                        height: `${iframeHeight}px`,
-                        minHeight: '300px',
-                        background: '#ffffff',
-                    }}
-                    onLoad={() => {
-                        measureHeight()
-                        setLoading(false)
-                    }}
-                    title="Email content"
-                />
+                    <iframe
+                        ref={iframeRef}
+                        sandbox="allow-same-origin"
+                        srcDoc={iframeHtml}
+                        className={cn(
+                            "w-full border-0 block transition-opacity duration-200",
+                            loading ? "opacity-0" : "opacity-100"
+                        )}
+                        style={{
+                            height: `${iframeHeight}px`,
+                            minHeight: '88px',
+                            background: '#fafafa',
+                        }}
+                        onLoad={() => {
+                            measureHeight()
+                            setLoading(false)
+                        }}
+                        title="Email content"
+                    />
+                </div>
             </div>
         </div>
     )

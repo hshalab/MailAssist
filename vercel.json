@@ -8,6 +8,10 @@
         {
             "path": "/api/cron/renew-watches",
             "schedule": "0 0 * * *"
+        },
+        {
+            "path": "/api/cron/reconcile-inbox",
+            "schedule": "0 */2 * * *"
         }
     ]
 }
