@@ -85,7 +85,38 @@ export async function GET(
       );
     }
 
-    const thread = await getThreadById(tokens, ticket.threadId);
+    // MULTI-MAILBOX: the thread may live in a different connected mailbox than
+    // the one we resolved tokens for. If the primary fetch fails or comes back
+    // empty, try each connected account's tokens until the thread is found —
+    // otherwise the user sees "Failed to fetch thread" for non-primary mailboxes.
+    let thread: { messages: any[] } | null = null;
+    try {
+      thread = await getThreadById(tokens, ticket.threadId);
+    } catch (primaryErr) {
+      console.warn('[Thread API] Primary tokens failed to fetch thread, trying other connected accounts:', primaryErr instanceof Error ? primaryErr.message : primaryErr);
+    }
+
+    if (!thread || !(thread.messages?.length)) {
+      try {
+        const { loadBusinessTokens } = await import('@/lib/storage');
+        const accounts = await loadBusinessTokens(businessSession?.businessId || null, targetEmail || undefined);
+        for (const acc of accounts) {
+          if (acc.tokens?.access_token === tokens.access_token) continue; // already tried
+          try {
+            const t = await getThreadById(acc.tokens, ticket.threadId);
+            if (t && t.messages?.length) { thread = t; break; }
+          } catch { /* try next account */ }
+        }
+      } catch (fanoutErr) {
+        console.warn('[Thread API] Cross-account thread fetch fallback failed:', fanoutErr);
+      }
+    }
+
+    // Graceful: if still nothing, return empty messages (client shows
+    // "No messages yet") rather than a hard "Failed to fetch thread".
+    if (!thread) {
+      thread = { messages: [] };
+    }
 
     console.log('[Thread API] Fetched thread with', thread.messages?.length || 0, 'messages');
 
