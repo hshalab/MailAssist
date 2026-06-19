@@ -248,18 +248,17 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document
             if (!iframeDoc) return
 
+            // Measure the BODY's content height only. Previously this took
+            // Math.max of body AND documentElement metrics — but once the iframe
+            // is sized tall, documentElement fills it and html.scrollHeight never
+            // shrinks back, leaving a large blank gap under short emails (the
+            // "whitespace" bug). body.scrollHeight reflects the true content height
+            // and shrinks correctly because the body isn't forced to fill the frame.
             const body = iframeDoc.body
-            const html = iframeDoc.documentElement
-            const actualHeight = Math.max(
-                body?.scrollHeight || 0,
-                body?.offsetHeight || 0,
-                html?.clientHeight || 0,
-                html?.scrollHeight || 0,
-                html?.offsetHeight || 0
-            )
+            const contentHeight = body?.scrollHeight || iframeDoc.documentElement?.scrollHeight || 0
 
-            const minHeight = 100
-            const calculatedHeight = actualHeight + 40
+            const minHeight = 56
+            const calculatedHeight = contentHeight + 16
             setIframeHeight(Math.max(calculatedHeight, minHeight))
         } catch (error) {
             console.error('Error updating iframe height:', error)
@@ -536,7 +535,7 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                         )}
                         style={{
                             height: `${iframeHeight}px`,
-                            minHeight: '88px',
+                            minHeight: '48px',
                             background: canvasBg,
                         }}
                         onLoad={() => {
