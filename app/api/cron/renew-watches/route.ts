@@ -13,6 +13,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
+// Vercel Hobby caps function runtime at 60s. The reconcile pass below is
+// bounded by a wall-clock budget so this stays well under that limit.
+export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
     const startTime = Date.now();
@@ -96,17 +99,56 @@ export async function GET(request: NextRequest) {
             }
         }
 
+        // --- Daily reconciliation pass ---
+        // Folded into this cron so we stay within Hobby's 2-cron limit. After
+        // renewing watches we sweep each mailbox's recent inbox and backfill any
+        // thread that never became a ticket — the safety net for missed pushes.
+        // Bounded by a wall-clock budget to stay under the 60s function cap;
+        // any mailboxes not reached this run are covered tomorrow + by the
+        // real-time webhook. Steady-state cost is tiny: a couple of list calls
+        // per mailbox, with NO body fetches unless a ticket is actually missing.
+        const RECONCILE_TOTAL_BUDGET_MS = 50_000;
+        const RECONCILE_PER_ACCOUNT_MS = 8_000;
+        const { reconcileAccountInbox } = await import('@/lib/reconcile');
+        let reconciledAccounts = 0;
+        let ticketsRecovered = 0;
+        let reconcileSkippedForTime = 0;
+        for (const [email, token] of byEmail) {
+            if (Date.now() - startTime > RECONCILE_TOTAL_BUDGET_MS) {
+                reconcileSkippedForTime++;
+                continue;
+            }
+            if (!token.refresh_token) continue;
+            try {
+                const r = await reconcileAccountInbox(email, token, {
+                    query: 'in:inbox newer_than:7d',
+                    softDeadlineMs: RECONCILE_PER_ACCOUNT_MS,
+                    maxCreatesPerRun: 100,
+                });
+                reconciledAccounts++;
+                ticketsRecovered += r.ticketsCreated;
+                if (r.ticketsCreated > 0) {
+                    console.warn(`[Watch Renewal] Reconcile recovered ${r.ticketsCreated} missing ticket(s) for ${email}`);
+                }
+            } catch (reconcileErr) {
+                console.error(`[Watch Renewal] Reconcile failed for ${email}:`, reconcileErr);
+            }
+        }
+
         const successCount = results.filter(r => r.success).length;
         const needsReconnectCount = results.filter(r => r.needsReconnect).length;
         const duration = Date.now() - startTime;
 
-        console.log(`[Watch Renewal] Completed: ${successCount}/${results.length} accounts renewed, ${needsReconnectCount} need reconnect, in ${duration}ms`);
+        console.log(`[Watch Renewal] Completed: ${successCount}/${results.length} renewed, ${needsReconnectCount} need reconnect; reconciled ${reconciledAccounts} mailbox(es), recovered ${ticketsRecovered} ticket(s), ${reconcileSkippedForTime} skipped for time, in ${duration}ms`);
 
         return NextResponse.json({
             success: true,
             renewed: successCount,
             needsReconnect: needsReconnectCount,
             total: results.length,
+            reconciledAccounts,
+            ticketsRecovered,
+            reconcileSkippedForTime,
             duration,
             results,
         });
