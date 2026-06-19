@@ -72,7 +72,16 @@ export async function GET(request: NextRequest) {
 
         const results: { email: string; success: boolean; needsReconnect?: boolean; error?: string }[] = [];
 
+        // Cap watch-renewal time so the reconcile pass below always gets to run
+        // within the 60s function budget, even with many slow accounts.
+        const WATCH_RENEWAL_BUDGET_MS = 25_000;
+        let watchRenewalSkipped = 0;
+
         for (const [email, token] of byEmail) {
+            if (Date.now() - startTime > WATCH_RENEWAL_BUDGET_MS) {
+                watchRenewalSkipped++;
+                continue; // remaining accounts renew tomorrow; reconcile still runs
+            }
             if (!token.refresh_token) {
                 // No refresh token — the watch will lapse and cannot self-renew.
                 results.push({ email, success: false, needsReconnect: true, error: 'missing refresh_token' });
@@ -145,6 +154,7 @@ export async function GET(request: NextRequest) {
             success: true,
             renewed: successCount,
             needsReconnect: needsReconnectCount,
+            watchRenewalSkippedForTime: watchRenewalSkipped,
             total: results.length,
             reconciledAccounts,
             ticketsRecovered,

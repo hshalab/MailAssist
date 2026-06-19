@@ -2121,6 +2121,13 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       console.error("Error fetching thread:", err)
       if (selectedTicketIdRef.current === targetTicketId) {
         setThreadMessages([])
+        if (!silent) {
+          setThreadError(
+            err instanceof TypeError
+              ? "Network error — check your connection and retry."
+              : `Couldn't load this conversation.${err instanceof Error ? ` ${err.message}` : ''}`
+          )
+        }
       }
     } finally {
       if (selectedTicketIdRef.current === targetTicketId) {
@@ -3607,10 +3614,10 @@ ${latestMsg.body || ""}
               </div>
             )}
             <div className="p-3 border-b border-border/50 space-y-2 flex-shrink-0 bg-card/50 backdrop-blur-sm">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-semibold">Tickets</h2>
-                  <Badge variant="secondary" className="h-5 px-2 text-xs font-medium">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 min-w-0">
+                  <h2 className="text-lg font-semibold tracking-tight">Tickets</h2>
+                  <Badge variant="secondary" className="h-5 px-2 text-xs font-medium tabular-nums">
                     {/* Show GLOBAL count for the current tab, not just loaded count */}
                     {activeTab === 'open' ? ticketCounts.open :
                       activeTab === 'assigned' ? ticketCounts.assigned :
@@ -3619,7 +3626,7 @@ ${latestMsg.body || ""}
                             filteredTickets.length}
                   </Badge>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 flex-shrink-0">
                   <Button
                     type="button"
                     variant="ghost"
@@ -3671,7 +3678,7 @@ ${latestMsg.body || ""}
                         setSelectedTicketIds(new Set())
                       }
                     }}
-                    className="h-7 text-xs transition-all duration-300 ease-out hover:scale-110 hover:shadow-md"
+                    className="h-7 text-xs transition-all duration-300 ease-out hover:shadow-md"
                   >
                     {isSelectMode ? "Cancel" : "Select"}
                   </Button>
@@ -4191,13 +4198,12 @@ ${latestMsg.body || ""}
                       <div key={ticket.id} style={{ display: isVisible ? 'block' : 'none' }}>
                         <Card
                           data-ticket-id={ticket.id}
-                          className={`group m-2 cursor-pointer relative overflow-hidden rounded-lg transition-all duration-200 ease-out animate-in fade-in slide-in-from-left-2 ${isSelected
-                            ? "border-primary bg-primary/[0.04] shadow-md ring-1 ring-primary/30"
+                          className={`group m-2 cursor-pointer relative overflow-hidden rounded-lg transition-colors duration-150 ${isSelected
+                            ? "border-primary bg-primary/[0.04] ring-1 ring-primary/30"
                             : isUnread
-                              ? "border-primary/40 bg-primary/[0.03] hover:bg-primary/[0.06] hover:shadow-sm hover:border-primary/60"
-                              : "border-border/60 hover:bg-muted/40 hover:shadow-sm hover:border-border"
+                              ? "border-primary/40 bg-primary/[0.03] hover:bg-primary/[0.06] hover:border-primary/60"
+                              : "border-border/60 hover:bg-muted/40 hover:border-border"
                             }`}
-                          style={{ animationDelay: `${Math.min(index, 12) * 25}ms` }}
                           onClick={(e) => {
                             if (isSelectMode) {
                               e.stopPropagation()
@@ -4374,14 +4380,14 @@ ${latestMsg.body || ""}
                           </Badge>
                         )}
                         {selectedTicket.tags.map((tag, idx) => (
-                          <Badge key={idx} variant="outline" className="transition-all duration-300 ease-out hover:scale-110 hover:bg-muted hover:shadow-sm animate-in fade-in slide-in-from-bottom-2" style={{ animationDelay: `${idx * 50}ms` }}>{tag}</Badge>
+                          <Badge key={idx} variant="outline" className="transition-colors duration-150 hover:bg-muted">{tag}</Badge>
                         ))}
                       </div>
                     </div>
                     <Button
                       variant="outline"
                       onClick={() => setSelectedTicket(null)}
-                      className="transition-all duration-300 ease-out hover:scale-110 hover:shadow-md"
+                      className="transition-all duration-300 ease-out hover:shadow-md"
                     >
                       Close
                     </Button>
@@ -4589,7 +4595,7 @@ ${latestMsg.body || ""}
                       <div className="flex items-center gap-3">
                         <button
                           onClick={() => setShowShopifySidebar(true)}
-                          className="flex-shrink-0 hover:scale-110 transition-transform duration-200 cursor-pointer group"
+                          className="flex-shrink-0 transition-transform duration-200 cursor-pointer group"
                           title="View Shopify customer info"
                         >
                           <Avatar className="h-12 w-12 border-2 border-border group-hover:border-primary transition-colors">
@@ -4772,7 +4778,7 @@ ${latestMsg.body || ""}
                             variant="ghost"
                             size="sm"
                             onClick={() => setConversationMinimized(!conversationMinimized)}
-                            className="h-8 w-8 p-0 transition-all duration-300 ease-out hover:scale-110 hover:bg-muted hover:shadow-sm flex-shrink-0"
+                            className="h-8 w-8 p-0 transition-all duration-300 ease-out hover:bg-muted hover:shadow-sm flex-shrink-0"
                           >
                             {conversationMinimized ? (
                               <ChevronDown className="w-4 h-4 transition-transform duration-300 ease-out" />
@@ -4846,8 +4852,7 @@ ${latestMsg.body || ""}
                               return (
                                 <div
                                   key={key}
-                                  className="rounded-lg border border-border/50 bg-background/60 shadow-sm p-4 transition-all duration-300 ease-out hover:bg-muted/40 animate-in fade-in slide-in-from-left-2 w-full max-w-full overflow-hidden"
-                                  style={{ animationDelay: `${Math.min(idx, 6) * 35}ms` }}
+                                  className="rounded-lg border border-border/50 bg-card/60 shadow-sm p-4 transition-colors duration-150 hover:bg-muted/30 w-full max-w-full overflow-hidden"
                                 >
                                   <div className="flex items-start gap-3 w-full max-w-full">
                                     <div className="h-9 w-9 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold flex-shrink-0">
@@ -4973,7 +4978,7 @@ ${latestMsg.body || ""}
                                     <Button
                                       size="sm"
                                       variant="ghost"
-                                      className="h-6 w-6 p-0 transition-all duration-200 hover:scale-110 hover:bg-muted"
+                                      className="h-6 w-6 p-0 transition-all duration-200 hover:bg-muted"
                                       onClick={() => handleStartEditNote(note)}
                                     >
                                       <Edit2 className="w-3 h-3" />
@@ -5107,7 +5112,7 @@ ${latestMsg.body || ""}
                             size="sm"
                             variant={showShopifySidebar ? "default" : "outline"}
                             onClick={() => setShowShopifySidebar(!showShopifySidebar)}
-                            className="h-7 text-xs transition-all duration-200 hover:scale-105"
+                            className="h-7 text-xs transition-all duration-200"
                             title="Toggle Shopify Customer Info"
                           >
                             <ShoppingBag className="w-3 h-3 mr-1" />
@@ -5117,7 +5122,7 @@ ${latestMsg.body || ""}
                             size="sm"
                             variant={showQuickRepliesSidebar ? "default" : "outline"}
                             onClick={() => setShowQuickRepliesSidebar(!showQuickRepliesSidebar)}
-                            className="h-7 text-xs transition-all duration-200 hover:scale-105"
+                            className="h-7 text-xs transition-all duration-200"
                           >
                             <MessageSquare className="w-3 h-3 mr-1" />
                             Quick Replies
@@ -5170,7 +5175,7 @@ ${latestMsg.body || ""}
                                 setShowDraft(false)
                                 setDraftText("")
                               }}
-                              className="transition-all duration-200 hover:scale-110 flex-shrink-0"
+                              className="transition-all duration-200 flex-shrink-0"
                             >
                               <X className="w-4 h-4" />
                             </Button>
@@ -5178,7 +5183,7 @@ ${latestMsg.body || ""}
                           <p className="text-sm whitespace-pre-wrap break-words overflow-wrap-anywhere w-full max-w-full overflow-hidden">{draftText}</p>
                           <Button
                             size="sm"
-                            className="mt-2 transition-all duration-200 hover:scale-105"
+                            className="mt-2 transition-all duration-200"
                             onClick={() => {
                               // Update both text and HTML representations
                               // Convert newlines to breaks for HTML if needed, or just use raw text
@@ -5280,7 +5285,7 @@ ${latestMsg.body || ""}
                                 onClick={() => handleSendReply()}
                                 disabled={sendingReply || !forwardTo.trim()}
                                 size="sm"
-                                className="h-9 transition-all duration-200 hover:scale-105"
+                                className="h-9 transition-all duration-200"
                               >
                                 {sendingReply ? (
                                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -5329,7 +5334,7 @@ ${latestMsg.body || ""}
                         <Button
                           onClick={() => handleSendReply()}
                           disabled={!replyText.trim() || sendingReply || updatingStatus}
-                          className="h-8 text-xs transition-all duration-300 ease-out hover:scale-105 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="h-8 text-xs transition-all duration-300 ease-out hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {sendingAction === 'send' ? (
                             <>
@@ -5344,7 +5349,7 @@ ${latestMsg.body || ""}
                           variant="secondary"
                           onClick={() => handleSendReply({ closeTicket: true })}
                           disabled={!replyText.trim() || sendingReply || updatingStatus}
-                          className="h-8 text-xs transition-all duration-300 ease-out hover:scale-105 hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="h-8 text-xs transition-all duration-300 ease-out hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {sendingAction === 'send-close' ? (
                             <>
@@ -5483,7 +5488,7 @@ ${latestMsg.body || ""}
       <Dialog open={showDepartmentDialog} onOpenChange={setShowDepartmentDialog}>
         <DialogContent className="sm:max-w-md bg-background border-border shadow-2xl rounded-3xl">
           <DialogHeader className="flex flex-col items-center text-center pt-2">
-            <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 transition-transform hover:scale-110">
+            <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center mb-4 transition-transform">
               <Sparkles className="w-6 h-6 text-primary" />
             </div>
             <DialogTitle className="text-2xl font-bold tracking-tight">Confirm Move</DialogTitle>
@@ -5523,7 +5528,7 @@ ${latestMsg.body || ""}
             <Button
               onClick={handleUpdateDepartment}
               disabled={updatingDepartment || !targetDepartmentId}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl px-8 h-11 font-bold shadow-lg shadow-primary/20 transition-all hover:scale-105 active:scale-95"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl px-8 h-11 font-bold shadow-lg shadow-primary/20 transition-all active:scale-95"
             >
               {updatingDepartment ? (
                 <>

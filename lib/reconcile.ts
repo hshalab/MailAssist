@@ -201,8 +201,11 @@ export async function reconcileAccountInbox(
           );
 
           if (ticket) {
+            // "New" = created during this run. Window must cover the whole run,
+            // not 5s, or tickets created early are miscounted as pre-existing in
+            // long sweeps (skewing the "recovered N tickets" log to 0).
             const createdAt = new Date((ticket as any).createdAt || (ticket as any).created_at || 0).getTime();
-            const isNew = Date.now() - createdAt < 5000;
+            const isNew = Date.now() - createdAt < (options.softDeadlineMs ?? DEFAULTS.softDeadlineMs) + 5000;
             if (isNew) result.ticketsCreated++;
             else result.ticketsExisting++;
           } else {

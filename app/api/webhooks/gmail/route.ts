@@ -79,18 +79,25 @@ export async function POST(request: NextRequest) {
         // observed to vary), prefer the business-scoped row so downstream
         // agent-email lookups by business_id work, fall back to personal.
         const lookupEmail = notification.emailAddress.trim().toLowerCase();
-        // SECURITY: escape LIKE metacharacters (% and _) before passing to ilike.
-        // The email comes from the Pub/Sub payload; an unescaped '%' would turn the
-        // lookup into a wildcard match and could return a DIFFERENT account's tokens.
-        // Escaping keeps the intended case-insensitive exact match.
-        const lookupPattern = lookupEmail.replace(/([\\%_])/g, '\\$1');
-        const { data: tokenRows, error: tokenError } = await adminClient
+        // SECURITY: PostgREST's .ilike() does NOT honour backslash escaping (no
+        // ESCAPE clause), so a '%'/'_' in the Pub/Sub email would still act as a
+        // wildcard and could match a DIFFERENT account's tokens. We keep ilike for
+        // the case-insensitive fetch (Gmail casing varies) but then re-filter the
+        // rows in JS to an exact, case-insensitive match — neutralising any
+        // wildcard expansion regardless of DB-side escaping behaviour.
+        const lookupPattern = lookupEmail.replace(/([%_])/g, '');
+        const { data: rawTokenRows, error: tokenError } = await adminClient
             .from('tokens')
             .select('user_email, access_token, refresh_token, business_id')
-            .ilike('user_email', lookupPattern)
+            .ilike('user_email', `%${lookupPattern}%`)
             .order('business_id', { ascending: false, nullsFirst: false });
 
-        console.log(`[Gmail Webhook ${WEBHOOK_VERSION}] Token lookup for ${lookupEmail} returned ${tokenRows?.length ?? 0} row(s); error=${tokenError ? tokenError.message : 'none'}`);
+        // Exact (case-insensitive) match only — defends against any wildcard match.
+        const tokenRows = (rawTokenRows || []).filter(
+            r => (r.user_email || '').trim().toLowerCase() === lookupEmail
+        );
+
+        console.log(`[Gmail Webhook ${WEBHOOK_VERSION}] Token lookup for ${lookupEmail} returned ${tokenRows.length} exact row(s) (of ${rawTokenRows?.length ?? 0} fetched); error=${tokenError ? tokenError.message : 'none'}`);
 
         if (tokenError) {
             console.error(`[Gmail Webhook ${WEBHOOK_VERSION}] Token lookup failed for ${lookupEmail}:`, tokenError);
