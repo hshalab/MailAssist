@@ -41,7 +41,12 @@ export async function GET(
 
     // Check permissions
     const canViewAll = await canViewAllTickets(userId);
-    const ticket = await getTicketById(ticketId, userId, canViewAll, userEmail);
+    // Pass businessId so business accounts can open tickets owned by ANY of
+    // their connected mailboxes (not just the primary) — otherwise the list
+    // shows the ticket but the thread fetch returns "Ticket not found".
+    const { validateBusinessSession } = await import('@/lib/session');
+    const businessSession = await validateBusinessSession();
+    const ticket = await getTicketById(ticketId, userId, canViewAll, userEmail, businessSession?.businessId || null);
 
     if (!ticket) {
       return NextResponse.json(

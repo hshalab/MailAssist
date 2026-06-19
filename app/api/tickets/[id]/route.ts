@@ -48,8 +48,13 @@ export async function GET(
     // Check if user can view all tickets (Admin/Manager)
     const canViewAll = await canViewAllTickets(userId);
 
+    // Scope to all connected mailboxes for business accounts (matches getTickets),
+    // so a ticket owned by a non-primary mailbox doesn't 404 on open.
+    const { validateBusinessSession } = await import('@/lib/session');
+    const businessSession = await validateBusinessSession();
+
     // Get ticket (with permission check built-in)
-    const ticket = await getTicketById(ticketId, userId, canViewAll, userEmail);
+    const ticket = await getTicketById(ticketId, userId, canViewAll, userEmail, businessSession?.businessId || null);
 
     if (!ticket) {
       return NextResponse.json(
