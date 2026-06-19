@@ -355,6 +355,9 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // thread endpoint has fully caught up.
   const optimisticThreadMessagesRef = useRef<Record<string, ThreadMessage[]>>({})
   const [loadingThread, setLoadingThread] = useState(false)
+  // Holds a human-readable reason when a conversation fails to load, so we can
+  // show it (with a retry) instead of the misleading "No messages yet".
+  const [threadError, setThreadError] = useState<string | null>(null)
   const [notes, setNotes] = useState<TicketNote[]>([])
   const [replyText, setReplyText] = useState("")
   const [replyHtml, setReplyHtml] = useState("")
@@ -2065,6 +2068,7 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
       }
 
       if (!silent) setLoadingThread(true)
+      if (!silent) setThreadError(null)
       const response = await fetch(`/api/tickets/${targetTicketId}/thread`)
 
       // GUARD: If we moved to another ticket while fetching, ABORT.
@@ -2099,13 +2103,19 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
         }
 
         setThreadMessages(messages)
+        if (selectedTicketIdRef.current === targetTicketId) setThreadError(null)
       } else {
         // Handle error - try to get error message from response
         const errorData = await response.json().catch(() => ({}))
         console.error("Thread API error:", response.status, errorData)
-        // Set empty messages - UI will show "No messages yet"
-        // In the future we could add an error state to show the actual error
-        setThreadMessages([])
+        if (selectedTicketIdRef.current === targetTicketId) {
+          // Surface an actionable reason instead of a silent "No messages yet".
+          const reason = response.status === 401
+            ? "This mailbox's Gmail connection needs to be reconnected to load the conversation."
+            : (errorData?.error || `Couldn't load this conversation (error ${response.status}).`)
+          setThreadError(reason)
+          setThreadMessages([])
+        }
       }
     } catch (err) {
       console.error("Error fetching thread:", err)
@@ -4814,6 +4824,16 @@ ${latestMsg.body || ""}
                                   </div>
                                 </div>
                               ))}
+                            </div>
+                          ) : threadError ? (
+                            <div className="flex flex-col items-center justify-center gap-3 py-10 text-center animate-in fade-in duration-300">
+                              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-destructive/10">
+                                <XCircle className="h-5 w-5 text-destructive" />
+                              </div>
+                              <p className="text-sm font-medium text-foreground max-w-sm">{threadError}</p>
+                              <Button variant="outline" size="sm" onClick={() => fetchThread()} className="h-8">
+                                <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Retry
+                              </Button>
                             </div>
                           ) : threadMessages.length === 0 ? (
                             <p className="text-sm text-muted-foreground animate-in fade-in duration-300">No messages yet</p>

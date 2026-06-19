@@ -9,7 +9,6 @@ import { getValidTokens } from '@/lib/token-refresh';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { canViewAllTickets } from '@/lib/permissions';
 import { getCurrentUserEmail } from '@/lib/storage';
-import { getGmailClient } from '@/lib/gmail';
 
 type RouteContext =
   | { params: { id: string } }
@@ -83,68 +82,18 @@ export async function GET(
 
     const thread = await getThreadById(tokens, ticket.threadId);
 
-    // Log initial thread data
     console.log('[Thread API] Fetched thread with', thread.messages?.length || 0, 'messages');
-    thread.messages?.forEach((msg: any, i: number) => {
-      console.log(`  Message ${i}: has ${msg.attachments?.length || 0} attachments`, msg.attachments?.map((a: any) => a.filename));
-    });
 
-    // Fetch attachment data for all messages
-    const gmail = getGmailClient(tokens);
-    const messagesWithAttachmentData = await Promise.all(
-      (thread.messages || []).map(async (msg: any) => {
-        if (!msg.attachments || msg.attachments.length === 0) {
-          return msg;
-        }
-
-        console.log(`[Thread API] Fetching attachment data for message ${msg.id}`);
-
-        const attachmentResults = await Promise.allSettled(
-          msg.attachments.map(async (att: any) => {
-            try {
-              console.log(`[Thread API] Fetching attachment ${att.id} (${att.filename}) from message ${msg.id}`);
-              const response = await gmail.users.messages.attachments.get({
-                userId: 'me',
-                messageId: msg.id,
-                id: att.id,
-              });
-
-              const attachmentData = response.data.data;
-              console.log(`[Thread API] Got attachment data for ${att.filename}: ${attachmentData ? `${attachmentData.length} chars` : 'no data'}`);
-              return {
-                ...att,
-                data: attachmentData || undefined, // base64url encoded
-              };
-            } catch (error) {
-              console.error(`[Thread API] Failed to fetch attachment ${att.id} (${att.filename}) from message ${msg.id}:`, error instanceof Error ? error.message : String(error));
-              return att; // Return without data if fetch fails
-            }
-          })
-        );
-
-        const attachmentsWithData = attachmentResults.map((result, idx) => {
-          if (result.status === 'fulfilled') {
-            return result.value;
-          } else {
-            console.error('[Thread API] Attachment fetch promise rejected:', result.reason);
-            return msg.attachments[idx]; // Return original attachment if promise rejected
-          }
-        });
-
-        return {
-          ...msg,
-          attachments: attachmentsWithData,
-        };
-      })
-    );
-
-    // Debug: Log attachment info for each message
-    console.log('[Thread API] Returning thread messages with attachments:');
-    messagesWithAttachmentData?.forEach((msg: any, i: number) => {
-      console.log(`  Message ${i}: ${msg.id}, attachments:`, msg.attachments?.length || 0, msg.attachments?.map((a: any) => ({ id: a.id, filename: a.filename, hasData: !!a.data })));
-    });
-
-    const response = NextResponse.json({ messages: messagesWithAttachmentData || [] });
+    // PERFORMANCE: Do NOT download attachment binaries here.
+    // Previously this made one extra Gmail API call per attachment (downloading
+    // full base64 data) BEFORE the conversation could render. On threads with
+    // attachments that was slow and could exceed the serverless function timeout,
+    // failing the whole request — so the user saw "No messages yet" and a long
+    // spinner. We now return messages with attachment METADATA immediately; the
+    // client lazy-loads each attachment's bytes on demand via
+    // /api/emails/[id]/attachments/[attachmentId] (already used by the email
+    // viewer for inline images and by the download links).
+    const response = NextResponse.json({ messages: thread.messages || [] });
 
     // PERFORMANCE: Cache thread details
     // Short cache time because threads get new messages
