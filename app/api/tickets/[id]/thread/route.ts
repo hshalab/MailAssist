@@ -5,7 +5,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTicketById } from '@/lib/tickets';
 import { getThreadById } from '@/lib/gmail';
-import { getValidTokens } from '@/lib/token-refresh';
 import { getCurrentUserIdFromRequest } from '@/lib/permissions';
 import { canViewAllTickets } from '@/lib/permissions';
 import { getCurrentUserEmail } from '@/lib/storage';
@@ -55,62 +54,30 @@ export async function GET(
       );
     }
 
-    // Get tokens and fetch thread
-    // First try the ticket's user_email, then fallback to current user's email
-    // Get tokens and fetch thread
-    // CRITICAL FIX: Use ownerEmail (the connected account) to fetch the thread.
-    // The thread ID corresponds to the mailbox of ownerEmail.
-    const targetEmail = ticket.ownerEmail || ticket.userEmail;
-    console.log(`[Thread API] Fetching tokens for ${targetEmail} (Owner: ${ticket.ownerEmail}, User: ${ticket.userEmail})`);
+    // Fetch the conversation. The thread may live in ANY connected mailbox, so
+    // resolve via fan-out (the ticket's owner mailbox first) rather than a single
+    // primary token — this is what fixes "Failed to fetch thread" for tickets
+    // owned by a non-primary mailbox.
+    const ownerHint = ticket.ownerEmail || ticket.userEmail;
+    const { withMailboxFallback } = await import('@/lib/mailbox-resolver');
+    const { result: fetched, candidateCount } = await withMailboxFallback<{ messages: any[] }>(
+      { ownerEmailHint: ownerHint, businessId: businessSession?.businessId || null, sessionEmail: userEmail },
+      async (tok) => {
+        const t = await getThreadById(tok, ticket.threadId);
+        return (t && t.messages?.length) ? t : null;
+      }
+    );
 
-    let tokens = await getValidTokens(targetEmail);
-
-    // Fallback: If target email doesn't have tokens, try current session email
-    // (Only if it's different from what we already tried)
-    if ((!tokens || !tokens.access_token) && userEmail && userEmail !== targetEmail) {
-      console.log(`[Thread] Target email ${targetEmail} has no tokens, trying current user ${userEmail}`);
-      tokens = await getValidTokens(userEmail);
-    }
-
-    if (!tokens || !tokens.access_token) {
-      console.error(`[Thread API] Authentication failed for ${targetEmail}. Owner: ${ticket.ownerEmail}, User: ${ticket.userEmail}`);
-      // DEBUG: Verify directly if tokens exist
-      const { loadTokens } = await import('@/lib/storage');
-      const directCheck = await loadTokens(targetEmail);
-      console.log(`[Thread API] Direct token check for ${targetEmail}: ${directCheck ? 'Found' : 'Missing'}`);
-
+    // No connected mailbox at all → tell the user to reconnect (don't silently
+    // show "No messages yet", which hides a revoked/expired Gmail connection).
+    if (candidateCount === 0) {
       return NextResponse.json(
-        { error: `No valid Gmail tokens found for ${targetEmail}. Please reconnect your Gmail account.` },
+        { error: 'No connected Gmail account for this ticket. Please reconnect Gmail.' },
         { status: 401 }
       );
     }
 
-    // MULTI-MAILBOX: the thread may live in a different connected mailbox than
-    // the one we resolved tokens for. If the primary fetch fails or comes back
-    // empty, try each connected account's tokens until the thread is found —
-    // otherwise the user sees "Failed to fetch thread" for non-primary mailboxes.
-    let thread: { messages: any[] } | null = null;
-    try {
-      thread = await getThreadById(tokens, ticket.threadId);
-    } catch (primaryErr) {
-      console.warn('[Thread API] Primary tokens failed to fetch thread, trying other connected accounts:', primaryErr instanceof Error ? primaryErr.message : primaryErr);
-    }
-
-    if (!thread || !(thread.messages?.length)) {
-      try {
-        const { loadBusinessTokens } = await import('@/lib/storage');
-        const accounts = await loadBusinessTokens(businessSession?.businessId || null, targetEmail || undefined);
-        for (const acc of accounts) {
-          if (acc.tokens?.access_token === tokens.access_token) continue; // already tried
-          try {
-            const t = await getThreadById(acc.tokens, ticket.threadId);
-            if (t && t.messages?.length) { thread = t; break; }
-          } catch { /* try next account */ }
-        }
-      } catch (fanoutErr) {
-        console.warn('[Thread API] Cross-account thread fetch fallback failed:', fanoutErr);
-      }
-    }
+    let thread: { messages: any[] } | null = fetched;
 
     // Graceful: if still nothing, return empty messages (client shows
     // "No messages yet") rather than a hard "Failed to fetch thread".
