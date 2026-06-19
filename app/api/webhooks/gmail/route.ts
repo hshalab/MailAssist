@@ -79,10 +79,15 @@ export async function POST(request: NextRequest) {
         // observed to vary), prefer the business-scoped row so downstream
         // agent-email lookups by business_id work, fall back to personal.
         const lookupEmail = notification.emailAddress.trim().toLowerCase();
+        // SECURITY: escape LIKE metacharacters (% and _) before passing to ilike.
+        // The email comes from the Pub/Sub payload; an unescaped '%' would turn the
+        // lookup into a wildcard match and could return a DIFFERENT account's tokens.
+        // Escaping keeps the intended case-insensitive exact match.
+        const lookupPattern = lookupEmail.replace(/([\\%_])/g, '\\$1');
         const { data: tokenRows, error: tokenError } = await adminClient
             .from('tokens')
             .select('user_email, access_token, refresh_token, business_id')
-            .ilike('user_email', lookupEmail)
+            .ilike('user_email', lookupPattern)
             .order('business_id', { ascending: false, nullsFirst: false });
 
         console.log(`[Gmail Webhook ${WEBHOOK_VERSION}] Token lookup for ${lookupEmail} returned ${tokenRows?.length ?? 0} row(s); error=${tokenError ? tokenError.message : 'none'}`);

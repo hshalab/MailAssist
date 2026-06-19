@@ -47,19 +47,40 @@ export async function GET(request: NextRequest) {
         auth: { persistSession: false },
     });
 
-    const { data: tokens, error: tokensError } = await adminClient
+    // SECURITY: scope strictly to the caller's tenant. This endpoint uses the
+    // service-role client (bypasses RLS); without an explicit tenant filter it
+    // would leak EVERY business's connected email addresses and sync timing to
+    // any logged-in user (cross-tenant information disclosure).
+    const businessId = businessSession.businessId;
+    let tokensQuery = adminClient
         .from('tokens')
         .select('user_email, business_id')
         .not('user_email', 'is', null);
+    if (businessId) {
+        tokensQuery = tokensQuery.eq('business_id', businessId);
+    } else {
+        // Personal account: restrict to its own mailbox only.
+        tokensQuery = tokensQuery.eq('user_email', businessSession.email).is('business_id', null);
+    }
+    const { data: tokens, error: tokensError } = await tokensQuery;
     if (tokensError) {
         return NextResponse.json({ error: tokensError.message }, { status: 500 });
     }
 
-    const { data: syncStates, error: syncError } = await adminClient
-        .from('sync_state')
-        .select('user_email, last_history_id, last_sync_at');
-    if (syncError) {
-        return NextResponse.json({ error: syncError.message }, { status: 500 });
+    // sync_state has no business_id column, so scope it to this tenant's mailboxes.
+    const tenantEmails = (tokens || [])
+        .map(t => t.user_email as string)
+        .filter(Boolean);
+    let syncStates: { user_email: string; last_history_id: string | null; last_sync_at: string | null }[] = [];
+    if (tenantEmails.length > 0) {
+        const { data: syncData, error: syncError } = await adminClient
+            .from('sync_state')
+            .select('user_email, last_history_id, last_sync_at')
+            .in('user_email', tenantEmails);
+        if (syncError) {
+            return NextResponse.json({ error: syncError.message }, { status: 500 });
+        }
+        syncStates = syncData || [];
     }
 
     const tokenEmails = new Set((tokens || []).map(t => (t.user_email as string).toLowerCase()));
