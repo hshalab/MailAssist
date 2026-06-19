@@ -903,11 +903,10 @@ export default function EmailList({ selectedEmail, onSelectEmail, onLoadingChang
               clearTimeout(prefetchTimeoutRef.current)
             }
           }}
-          className={`w-full text-left rounded-xl transition-all duration-200 ease-out border animate-in fade-in slide-in-from-left-2 group relative overflow-hidden ${selectedEmail === email.id
-            ? "border-primary/50 bg-accent/10 shadow-lg ring-1 ring-primary/20"
-            : "border-border/40 hover:border-primary/30 hover:bg-accent/5 hover:shadow-md bg-card/80"
+          className={`w-full text-left rounded-lg transition-colors duration-150 border group relative overflow-hidden ${selectedEmail === email.id
+            ? "border-primary bg-primary/[0.04] ring-1 ring-primary/30"
+            : "border-border/60 hover:border-border hover:bg-muted/40 bg-card/60"
             }`}
-          style={{ animationDelay: `${index * 15}ms` }}
         >
           <div className="flex gap-3 p-3 relative z-10">
             {isSpamView && (
