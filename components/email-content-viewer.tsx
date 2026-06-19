@@ -503,8 +503,12 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             <div className="relative p-3 sm:p-4">
                 <div className="rounded-lg overflow-hidden border border-zinc-200/80 dark:border-white/5 bg-[#fafafa] dark:ring-1 dark:ring-white/5">
                     {loading && (
-                        <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-50/70 dark:bg-zinc-900/60 backdrop-blur-sm">
-                            <span className="text-sm text-zinc-600 dark:text-zinc-300">Loading message…</span>
+                        <div className="absolute inset-0 z-10 flex flex-col gap-3 p-6 bg-[#fafafa] dark:bg-zinc-900/60">
+                            {/* Paper-like shimmer so the message area never flashes blank */}
+                            <div className="h-3 w-2/3 rounded bg-zinc-200/80 dark:bg-zinc-700/60 animate-pulse" />
+                            <div className="h-3 w-11/12 rounded bg-zinc-200/70 dark:bg-zinc-700/50 animate-pulse" style={{ animationDelay: '80ms' }} />
+                            <div className="h-3 w-5/6 rounded bg-zinc-200/70 dark:bg-zinc-700/50 animate-pulse" style={{ animationDelay: '160ms' }} />
+                            <div className="h-3 w-3/5 rounded bg-zinc-200/60 dark:bg-zinc-700/40 animate-pulse" style={{ animationDelay: '240ms' }} />
                         </div>
                     )}
                     <iframe
@@ -512,12 +516,12 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                         sandbox="allow-same-origin"
                         srcDoc={iframeHtml}
                         className={cn(
-                            "w-full border-0 block transition-opacity",
+                            "w-full border-0 block transition-opacity duration-200",
                             loading ? "opacity-0" : "opacity-100"
                         )}
                         style={{
                             height: `${iframeHeight}px`,
-                            minHeight: '300px',
+                            minHeight: '88px',
                             background: '#fafafa',
                         }}
                         onLoad={() => {
