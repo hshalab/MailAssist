@@ -3,7 +3,6 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getValidTokens } from '@/lib/token-refresh';
 import { getGmailClient } from '@/lib/gmail';
 
 export const dynamic = 'force-dynamic';
@@ -56,67 +55,31 @@ export async function GET(
             console.log(`[Attachment] Very long attachment ID detected: ${attachmentId.length} characters`);
         }
 
-        // Check for business session to determine which tokens to use
+        // Resolve the mailbox by fan-out: the message (and thus the attachment)
+        // may live in ANY connected mailbox, not just the session's primary one.
         const { validateBusinessSession, getSessionUserEmail } = await import('@/lib/session');
+        const { withMailboxFallback } = await import('@/lib/mailbox-resolver');
         const businessSession = await validateBusinessSession();
+        const sessionEmail = businessSession ? businessSession.email : await getSessionUserEmail();
 
-        // If business session exists, use the business email (shared account)
-        // Otherwise fallback to personal session email
-        let targetEmail = businessSession
-            ? businessSession.email
-            : await getSessionUserEmail();
-
-        if (businessSession) {
-            console.log(`[Attachment] Using business session tokens for: ${businessSession.email} (Agent: ${businessSession.name})`);
-        } else {
-            console.log(`[Attachment] Personal account mode, targetEmail: ${targetEmail || 'NOT SET'}`);
-        }
-
-        let tokens = await getValidTokens(targetEmail, businessSession?.businessId || undefined);
-
-        // FALLBACK: If no tokens found for personal accounts
-        const needsFallback = !tokens?.access_token && (!businessSession || !businessSession.businessId);
-        if (needsFallback) {
-            console.log('[Attachment] No tokens via getValidTokens, trying fallback...');
-            if (targetEmail) {
-                const { loadBusinessTokens } = await import('@/lib/storage');
-                const connectedAccounts = await loadBusinessTokens(null, targetEmail);
-                if (connectedAccounts.length > 0) {
-                    tokens = connectedAccounts[0].tokens;
-                    console.log(`[Attachment] Found tokens via loadBusinessTokens for: ${connectedAccounts[0].email}`);
-                }
+        const { result: attachmentData, accountEmail } = await withMailboxFallback<string>(
+            { businessId: businessSession?.businessId || null, sessionEmail },
+            async (tokens) => {
+                const gmail = getGmailClient(tokens);
+                const res = await gmail.users.messages.attachments.get({
+                    userId: 'me',
+                    messageId,
+                    id: attachmentId,
+                });
+                return res?.data?.data || null;
             }
-        }
+        );
 
-        if (!tokens || !tokens.access_token) {
-            console.error('[Attachment] No valid tokens found');
-            return new NextResponse('Not authenticated', { status: 401 });
-        }
-
-        const gmail = getGmailClient(tokens);
-
-        // Fetch the attachment data from Gmail
-        console.log(`[Attachment] Fetching attachment ${attachmentId} from message ${messageId}`);
-        let gmailResponse;
-        try {
-            gmailResponse = await gmail.users.messages.attachments.get({
-                userId: 'me',
-                messageId: messageId,
-                id: attachmentId,
-            });
-        } catch (gmailError: any) {
-            console.error('[Attachment] Gmail API error:', gmailError?.message || gmailError);
-            return new NextResponse(
-                `Failed to fetch attachment from Gmail: ${gmailError?.message || 'Unknown error'}`,
-                { status: 500 }
-            );
-        }
-
-        const attachmentData = gmailResponse?.data?.data;
         if (!attachmentData) {
-            console.error('[Attachment] No attachment data in Gmail response');
+            console.error(`[Attachment] Not found in any connected mailbox: msg ${messageId}, att ${attachmentId}`);
             return new NextResponse('Attachment not found', { status: 404 });
         }
+        console.log(`[Attachment] Fetched ${attachmentId} from mailbox ${accountEmail}`);
 
         // Decode base64url encoded data
         let base64 = attachmentData.replace(/-/g, '+').replace(/_/g, '/');
