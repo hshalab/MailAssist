@@ -156,8 +156,38 @@ export async function GET(
       }
     }
 
-    // Fetch the specific email with full content including attachments
-    const email = await getEmailById(tokens, emailId);
+    // Fetch the specific email with full content including attachments.
+    // MULTI-MAILBOX: in a business with several connected accounts, this message
+    // id may live in a DIFFERENT mailbox than the primary one. If the primary
+    // tokens fail (Gmail 404s for a message not in that mailbox), fall back to
+    // trying each connected account's tokens until one returns it — otherwise the
+    // user sees "Failed to fetch email" for any non-primary mailbox.
+    let email = null;
+    try {
+      email = await getEmailById(tokens, emailId);
+    } catch (primaryErr) {
+      console.warn('[Email Detail] Primary tokens failed for message, trying other connected accounts:', primaryErr instanceof Error ? primaryErr.message : primaryErr);
+    }
+
+    if (!email) {
+      try {
+        const { loadBusinessTokens } = await import('@/lib/storage');
+        const accounts = await loadBusinessTokens(businessSession?.businessId || null, targetEmail || undefined);
+        for (const acc of accounts) {
+          if (acc.tokens?.access_token === tokens.access_token) continue; // already tried
+          try {
+            const found = await getEmailById(acc.tokens, emailId);
+            if (found) {
+              email = found;
+              targetEmail = acc.email; // use the real owner for ticket scoping below
+              break;
+            }
+          } catch { /* try next account */ }
+        }
+      } catch (fanoutErr) {
+        console.warn('[Email Detail] Cross-account email fetch fallback failed:', fanoutErr);
+      }
+    }
 
     if (!email) {
       return NextResponse.json(

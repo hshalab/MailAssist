@@ -358,6 +358,17 @@ export default function TicketsView({ currentUserId, currentUserRole, globalSear
   // Holds a human-readable reason when a conversation fails to load, so we can
   // show it (with a retry) instead of the misleading "No messages yet".
   const [threadError, setThreadError] = useState<string | null>(null)
+  // Mobile = single-pane stacked navigation: show the LIST, or (when a ticket is
+  // selected) the DETAIL full-width — never the cramped side-by-side split.
+  const [isMobile, setIsMobile] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(max-width: 767px)')
+    const apply = () => setIsMobile(mq.matches)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
   const [notes, setNotes] = useState<TicketNote[]>([])
   const [replyText, setReplyText] = useState("")
   const [replyHtml, setReplyHtml] = useState("")
@@ -3594,7 +3605,8 @@ ${latestMsg.body || ""}
         className="h-full w-full"
         onLayout={handlePanelResize}
       >
-        {/* Tickets List */}
+        {/* Tickets List — on mobile, hidden once a ticket is open (stacked nav) */}
+        {!(isMobile && selectedTicket) && (
         <ResizablePanel
           defaultSize={effectivePanelSizes[0]}
           minSize={15}
@@ -4330,13 +4342,18 @@ ${latestMsg.body || ""}
             </div>
           </div>
         </ResizablePanel>
+        )}
 
+        {/* Resize handle only on desktop — panels stack on mobile */}
+        {!isMobile && (
         <ResizableHandle
           withHandle
           className="w-1 bg-border/50 hover:bg-primary/30 active:bg-primary/50 transition-all duration-200 cursor-col-resize group relative z-10"
         />
+        )}
 
-        {/* Ticket Detail */}
+        {/* Ticket Detail — on mobile, only shown when a ticket is selected */}
+        {(!isMobile || selectedTicket) && (
         <ResizablePanel
           defaultSize={effectivePanelSizes[1]}
           minSize={45}
@@ -5382,6 +5399,7 @@ ${latestMsg.body || ""}
             )}
           </div>
         </ResizablePanel>
+        )}
 
         {/* Quick Replies Sidebar */}
         {showQuickRepliesSidebar && (
