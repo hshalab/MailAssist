@@ -233,7 +233,7 @@ export async function POST(request: NextRequest) {
                             );
 
                             if (ticket) {
-                                const ticketCreatedAt = new Date(ticket.created_at || 0).getTime();
+                                const ticketCreatedAt = new Date(ticket.createdAt || 0).getTime();
                                 const isNew = Date.now() - ticketCreatedAt < 5000;
                                 if (isNew) {
                                     result.ticketsCreated++;

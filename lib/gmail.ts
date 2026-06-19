@@ -452,10 +452,59 @@ export async function moveMessagesOutOfSpam(
 }
 
 /**
+ * List recent inbox message IDs via messages.list (NOT the history API).
+ *
+ * This is the resync fallback used whenever the incremental history cursor
+ * cannot be trusted — i.e. the historyId has expired (404) or a burst exceeded
+ * our page budget. Gmail only retains history for a few days and the watch
+ * lapses every 7 days, so without this fallback every message that arrived in
+ * the gap would be silently lost forever. Listing recent inbox messages and
+ * feeding them through the same ticket pipeline guarantees nothing is dropped;
+ * downstream ensureTicketForEmail() dedupes by threadId so re-listing is safe.
+ *
+ * @param tokens   OAuth tokens
+ * @param days     How far back to look (Gmail `newer_than:Nd`)
+ * @param maxCount Hard cap on returned IDs to bound webhook cost
+ */
+export async function listRecentInboxMessageIds(
+  tokens: { access_token?: string | null; refresh_token?: string | null },
+  days: number = 2,
+  maxCount: number = 150
+): Promise<string[]> {
+  const gmail = getGmailClient(tokens);
+  const ids: string[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const res = await gmail.users.messages.list({
+      userId: 'me',
+      // `-in:spam -in:trash` mirrors the inbox filtering applied everywhere else.
+      q: `in:inbox newer_than:${days}d`,
+      maxResults: Math.min(100, maxCount - ids.length),
+      pageToken,
+    });
+
+    for (const m of res.data.messages || []) {
+      if (m.id) ids.push(m.id);
+    }
+
+    pageToken = res.data.nextPageToken || undefined;
+  } while (pageToken && ids.length < maxCount);
+
+  return ids;
+}
+
+/**
  * Fetch new message IDs since a given historyId using Gmail History API.
  * This is much faster than fetching all inbox messages because it only
  * returns changes (new messages added) since the last sync.
- * 
+ *
+ * SELF-HEALING: If the incremental cursor is unusable — historyId expired
+ * (404) or the change burst exceeds our page budget — we fall back to listing
+ * recent inbox messages (`listRecentInboxMessageIds`) instead of returning an
+ * empty set. Returning empty here used to permanently drop every email in the
+ * gap, which was the primary cause of "missing emails for some clients".
+ *
  * @param tokens - OAuth tokens
  * @param startHistoryId - The historyId to start from (from last sync)
  * @returns Object with new message IDs and the latest historyId
@@ -483,12 +532,16 @@ export async function getNewMessagesFromHistory(
     let pageToken: string | undefined;
     let latestHistoryId = startHistoryId;
     let pagesFetched = 0;
+    let overflowed = false; // true if we stopped before draining all history pages
 
     // --- Pass 1: INBOX messages ---
     do {
-      // Safety break
+      // Safety break: a burst larger than our page budget. We will still advance
+      // latestHistoryId (Gmail returns the mailbox-wide id), so the unread pages
+      // would otherwise be skipped forever — flag for a recent-inbox resync below.
       if (pagesFetched >= maxPages) {
-        console.log(`[Gmail] Hit max history pages limit (${maxPages}), stopping fetch early`);
+        console.warn(`[Gmail] Hit max history pages limit (${maxPages}); flagging recent-inbox resync to avoid dropping burst messages`);
+        overflowed = true;
         break;
       }
 
@@ -553,19 +606,39 @@ export async function getNewMessagesFromHistory(
       console.warn('[Gmail] Spam history pass failed (non-fatal):', spamError);
     }
 
+    // Burst overflow: history had more pages than our budget. Merge in recent
+    // inbox messages so nothing in the unread pages is lost. Dedup via the Set.
+    if (overflowed) {
+      try {
+        const recentIds = await listRecentInboxMessageIds(tokens, 2);
+        recentIds.forEach(id => messageIds.add(id));
+        console.warn(`[Gmail] Overflow resync merged ${recentIds.length} recent inbox message(s)`);
+      } catch (resyncError) {
+        console.error('[Gmail] Overflow resync failed:', resyncError);
+      }
+    }
+
     return {
       messageIds: Array.from(messageIds),
       spamMessageIds: Array.from(spamMessageIds),
       latestHistoryId,
     };
   } catch (error: any) {
-    // Handle case where historyId is too old (404 error)
+    // Handle case where historyId is too old (404 error).
+    // The cursor is unrecoverable, but the messages are NOT — fall back to a
+    // bounded recent-inbox resync so the gap is recovered instead of dropped.
     if (error.code === 404 || error.status === 404) {
-      console.warn('[Gmail] History ID expired, need full resync');
-      // Return current historyId for future incremental syncs
+      console.warn('[Gmail] History ID expired — running recent-inbox resync to recover the gap');
       const profile = await gmail.users.getProfile({ userId: 'me' });
+      let recoveredIds: string[] = [];
+      try {
+        recoveredIds = await listRecentInboxMessageIds(tokens, 3);
+        console.warn(`[Gmail] Expired-cursor resync recovered ${recoveredIds.length} recent inbox message(s)`);
+      } catch (resyncError) {
+        console.error('[Gmail] Expired-cursor resync failed:', resyncError);
+      }
       return {
-        messageIds: [], // Can't do incremental, but don't fail
+        messageIds: recoveredIds,
         spamMessageIds: [],
         latestHistoryId: profile.data.historyId || null,
       };
