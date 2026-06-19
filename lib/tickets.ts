@@ -1083,7 +1083,8 @@ export async function getTicketById(
   ticketId: string,
   currentUserId: string | null,
   canViewAll: boolean,
-  userEmail: string | null
+  userEmail: string | null,
+  businessId?: string | null
 ): Promise<Ticket | null> {
   if (!supabase) return null;
 
@@ -1095,8 +1096,26 @@ export async function getTicketById(
     `)
     .eq('id', ticketId)
 
-  // Filter by Gmail account
-  if (userEmail) {
+  // Scope to the account, MATCHING getTickets():
+  // - Business: a ticket may belong to ANY connected mailbox, so scope by the
+  //   full set of connected emails. Scoping by a single `userEmail` here was the
+  //   bug behind "Ticket not found or access denied" — the list shows tickets
+  //   across all mailboxes, but opening one owned by a non-primary mailbox 404'd.
+  // - Personal: scope by userEmail as before.
+  if (businessId) {
+    try {
+      const { loadBusinessTokens } = await import('./storage');
+      const connected = await loadBusinessTokens(businessId);
+      const connectedEmails = connected.map(a => a.email).filter(Boolean);
+      if (connectedEmails.length > 0) {
+        query = query.in('user_email', connectedEmails);
+      } else if (userEmail) {
+        query = query.eq('user_email', userEmail);
+      }
+    } catch {
+      if (userEmail) query = query.eq('user_email', userEmail);
+    }
+  } else if (userEmail) {
     query = query.eq('user_email', userEmail)
   }
 

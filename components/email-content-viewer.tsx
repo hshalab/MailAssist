@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useRef, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import DOMPurify from "isomorphic-dompurify"
 import { cn } from "@/lib/utils"
 
@@ -13,14 +13,20 @@ interface EmailContentViewerProps {
 
 export function EmailContentViewer({ content, emailId, attachments, className }: EmailContentViewerProps) {
     const [processedContent, setProcessedContent] = useState("")
-    const [isPlainTextContent, setIsPlainTextContent] = useState(false)
+    // Derived synchronously from `content` (not state) so the canvas theme and
+    // the rendered body are always computed from the same content in the same
+    // render — no wrong-theme flash when switching between HTML and plain-text mail.
+    const isPlainTextContent = useMemo(
+        () => content ? !/<\s*(p|div|br|table|img|ul|ol|li|span|style|body|html|blockquote)/i.test(content) : false,
+        [content]
+    )
     const [iframeHeight, setIframeHeight] = useState(200)
     const [loading, setLoading] = useState(false)
     const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(true)
     const [blockedRemoteCount, setBlockedRemoteCount] = useState(0)
     const iframeRef = useRef<HTMLIFrameElement>(null)
 
-    // Reset remote image permissions when switching emails
+    // Reset remote image permissions when switching emails.
     useEffect(() => {
         setRemoteImagesAllowed(true)
         setBlockedRemoteCount(0)
@@ -33,11 +39,10 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             return
         }
 
-        // If message is plain text, preserve line breaks and auto-link URLs/emails
-        const isPlainText = !/<\s*(p|div|br|table|img|ul|ol|li|span|style|body|html|blockquote)/i.test(content)
+        // Plain-text detection is the memoized `isPlainTextContent` (derived from
+        // the same content), so the body normalization and the canvas theme stay in sync.
+        const isPlainText = isPlainTextContent
         let normalizedContent = content
-        // Track whether this content is plain text for CSS styling
-        setIsPlainTextContent(isPlainText)
 
         if (isPlainText) {
             // Escape HTML entities first
@@ -312,13 +317,22 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
         }
     }, [processedContent])
 
-    // Always render the email body on a white "paper" canvas, regardless of app theme.
-    // Email inline CSS (text colors, backgrounds, branded styling) is designed for white;
-    // forcing dark-mode rewrites breaks marketing emails. Gmail/Outlook follow the same pattern.
-    // We soften the canvas a touch (#fafafa) so it doesn't burn against dark UI chrome.
-    const canvasBg = '#fafafa'
-    const fallbackText = '#1f2937'
-    const fallbackLink = '#2563eb'
+    // Styled HTML mail is authored for a white background, so we keep a light
+    // "paper" for it (matching Gmail/Outlook). But plain-text mail and agent
+    // replies carry no inline styling — rendering those on glaring white inside
+    // a dark console is eye-fatiguing, so we render them on the dark theme canvas
+    // (this is exactly what Gmail does for plain text in dark mode).
+    const canvasBg = isPlainTextContent ? '#15181E' : '#fafafa'
+    const fallbackText = isPlainTextContent ? '#E9EDF2' : '#1f2937'
+    const fallbackLink = isPlainTextContent ? '#5EC6D6' : '#2563eb'
+    const colorScheme = isPlainTextContent ? 'dark' : 'light'
+    // Quote / reply chrome, tuned per canvas so collapsed "On … wrote:" history
+    // and blockquotes don't show light-gray bars/text on the dark plain-text canvas.
+    const quoteText = isPlainTextContent ? '#9AA3AE' : '#718096'
+    const quoteBorder = isPlainTextContent ? 'rgba(255,255,255,0.20)' : '#cbd5e0'
+    const quoteBtnBg = isPlainTextContent ? 'rgba(255,255,255,0.10)' : '#e5e7eb'
+    const quoteBtnText = isPlainTextContent ? '#7FD3DF' : '#0b57d0'
+    const shimmer = isPlainTextContent ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.07)'
 
     const iframeHtml = `
         <!DOCTYPE html>
@@ -327,7 +341,7 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
-                :root { color-scheme: light; }
+                :root { color-scheme: ${colorScheme}; }
                 * { box-sizing: border-box; }
                 html, body {
                     margin: 0;
@@ -416,8 +430,8 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 blockquote {
                     margin: 0 0 1em 0;
                     padding-left: 12px;
-                    border-left: 3px solid #cbd5e0;
-                    color: #718096;
+                    border-left: 3px solid ${quoteBorder};
+                    color: ${quoteText};
                 }
                 /* Gmail-style collapsed quotes */
                 .gmail-quote[data-collapsed="true"] blockquote {
@@ -442,22 +456,22 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 }
                 /* Quote header with expand button */
                 .quote-header {
-                    color: #718096;
+                    color: ${quoteText};
                     font-size: 0.9em;
                     margin-top: 1em;
                 }
                 .quote-header .expand-quote {
-                    background: #e5e7eb;
+                    background: ${quoteBtnBg};
                     border: none;
                     border-radius: 4px;
                     padding: 2px 8px;
                     margin-left: 8px;
                     cursor: pointer;
                     font-size: 0.85em;
-                    color: #0b57d0;
+                    color: ${quoteBtnText};
                 }
                 .quote-header .expand-quote:hover {
-                    background: #d1d5db;
+                    opacity: 0.85;
                 }
                 .quote-header:not(.expanded) + .quoted-content {
                     display: none;
@@ -465,8 +479,8 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 .quote-header.expanded + .quoted-content {
                     display: block;
                     padding-left: 12px;
-                    border-left: 3px solid #cbd5e0;
-                    color: #718096;
+                    border-left: 3px solid ${quoteBorder};
+                    color: ${quoteText};
                 }
             </style>
         </head>
@@ -502,14 +516,14 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                 </div>
             )}
             <div className="relative">
-                <div className="relative overflow-hidden bg-[#fafafa]">
+                <div className="relative overflow-hidden" style={{ background: canvasBg }}>
                     {loading && (
-                        <div className="absolute inset-0 z-10 flex flex-col gap-3 p-6 bg-[#fafafa] dark:bg-zinc-900/60">
-                            {/* Paper-like shimmer so the message area never flashes blank */}
-                            <div className="h-3 w-2/3 rounded bg-zinc-200/80 dark:bg-zinc-700/60 animate-pulse" />
-                            <div className="h-3 w-11/12 rounded bg-zinc-200/70 dark:bg-zinc-700/50 animate-pulse" style={{ animationDelay: '80ms' }} />
-                            <div className="h-3 w-5/6 rounded bg-zinc-200/70 dark:bg-zinc-700/50 animate-pulse" style={{ animationDelay: '160ms' }} />
-                            <div className="h-3 w-3/5 rounded bg-zinc-200/60 dark:bg-zinc-700/40 animate-pulse" style={{ animationDelay: '240ms' }} />
+                        <div className="absolute inset-0 z-10 flex flex-col gap-3 p-6" style={{ background: canvasBg }}>
+                            {/* Shimmer tracks the canvas (dark for plain text, light for HTML mail) */}
+                            <div className="h-3 w-2/3 rounded animate-pulse" style={{ background: shimmer }} />
+                            <div className="h-3 w-11/12 rounded animate-pulse" style={{ background: shimmer, animationDelay: '80ms' }} />
+                            <div className="h-3 w-5/6 rounded animate-pulse" style={{ background: shimmer, animationDelay: '160ms' }} />
+                            <div className="h-3 w-3/5 rounded animate-pulse" style={{ background: shimmer, animationDelay: '240ms' }} />
                         </div>
                     )}
                     <iframe
@@ -523,7 +537,7 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                         style={{
                             height: `${iframeHeight}px`,
                             minHeight: '88px',
-                            background: '#fafafa',
+                            background: canvasBg,
                         }}
                         onLoad={() => {
                             measureHeight()
