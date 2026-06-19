@@ -479,16 +479,17 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
     return (
         <div
             className={cn(
-                "email-content-viewer w-full rounded-xl overflow-hidden",
-                "border border-zinc-200 dark:border-white/10",
-                "shadow-sm dark:shadow-lg dark:shadow-black/30",
-                "bg-zinc-50 dark:bg-zinc-900/40",
+                // Chrome-less by design: the parent message card owns the single
+                // surface. We render exactly one inner "paper" for the email body
+                // so there's no double/triple-bordered nesting (the old "box
+                // overlapping" look). Rounded only to clip the paper corners.
+                "email-content-viewer w-full overflow-hidden rounded-lg",
                 className
             )}
             aria-busy={loading}
         >
             {blockedRemoteCount > 0 && !remoteImagesAllowed && (
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 dark:border-white/10 bg-amber-50 dark:bg-amber-900/20 px-4 py-2.5 text-sm text-amber-900 dark:text-amber-200">
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-50 dark:bg-amber-900/20 px-4 py-2.5 text-sm text-amber-900 dark:text-amber-200">
                     <span>
                         <span className="font-medium">{blockedRemoteCount}</span> remote image{blockedRemoteCount === 1 ? '' : 's'} blocked for privacy.
                     </span>
@@ -500,8 +501,8 @@ export function EmailContentViewer({ content, emailId, attachments, className }:
                     </button>
                 </div>
             )}
-            <div className="relative p-3 sm:p-4">
-                <div className="rounded-lg overflow-hidden border border-zinc-200/80 dark:border-white/5 bg-[#fafafa] dark:ring-1 dark:ring-white/5">
+            <div className="relative">
+                <div className="relative overflow-hidden bg-[#fafafa]">
                     {loading && (
                         <div className="absolute inset-0 z-10 flex flex-col gap-3 p-6 bg-[#fafafa] dark:bg-zinc-900/60">
                             {/* Paper-like shimmer so the message area never flashes blank */}
