@@ -391,12 +391,20 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
         emailResponse = emailRes;
 
         // Process Email Response
+        let email: EmailSummary;
         if (!emailResponse.ok) {
-          throw new Error('Failed to fetch email');
+          // Single-message fetch failed (deleted / moved / not in any connected
+          // mailbox). Fall back to the data the list already provided instead of
+          // hard-erroring, so the conversation thread below can still render.
+          if (initialEmailData) {
+            email = { ...(initialEmailData as any), id: emailId } as EmailSummary;
+          } else {
+            throw new Error('Failed to fetch email');
+          }
+        } else {
+          const emailData = await emailResponse.json();
+          email = emailData.email;
         }
-
-        const emailData = await emailResponse.json();
-        const email: EmailSummary = emailData.email;
 
         // Update email summary first
         if (requestToken && requestToken !== latestRequestRef.current) return;
@@ -455,12 +463,17 @@ export default function EmailDetail({ emailId, onDraftGenerated, onBack, initial
       } else {
         // SEQUENTIAL FALLBACK (if we didn't have threadId)
         emailResponse = await emailPromise;
+        let email: EmailSummary;
         if (!emailResponse.ok) {
-          throw new Error('Failed to fetch email');
+          if (initialEmailData) {
+            email = { ...(initialEmailData as any), id: emailId } as EmailSummary;
+          } else {
+            throw new Error('Failed to fetch email');
+          }
+        } else {
+          const emailData = await emailResponse.json();
+          email = emailData.email;
         }
-
-        const emailData = await emailResponse.json();
-        const email: EmailSummary = emailData.email;
 
         if (requestToken && requestToken !== latestRequestRef.current) return;
         if (signal?.aborted) return;
