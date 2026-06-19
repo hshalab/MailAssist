@@ -19,12 +19,16 @@ import { createClient } from '@supabase/supabase-js';
 import { reconcileAccountInbox, ReconcileResult } from '@/lib/reconcile';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300; // allow a long sweep across many accounts
+// NOTE: This endpoint is no longer on a schedule — the daily reconcile pass is
+// folded into /api/cron/renew-watches to stay within Vercel Hobby's 2-cron
+// limit. It remains as a manually-triggerable "sweep all mailboxes" endpoint
+// (cron-secret protected). maxDuration capped at 60s for Hobby compatibility.
+export const maxDuration = 60;
 
 // Per-account wall-clock budget so one large mailbox can't starve the rest.
-const PER_ACCOUNT_DEADLINE_MS = 25_000;
+const PER_ACCOUNT_DEADLINE_MS = 12_000;
 // Overall budget; leave headroom under maxDuration for the response.
-const TOTAL_DEADLINE_MS = 270_000;
+const TOTAL_DEADLINE_MS = 50_000;
 // Look back far enough to recover gaps from multi-day webhook outages.
 const RECONCILE_QUERY = 'in:inbox newer_than:14d';
 
