@@ -90,10 +90,16 @@ export async function GET(request: NextRequest) {
             }
 
             try {
-                await startHistoryWatch({
+                const watchInfo = await startHistoryWatch({
                     access_token: token.access_token,
                     refresh_token: token.refresh_token,
                 });
+                // Refresh last_sync_at so the health check stays green for
+                // low-traffic mailboxes (a fresh watch = live, even with no new mail).
+                if (watchInfo?.historyId) {
+                    const { updateSyncState } = await import('@/lib/sync-state');
+                    await updateSyncState(email, String(watchInfo.historyId));
+                }
 
                 results.push({ email, success: true });
                 console.log(`[Watch Renewal] Renewed watch for ${email}`);

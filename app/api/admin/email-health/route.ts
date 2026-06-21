@@ -29,7 +29,12 @@ interface AccountHealth {
     status: 'ok' | 'stale' | 'never_synced' | 'orphaned_no_token';
 }
 
-const STALE_THRESHOLD_MINUTES = 60 * 6; // 6 hours
+// 26 hours: the watch is renewed (and last_sync_at refreshed) by the daily cron,
+// so anything under ~26h is healthy. A 6h threshold false-flagged low-traffic
+// mailboxes that simply hadn't received email recently. (Even a genuinely missed
+// window is covered by the daily reconcile sweep, so this is purely the warning
+// sensitivity — not the no-missed-email guarantee.)
+const STALE_THRESHOLD_MINUTES = 60 * 26;
 
 export async function GET(request: NextRequest) {
     const businessSession = await validateBusinessSession();
