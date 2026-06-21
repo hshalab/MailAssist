@@ -18,6 +18,7 @@ import { startHistoryWatch } from '@/lib/gmail';
 import { validateBusinessSession } from '@/lib/session';
 import { loadBusinessTokens, getCurrentUserEmail } from '@/lib/storage';
 import { getValidTokens } from '@/lib/token-refresh';
+import { updateSyncState } from '@/lib/sync-state';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -72,6 +73,12 @@ export async function POST(request: NextRequest) {
         for (const { email, tokens } of accounts) {
             try {
                 const watchInfo = await startHistoryWatch(tokens);
+                // Mark the mailbox as freshly-confirmed-live so the health check
+                // (which reads sync_state.last_sync_at) reflects it immediately —
+                // otherwise re-activating leaves the banner showing "not live".
+                if (watchInfo.historyId) {
+                    await updateSyncState(email, String(watchInfo.historyId));
+                }
                 results.push({
                     email,
                     success: true,
