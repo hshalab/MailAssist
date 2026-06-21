@@ -352,6 +352,36 @@ export async function POST(
         try {
           const { getTicketById, assignTicket, ensureTicketForEmail, updateTicketStatus } = await import('@/lib/tickets');
 
+          // Resolve the EXISTING ticket for this thread across ALL connected
+          // mailboxes first. Without this, ensureTicketForEmail scopes to the
+          // primary mailbox, fails to find a ticket owned by a non-primary
+          // mailbox, and creates a DUPLICATE — so the subsequent auto-assign and
+          // close hit the duplicate while the real ticket stays "pending" and
+          // unassigned (the reported regression). Passing the real owner email
+          // makes ensureTicketForEmail find and update the correct ticket.
+          let resolvedOwnerEmail: string | undefined;
+          try {
+            const { supabase } = await import('@/lib/supabase');
+            const { validateBusinessSession } = await import('@/lib/session');
+            const bSession = await validateBusinessSession();
+            if (supabase && incomingEmail.threadId) {
+              let q = supabase
+                .from('tickets')
+                .select('id, owner_email, user_email')
+                .eq('thread_id', incomingEmail.threadId);
+              if (bSession?.businessId) {
+                const { loadBusinessTokens } = await import('@/lib/storage');
+                const conn = await loadBusinessTokens(bSession.businessId);
+                const emails = conn.map((a: any) => a.email).filter(Boolean);
+                if (emails.length) q = q.in('user_email', emails);
+              }
+              const { data: existing } = await q.order('created_at', { ascending: true }).limit(1).maybeSingle();
+              if (existing) resolvedOwnerEmail = existing.owner_email || existing.user_email || undefined;
+            }
+          } catch (lookupErr) {
+            console.warn('[Reply] Could not resolve existing ticket owner:', lookupErr);
+          }
+
           // 1. Ensure ticket exists and has updated timestamps/status
           // This handles creating the ticket if missing, and updating lastAgentReplyAt/status
           const ticketEmailLike = {
@@ -360,7 +390,8 @@ export async function POST(
             subject: incomingEmail.subject || '(No Subject)',
             from: fromAddress || userEmail || 'me',
             to: replyRecipient,
-            date: new Date().toISOString()
+            date: new Date().toISOString(),
+            ownerEmail: resolvedOwnerEmail, // scope to the REAL ticket's mailbox
           };
 
           let ticket = await ensureTicketForEmail(ticketEmailLike, true); // true = isFromAgent
