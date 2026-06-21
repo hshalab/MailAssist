@@ -52,6 +52,12 @@ type RecoverState =
   | { phase: "done"; created: number }
   | { phase: "error"; message: string }
 
+type ActivateState =
+  | { phase: "idle" }
+  | { phase: "running" }
+  | { phase: "done"; activated: number; total: number }
+  | { phase: "error"; message: string }
+
 const POLL_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 
 const STATUS_COPY: Record<AccountHealth["status"], string> = {
@@ -78,6 +84,7 @@ interface EmailHealthBannerProps {
 export default function EmailHealthBanner({ onRecovered }: EmailHealthBannerProps) {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [recover, setRecover] = useState<RecoverState>({ phase: "idle" })
+  const [activate, setActivate] = useState<ActivateState>({ phase: "idle" })
   const [expanded, setExpanded] = useState(false)
   const [dismissedHealthy, setDismissedHealthy] = useState(false)
   const mountedRef = useRef(true)
@@ -151,6 +158,22 @@ export default function EmailHealthBanner({ onRecovered }: EmailHealthBannerProp
       }
     }
   }, [onRecovered, loadHealth])
+
+  // Restore real-time delivery by (re)activating the Gmail watch for each
+  // connected mailbox. This is the ACTUAL fix for "not live" — recovery only
+  // backfills already-missed mail; this stops the bleeding going forward.
+  const runActivate = useCallback(async () => {
+    setActivate({ phase: "running" })
+    try {
+      const res = await fetch("/api/admin/activate-watches", { method: "POST", credentials: "include" })
+      const data: any = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data?.error || `Failed (${res.status})`)
+      setActivate({ phase: "done", activated: data?.activated ?? 0, total: data?.total ?? 0 })
+      loadHealth()
+    } catch (err) {
+      setActivate({ phase: "error", message: err instanceof Error ? err.message : "Failed to restore live delivery" })
+    }
+  }, [loadHealth])
 
   // Nothing to show: no session/permission, or still loading.
   if (!health) return null
@@ -266,26 +289,44 @@ export default function EmailHealthBanner({ onRecovered }: EmailHealthBannerProp
           {recover.phase === "error" && (
             <div className="mt-2 text-[12px] font-medium text-destructive">{recover.message}</div>
           )}
+          {activate.phase === "done" && (
+            <div className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-medium text-[var(--status-success)]">
+              <Check className="h-3.5 w-3.5" />
+              Re-activated {activate.activated}/{activate.total} mailbox{activate.total === 1 ? "" : "es"} — live delivery restored.
+            </div>
+          )}
+          {activate.phase === "error" && (
+            <div className="mt-2 text-[12px] font-medium text-destructive">{activate.message}</div>
+          )}
         </div>
 
-        <button
-          onClick={runRecovery}
-          disabled={recover.phase === "running"}
-          className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-semibold text-white shadow-sm transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-70"
-          style={{ background: `var(${accentVar})` }}
-        >
-          {recover.phase === "running" ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Recovering…
-            </>
-          ) : (
-            <>
-              <RefreshCw className="h-3.5 w-3.5" />
-              Recover emails
-            </>
-          )}
-        </button>
+        <div className="flex flex-shrink-0 flex-col gap-1.5">
+          {/* Primary: actually fix live delivery by re-activating the watch. */}
+          <button
+            onClick={runActivate}
+            disabled={activate.phase === "running"}
+            className="inline-flex items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-semibold text-white shadow-sm transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-70"
+            style={{ background: `var(${accentVar})` }}
+          >
+            {activate.phase === "running" ? (
+              <><Loader2 className="h-3.5 w-3.5 animate-spin" />Restoring…</>
+            ) : (
+              <><ShieldCheck className="h-3.5 w-3.5" />Restore live delivery</>
+            )}
+          </button>
+          {/* Secondary: pull in anything missed while it was down (bounded to 30d). */}
+          <button
+            onClick={runRecovery}
+            disabled={recover.phase === "running"}
+            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border/60 px-2.5 py-1.5 text-[12px] font-medium text-foreground/80 transition-all hover:bg-muted/50 disabled:opacity-70"
+          >
+            {recover.phase === "running" ? (
+              <><Loader2 className="h-3.5 w-3.5 animate-spin" />Recovering…</>
+            ) : (
+              <><RefreshCw className="h-3.5 w-3.5" />Recover missed (30d)</>
+            )}
+          </button>
+        </div>
       </div>
     </div>
   )
