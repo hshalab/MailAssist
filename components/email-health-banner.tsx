@@ -116,11 +116,16 @@ export default function EmailHealthBanner({ onRecovered }: EmailHealthBannerProp
       let created = 0
       let resumeToken: string | null = null
       let guard = 0
+      // CRITICAL: bound recovery to recent mail only. Without a date window the
+      // backfill walks the ENTIRE inbox history and ticketed year-old emails.
+      // A watch lapses weekly and the daily cron backfills, so 30 days is a safe
+      // margin that recovers real gaps without dredging up old mail.
+      const RECOVER_QUERY = encodeURIComponent("in:inbox newer_than:30d");
       // Walk the backfill in resumable chunks until it reports completion.
       do {
         const url: string = resumeToken
-          ? `/api/emails/backfill?pageToken=${encodeURIComponent(resumeToken)}`
-          : "/api/emails/backfill"
+          ? `/api/emails/backfill?q=${RECOVER_QUERY}&pageToken=${encodeURIComponent(resumeToken)}`
+          : `/api/emails/backfill?q=${RECOVER_QUERY}`
         const res: Response = await fetch(url, { method: "POST", credentials: "include" })
         if (!res.ok) {
           const body: any = await res.json().catch(() => ({}))

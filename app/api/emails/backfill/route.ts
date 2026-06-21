@@ -75,7 +75,11 @@ interface AccountResult {
 export async function POST(request: NextRequest) {
     const startTime = Date.now();
     const searchParams = request.nextUrl.searchParams;
-    const query = searchParams.get('q') || 'in:inbox';
+    // Default to RECENT inbox only. An unbounded 'in:inbox' walks the entire
+    // mailbox history and ticketed year-old mail — recovery must only pull in
+    // genuinely-missing RECENT emails. Callers can pass an explicit ?q= (e.g.
+    // a dated range) for an intentional deep backfill.
+    const query = searchParams.get('q') || 'in:inbox newer_than:30d';
     const initialPageToken = searchParams.get('pageToken') || undefined;
     // dryRun=true does the entire pre-check + identification flow but skips
     // ensureTicketForEmail. Use this to preview how many tickets WOULD be
