@@ -104,8 +104,13 @@ export async function PATCH(
       );
     }
 
+    // Business-aware scoping: the ticket may belong to any connected mailbox,
+    // so pass businessId (without it, assigning a non-primary-mailbox ticket fails).
+    const { validateBusinessSession } = await import('@/lib/session');
+    const businessId = (await validateBusinessSession())?.businessId || null;
+
     // Assign the ticket (and update priority if provided)
-    const ticket = await assignTicket(ticketId, assigneeUserId || null, userEmail, userId);
+    const ticket = await assignTicket(ticketId, assigneeUserId || null, userEmail, userId, businessId);
 
     if (!ticket) {
       return NextResponse.json(
@@ -117,12 +122,12 @@ export async function PATCH(
     // Update priority if provided (done after assignment for simplicity)
     if (priority && assigneeUserId) {
       const { updateTicketPriority } = await import('@/lib/tickets');
-      await updateTicketPriority(ticketId, priority, userEmail);
+      await updateTicketPriority(ticketId, priority, userEmail, businessId);
       // Fetch updated ticket to return
       const { getTicketById } = await import('@/lib/tickets');
       const { canViewAllTickets } = await import('@/lib/permissions');
       const canViewAll = await canViewAllTickets(userId);
-      const updatedTicket = await getTicketById(ticketId, userId, canViewAll, userEmail);
+      const updatedTicket = await getTicketById(ticketId, userId, canViewAll, userEmail, businessId);
       return NextResponse.json({ ticket: updatedTicket });
     }
 

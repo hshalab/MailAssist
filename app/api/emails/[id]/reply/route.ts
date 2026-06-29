@@ -201,11 +201,42 @@ export async function POST(
       );
     }
 
-    const incomingEmail = await getEmailById(tokens, emailId);
+    // MULTI-MAILBOX: the message/thread may belong to a NON-primary connected
+    // mailbox. Resolve the email — and the tokens we must SEND with — across all
+    // connected mailboxes. Without this, replying to e.g. a help@ thread using the
+    // primary support@ tokens fails ("Email not found"), so send/close looked
+    // broken for that mailbox.
+    let incomingEmail = await getEmailById(tokens, emailId).catch(() => null);
+    let sendFromEmail: string | undefined = userEmail || undefined;
+    if (!incomingEmail) {
+      const { validateBusinessSession } = await import('@/lib/session');
+      const { withMailboxFallback } = await import('@/lib/mailbox-resolver');
+      const bSession = await validateBusinessSession();
+      const resolved = await withMailboxFallback<{ e: any; tok: any; email: string }>(
+        { businessId: bSession?.businessId || null, sessionEmail: userEmail },
+        async (tok, email) => {
+          const e = await getEmailById(tok, emailId);
+          return e ? { e, tok, email } : null;
+        }
+      );
+      if (resolved.result) {
+        incomingEmail = resolved.result.e;
+        tokens = resolved.result.tok;          // send from the mailbox that OWNS the thread
+        sendFromEmail = resolved.result.email;
+      }
+    }
     if (!incomingEmail) {
       return NextResponse.json(
         { error: 'Email not found' },
         { status: 404 }
+      );
+    }
+    // Re-narrow after the possible token reassignment above so the send calls
+    // below get a non-null token set.
+    if (!tokens || !tokens.access_token) {
+      return NextResponse.json(
+        { error: 'No valid Gmail tokens for the mailbox that owns this thread.' },
+        { status: 401 }
       );
     }
 
@@ -245,9 +276,10 @@ export async function POST(
     // For personal accounts, use the user's Gmail email
     let fromAddress: string | undefined;
     try {
-      // First try to get from userEmail (which is already set to connected Gmail account for business accounts)
-      if (userEmail) {
-        fromAddress = userEmail;
+      // Prefer the mailbox that actually owns the thread (resolved above), so the
+      // From header matches the tokens we're sending with. Falls back to userEmail.
+      if (sendFromEmail) {
+        fromAddress = sendFromEmail;
       } else {
         // Fallback: get from profile
         const profile = await getUserProfile(tokens);
@@ -255,8 +287,8 @@ export async function POST(
       }
     } catch {
       // best-effort, fallback handled below
-      if (userEmail) {
-        fromAddress = userEmail;
+      if (sendFromEmail) {
+        fromAddress = sendFromEmail;
       }
     }
 
@@ -426,7 +458,9 @@ export async function POST(
               const replierUser = await getUserById(userId);
               if (replierUser && replierUser.isActive) {
                 console.log(`[Reply] Auto-assigning ticket ${ticket.id} to replier ${userId}`);
-                await assignTicket(ticket.id, userId, userEmail, userId);
+                const { validateBusinessSession } = await import('@/lib/session');
+                const bId = (await validateBusinessSession())?.businessId || null;
+                await assignTicket(ticket.id, userId, userEmail, userId, bId);
               } else {
                 console.warn(`[Reply] Skipping auto-assignment - replier ${userId} is inactive`);
               }

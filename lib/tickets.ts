@@ -1175,7 +1175,8 @@ export async function assignTicket(
   ticketId: string,
   assigneeUserId: string | null,
   userEmail: string | null,
-  assignerUserId?: string | null
+  assignerUserId?: string | null,
+  businessId?: string | null
 ): Promise<Ticket | null> {
   if (!supabase) return null;
 
@@ -1190,8 +1191,26 @@ export async function assignTicket(
     .eq('id', ticketId)
     .select('*');
 
-  // Filter by Gmail account for security
-  if (userEmail) {
+  // Scope by mailbox, business-aware (matches getTickets/getTicketById):
+  // - Business: the ticket may belong to ANY connected mailbox, so scope by the
+  //   full set. Scoping by a single "primary" user_email here was the bug behind
+  //   "can't assign tickets to others" — assigning a ticket owned by a different
+  //   connected mailbox matched no row and silently failed.
+  // - Personal: scope by userEmail as before.
+  if (businessId) {
+    try {
+      const { loadBusinessTokens } = await import('./storage');
+      const connected = await loadBusinessTokens(businessId);
+      const connectedEmails = connected.map(a => a.email).filter(Boolean);
+      if (connectedEmails.length > 0) {
+        query = query.in('user_email', connectedEmails);
+      } else if (userEmail) {
+        query = query.eq('user_email', userEmail);
+      }
+    } catch {
+      if (userEmail) query = query.eq('user_email', userEmail);
+    }
+  } else if (userEmail) {
     query = query.eq('user_email', userEmail);
   }
 
@@ -1328,7 +1347,8 @@ export async function updateTicketStatus(
 export async function updateTicketPriority(
   ticketId: string,
   priority: TicketPriority,
-  userEmail: string | null
+  userEmail: string | null,
+  businessId?: string | null
 ): Promise<Ticket | null> {
   if (!supabase) return null;
 
@@ -1343,7 +1363,22 @@ export async function updateTicketPriority(
     .eq('id', ticketId)
     .select('*');
 
-  if (userEmail) {
+  // Business-aware scoping (see assignTicket): a ticket may belong to any
+  // connected mailbox, so don't pin to a single primary user_email.
+  if (businessId) {
+    try {
+      const { loadBusinessTokens } = await import('./storage');
+      const connected = await loadBusinessTokens(businessId);
+      const connectedEmails = connected.map(a => a.email).filter(Boolean);
+      if (connectedEmails.length > 0) {
+        query = query.in('user_email', connectedEmails);
+      } else if (userEmail) {
+        query = query.eq('user_email', userEmail);
+      }
+    } catch {
+      if (userEmail) query = query.eq('user_email', userEmail);
+    }
+  } else if (userEmail) {
     query = query.eq('user_email', userEmail);
   }
 
