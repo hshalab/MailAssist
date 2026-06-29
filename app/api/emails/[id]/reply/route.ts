@@ -231,6 +231,14 @@ export async function POST(
         { status: 404 }
       );
     }
+    // Re-narrow after the possible token reassignment above so the send calls
+    // below get a non-null token set.
+    if (!tokens || !tokens.access_token) {
+      return NextResponse.json(
+        { error: 'No valid Gmail tokens for the mailbox that owns this thread.' },
+        { status: 401 }
+      );
+    }
 
     // Try to find associated ticket for logging
     let ticketId: string | null = null;
